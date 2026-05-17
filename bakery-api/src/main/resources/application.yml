@@ -1,0 +1,67 @@
+spring:
+  application:
+    name: bakery-api
+
+  batch:
+    job:
+      enabled: false
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:bakery_db}
+    username: ${DB_USER:bakery}
+    password: ${DB_PASS:bakery123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: BakeryApiPool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        default_schema: public
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    out-of-order: false
+
+# ── Server ──────────────────────────────────────────────────
+# Không dùng context-path → call thẳng: POST localhost:8080/batch/run
+server:
+  port: ${API_PORT:8080}
+
+# ── Bakery config ────────────────────────────────────────────
+bakery:
+  batch:
+    input-dir: ${BATCH_INPUT_DIR:./batch-input}
+    output-dir: ${BATCH_OUTPUT_DIR:./batch-output}
+    # File Excel sẽ được lưu vào: batch-output/{yyyy}/{MM}/BaoCaoNgay_{ddMMyyyy}.xlsx
+
+# ── SpringDoc / Swagger UI ───────────────────────────────────
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+# ── Logging ──────────────────────────────────────────────────
+logging:
+  level:
+    root: INFO
+    com.bakery: DEBUG
+    org.hibernate.SQL: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"

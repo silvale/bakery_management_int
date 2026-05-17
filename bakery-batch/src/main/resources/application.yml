@@ -1,0 +1,88 @@
+spring:
+  application:
+    name: bakery-batch
+
+  # =====================================================
+  # DataSource — PostgreSQL
+  # =====================================================
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:bakery_db}
+    username: ${DB_USER:bakery}
+    password: ${DB_PASS:bakery123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: BakeryBatchPool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # =====================================================
+  # JPA / Hibernate
+  # =====================================================
+  jpa:
+    hibernate:
+      ddl-auto: validate          # Flyway quản lý schema, Hibernate chỉ validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        default_schema: public
+
+  # =====================================================
+  # Flyway — Migration
+  # =====================================================
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    out-of-order: false
+
+  # =====================================================
+  # Spring Batch
+  # =====================================================
+  batch:
+    job:
+      enabled: false              # Không auto-run khi startup, trigger thủ công
+    jdbc:
+      initialize-schema: always   # Tạo Spring Batch metadata tables
+
+# =====================================================
+# Server
+# =====================================================
+server:
+  port: ${BATCH_PORT:8081}
+#  servlet:
+#    context-path: /batch
+
+# =====================================================
+# Bakery Batch Config
+# =====================================================
+bakery:
+  batch:
+    input-dir: ${BATCH_INPUT_DIR:./batch-input}
+    # Thư mục chứa các file Excel đầu vào
+    archive-dir: ${BATCH_ARCHIVE_DIR:./batch-archive}
+    # File đã xử lý xong sẽ được move vào đây
+    error-dir: ${BATCH_ERROR_DIR:./batch-error}
+    # File bị lỗi sẽ được move vào đây
+    chunk-size: 100
+    # Số dòng xử lý mỗi chunk trong Spring Batch
+
+# =====================================================
+# Logging
+# =====================================================
+logging:
+  level:
+    root: INFO
+    com.bakery: DEBUG
+    org.springframework.batch: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/bakery-batch.log

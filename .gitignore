@@ -1,0 +1,53 @@
+# Maven
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Spring Boot
+spring-shell.log
+
+# Docker volumes (local)
+docker/postgres/data/
+
+# Batch input/archive/error dirs (local dev)
+batch-input/
+batch-archive/
+batch-error/
+
+# Env files
+.env
+.env.local
+
+# Test reports
+/test-output/
