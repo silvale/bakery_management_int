@@ -146,7 +146,7 @@ public class FifoEngine {
             boolean stillPending = false;
             BigDecimal newCostPerUnit = BigDecimal.ZERO;
 
-            // Lấy tất cả allocation log của lô này
+            // Lấy tất cả allocation log của lô này chưa recalculate
             List<FifoAllocationLog> logs = allocationLogRepository
                 .findAllByProductionLotIdAndIsRecalculatedFalse(lot.getId());
 
@@ -157,23 +157,46 @@ public class FifoEngine {
                     continue;
                 }
 
-                // Tìm lô nguyên liệu mới (backdate) để tính lại
+                // Tìm các lô nguyên liệu theo thứ tự FIFO (cũ nhất trước)
                 List<IngredientStockLot> availableLots = stockLotRepository
                     .findAvailableLotsForFifo(ingredientId, branch.getId());
 
-                if (!availableLots.isEmpty()) {
-                    BigDecimal newUnitPrice = availableLots.get(0).getUnitPrice();
-                    BigDecimal newContribution = alloc.getQtyAllocated()
-                        .multiply(newUnitPrice)
-                        .setScale(6, RoundingMode.HALF_UP);
-
-                    newCostPerUnit = newCostPerUnit.add(newContribution);
-                    alloc.setIsRecalculated(true);
-                    allocationLogRepository.save(alloc);
-                } else {
+                if (availableLots.isEmpty()) {
+                    // Vẫn chưa có nguyên liệu → tiếp tục PENDING
                     stillPending = true;
                     newCostPerUnit = newCostPerUnit.add(alloc.getCostContribution());
+                    continue;
                 }
+
+                // ── Tính lại cost theo FIFO thực sự ──────────────────────
+                // Phân bổ qtyAllocated qua các lô theo FIFO, tính weighted avg price
+                BigDecimal qtyNeeded = alloc.getQtyAllocated();
+                BigDecimal recalcCost = BigDecimal.ZERO;
+
+                for (IngredientStockLot stockLot : availableLots) {
+                    if (qtyNeeded.compareTo(BigDecimal.ZERO) <= 0) break;
+
+                    // Số lượng có thể lấy từ lô này (không thực sự trừ kho —
+                    // chỉ tính giá; việc trừ kho đã làm lúc allocate ban đầu)
+                    BigDecimal fromThisLot = stockLot.getQtyRemaining().min(qtyNeeded);
+                    recalcCost = recalcCost.add(
+                        fromThisLot.multiply(stockLot.getUnitPrice())
+                            .setScale(6, RoundingMode.HALF_UP)
+                    );
+                    qtyNeeded = qtyNeeded.subtract(fromThisLot);
+                }
+
+                if (qtyNeeded.compareTo(BigDecimal.ZERO) > 0) {
+                    // Vẫn còn phần chưa đủ lô → dùng giá lô mới nhất có sẵn
+                    BigDecimal fallbackPrice = availableLots.get(availableLots.size() - 1).getUnitPrice();
+                    recalcCost = recalcCost.add(
+                        qtyNeeded.multiply(fallbackPrice).setScale(6, RoundingMode.HALF_UP)
+                    );
+                }
+
+                newCostPerUnit = newCostPerUnit.add(recalcCost);
+                alloc.setIsRecalculated(true);
+                allocationLogRepository.save(alloc);
             }
 
             if (!stillPending) {

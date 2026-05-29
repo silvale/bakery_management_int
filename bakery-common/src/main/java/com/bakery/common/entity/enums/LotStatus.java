@@ -8,5 +8,7 @@ public enum LotStatus {
     /** Quá hạn sử dụng */
     EXPIRED,
     /** Hủy một phần, còn lại */
-    PARTIAL
+    PARTIAL,
+    /** Đã bán hết */
+    SOLD_OUT
 }

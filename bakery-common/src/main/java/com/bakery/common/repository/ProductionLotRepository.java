@@ -73,7 +73,26 @@ public interface ProductionLotRepository extends JpaRepository<ProductionLot, UU
         @Param("branchId")  UUID branchId
     );
 
-        /** Cập nhật cost sau backdate */
+        /**
+     * Tìm lô theo IN_CODE + ngày sản xuất + chi nhánh.
+     * Dùng khi cập nhật qtySold từ file POS.
+     */
+    @Query("""
+        SELECT pl FROM ProductionLot pl
+        JOIN FETCH pl.product p
+        WHERE p.code           = :productCode
+          AND pl.productionDate = :productionDate
+          AND pl.branch.id      = :branchId
+          AND pl.status        != 'CANCELLED'
+        ORDER BY pl.productionDate ASC
+        """)
+    List<ProductionLot> findByProductCodeAndProductionDate(
+        @Param("productCode")    String productCode,
+        @Param("productionDate") LocalDate productionDate,
+        @Param("branchId")       UUID branchId
+    );
+
+    /** Cập nhật cost sau backdate */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
         UPDATE ProductionLot pl

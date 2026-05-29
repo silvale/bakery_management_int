@@ -12,10 +12,10 @@ import java.time.LocalDate;
 
 /**
  * Scheduler tự động chạy batch.
- * Mặc định: mỗi thứ Hai lúc 06:00 (sau khi cửa hàng đã close và nhân viên đã nộp file).
+ * Mặc định: mỗi ngày lúc 06:00 (sau khi cửa hàng đã close và nhân viên đã nộp file).
  *
  * Override qua application.yml:
- *   bakery.batch.schedule.daily-cron: "0 0 6 * * MON"
+ *   bakery.batch.schedule.daily-cron: "0 0 6 * * *"
  */
 @Slf4j
 @Component
@@ -26,16 +26,16 @@ public class BatchScheduler {
     private final DailyBatchJobService jobService;
 
     /**
-     * Chạy tự động mỗi thứ Hai lúc 06:00 AM.
-     * Xử lý dữ liệu của ngày hôm qua (ngày cuối tuần).
+     * Chạy tự động mỗi ngày lúc 06:00 AM.
+     * Xử lý dữ liệu của ngày hôm qua.
      */
-    @Scheduled(cron = "${bakery.batch.schedule.daily-cron:0 0 6 * * MON}")
-    public void runWeeklyBatch() {
+    @Scheduled(cron = "${bakery.batch.schedule.daily-cron:0 0 6 * * *}")
+    public void runDailyBatch() {
         LocalDate processDate = LocalDate.now().minusDays(1);
-        log.info("Scheduler trigger Weekly Batch | Ngày xử lý: {}", processDate);
+        log.info("Scheduler trigger Daily Batch | Ngày xử lý: {}", processDate);
 
         try {
-            jobService.run(processDate, "SCHEDULER", BatchRunType.WEEKLY_AUTO);
+            jobService.run(processDate, "SCHEDULER", BatchRunType.DAILY_AUTO);
         } catch (Exception e) {
             log.error("Scheduler batch thất bại: {}", e.getMessage(), e);
         }
