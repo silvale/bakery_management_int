@@ -28,9 +28,18 @@ public class Ingredient extends BaseEntity {
     private String name;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "base_unit", nullable = false, length = 20)
+    @Column(name = "base_unit", nullable = false, length = 20, columnDefinition = "base_unit")
     @Builder.Default
     private BaseUnit baseUnit = BaseUnit.GRAM;
+
+    /**
+     * FK → ingredient_group.code.
+     * Nhóm: BM=Bánh Mì, PL=Phòng Lạnh, SDC=Sử Dụng Chung, HC=Hàng Chợ.
+     * Nullable — cho phép nhập NL trước khi phân nhóm.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "group_code", referencedColumnName = "code")
+    private IngredientGroup group;
 
     @Column(name = "is_active", nullable = false)
     @Builder.Default

@@ -84,22 +84,23 @@ public class BanhRaNgayGeneratorService {
         for (ProductionTemplate tmpl : templates) {
             Product product = tmpl.getProduct();
             BigDecimal qtyClosing = closingMap.getOrDefault(product.getId(), BigDecimal.ZERO);
-            BigDecimal qtyToProduce = tmpl.getDefaultQty().subtract(qtyClosing)
+            // Dùng qty theo ngày trong tuần (T7-CN cao hơn) thay vì default_qty cũ
+            BigDecimal targetQty = tmpl.getQtyForDay(targetDate.getDayOfWeek());
+            BigDecimal qtyToProduce = targetQty.subtract(qtyClosing)
                 .max(BigDecimal.ZERO);
 
             items.add(new ProductionItem(
                 product.getCode(),
                 product.getName(),
                 product.getUnit(),
-                tmpl.getDefaultQty(),
+                targetQty,
                 qtyClosing,
                 qtyToProduce
             ));
         }
 
-        // Sort: sheet B.MÌ (PCS) trước, LAN (KG) sau
-        items.sort(Comparator.comparing(ProductionItem::unit).reversed()
-            .thenComparing(ProductionItem::productCode));
+        // Sort theo code để nhóm prefix liền nhau
+        items.sort(Comparator.comparing(ProductionItem::productCode));
 
         // Generate Excel
         byte[] excelBytes = buildExcel(items, targetDate, kitchenBranch.getName());
@@ -126,7 +127,7 @@ public class BanhRaNgayGeneratorService {
         try (XSSFWorkbook wb = new XSSFWorkbook();
              var out = new java.io.ByteArrayOutputStream()) {
 
-            // Style
+            // Style (tạo 1 lần, dùng chung cho tất cả sheet)
             CellStyle headerStyle = createHeaderStyle(wb);
             CellStyle normalStyle = createNormalStyle(wb, false);
             CellStyle altStyle    = createNormalStyle(wb, true);
@@ -134,17 +135,31 @@ public class BanhRaNgayGeneratorService {
             CellStyle numStyle    = createNumStyle(wb, false);
             CellStyle numAltStyle = createNumStyle(wb, true);
 
-            // Sheet B.MÌ
-            XSSFSheet bmiSheet = wb.createSheet("B.MI");
-            buildSheet(bmiSheet, items.stream()
-                .filter(i -> "PCS".equals(i.unit()))
-                .toList(), targetDate, headerStyle, normalStyle, altStyle, zeroStyle, numStyle, numAltStyle);
+            // Sheet B.MÌ — BMN (bánh mì ngọt) + BMM (bánh mì mặn)
+            buildSheet(wb.createSheet("B.MI"),
+                items.stream().filter(i -> i.productCode().startsWith("BMN-")
+                                        || i.productCode().startsWith("BMM-")).toList(),
+                targetDate, headerStyle, normalStyle, altStyle, zeroStyle, numStyle, numAltStyle);
 
-            // Sheet LAN
-            XSSFSheet lanSheet = wb.createSheet("LAN");
-            buildSheet(lanSheet, items.stream()
-                .filter(i -> "KG".equals(i.unit()))
-                .toList(), targetDate, headerStyle, normalStyle, altStyle, zeroStyle, numStyle, numAltStyle);
+            // Sheet LAN — BL (bông lan)
+            buildSheet(wb.createSheet("LAN"),
+                items.stream().filter(i -> i.productCode().startsWith("BL-")).toList(),
+                targetDate, headerStyle, normalStyle, altStyle, zeroStyle, numStyle, numAltStyle);
+
+            // Sheet COOKIES — COO
+            buildSheet(wb.createSheet("COOKIES"),
+                items.stream().filter(i -> i.productCode().startsWith("COO-")).toList(),
+                targetDate, headerStyle, normalStyle, altStyle, zeroStyle, numStyle, numAltStyle);
+
+            // Sheet PK — Phòng Kem
+            buildSheet(wb.createSheet("PK"),
+                items.stream().filter(i -> i.productCode().startsWith("PK-")).toList(),
+                targetDate, headerStyle, normalStyle, altStyle, zeroStyle, numStyle, numAltStyle);
+
+            // Sheet PL — Phòng Lạnh
+            buildSheet(wb.createSheet("PL"),
+                items.stream().filter(i -> i.productCode().startsWith("PL-")).toList(),
+                targetDate, headerStyle, normalStyle, altStyle, zeroStyle, numStyle, numAltStyle);
 
             wb.write(out);
             return out.toByteArray();

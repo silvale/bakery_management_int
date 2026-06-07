@@ -6,7 +6,7 @@ import com.bakery.common.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,13 +41,17 @@ public class PosFileProcessorService {
     private final HuyBanhExcelService        huyBanhExcelService;
 
     // ── Cột trong file POS ────────────────────────────────────
-    private static final int COL_MA_HANG    = 0;
-    private static final int COL_TEN_HANG   = 1;
-    private static final int COL_SL_BAN     = 2;
-    private static final int COL_DOANH_THU  = 3;
-    private static final int COL_SL_TRA     = 4;
-    private static final int COL_GT_TRA     = 5;
-    private static final int COL_DT_THUAN   = 6;
+    // Cột trong file POS thực tế (0-indexed):
+    // Col 0: (trống)  Col 1: Mã hàng  Col 2: Tên hàng  Col 3-4: (trống)
+    // Col 5: SL bán   Col 6: Doanh thu  Col 7: SL trả  Col 8: Giá trị trả
+    // Col 9: (trống)  Col 10: DT thuần
+    private static final int COL_MA_HANG    = 1;
+    private static final int COL_TEN_HANG   = 2;
+    private static final int COL_SL_BAN     = 5;
+    private static final int COL_DOANH_THU  = 6;
+    private static final int COL_SL_TRA     = 7;
+    private static final int COL_GT_TRA     = 8;
+    private static final int COL_DT_THUAN   = 10;
 
     // ── Process ───────────────────────────────────────────────
 
@@ -141,7 +145,7 @@ public class PosFileProcessorService {
         List<PosRow> rows = new ArrayList<>();
 
         try (FileInputStream fis = new FileInputStream(filePath.toFile());
-             Workbook wb = new XSSFWorkbook(fis)) {
+             Workbook wb = WorkbookFactory.create(fis)) {
 
             Sheet sheet = wb.getSheetAt(0);
 
@@ -198,12 +202,15 @@ public class PosFileProcessorService {
      * Nhận diện: dòng có "Mã hàng" hoặc "Mã" ở cột đầu.
      */
     private int findDataStartRow(Sheet sheet) {
-        for (int i = 0; i <= Math.min(10, sheet.getLastRowNum()); i++) {
+        for (int i = 0; i <= Math.min(15, sheet.getLastRowNum()); i++) {
             Row row = sheet.getRow(i);
             if (row == null) continue;
-            String cell0 = getCellString(row, 0);
-            if (cell0 != null && (cell0.contains("Mã hàng") || cell0.equalsIgnoreCase("Mã"))) {
-                return i + 1; // data bắt đầu từ dòng tiếp theo
+            // Tìm "Mã hàng" ở bất kỳ cột nào trong 3 cột đầu
+            for (int c = 0; c <= 2; c++) {
+                String cell = getCellString(row, c);
+                if (cell != null && (cell.contains("Mã hàng") || cell.equalsIgnoreCase("Mã"))) {
+                    return i + 1; // data bắt đầu từ dòng tiếp theo
+                }
             }
         }
         return -1;

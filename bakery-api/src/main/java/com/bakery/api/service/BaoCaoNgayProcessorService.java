@@ -5,7 +5,7 @@ import com.bakery.common.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -171,64 +171,94 @@ public class BaoCaoNgayProcessorService {
 
     // ── Parse sheet SX ────────────────────────────────────────
 
+    // Prefixes hợp lệ của IN_CODE
+    private static final Set<String> VALID_PREFIXES = Set.of("BMN", "BMM", "BL", "PK", "PL", "COO");
+
     private List<ReportRow> parseSheetSX(Path filePath, LocalDate processDate) throws Exception {
         List<ReportRow> rows = new ArrayList<>();
 
         try (var fis = new java.io.FileInputStream(filePath.toFile());
-             Workbook wb = new XSSFWorkbook(fis)) {
+             Workbook wb = WorkbookFactory.create(fis)) {
 
-            // Tìm sheet SX (index 0 hoặc theo tên)
-            Sheet sheet = null;
-            for (int i = 0; i < wb.getNumberOfSheets(); i++) {
-                String name = wb.getSheetName(i);
-                if ("SX".equalsIgnoreCase(name) || name.toUpperCase().contains("SX")) {
-                    sheet = wb.getSheetAt(i);
-                    break;
-                }
+            // Đọc tất cả sheets
+            for (int s = 0; s < wb.getNumberOfSheets(); s++) {
+                Sheet sheet = wb.getSheetAt(s);
+                rows.addAll(parseOneSheet(sheet));
             }
-            if (sheet == null) sheet = wb.getSheetAt(0);
+        }
 
-            // Tìm dòng data (bỏ qua 2 dòng header)
-            int dataStart = findDataStart(sheet);
-            if (dataStart < 0) return rows;
+        log.info("BaoCaoNgay parsed: {} rows từ tất cả sheets", rows.size());
+        return rows;
+    }
 
-            for (int i = dataStart; i <= sheet.getLastRowNum(); i++) {
-                Row row = sheet.getRow(i);
-                if (row == null) continue;
+    /**
+     * Parse 1 sheet. Tự detect cấu trúc:
+     * - Có cột TT đầu → MãSP ở col 1, Hủy ở col 6
+     * - Không có TT   → MãSP ở col 0, Hủy ở col 5
+     */
+    private List<ReportRow> parseOneSheet(Sheet sheet) {
+        List<ReportRow> rows = new ArrayList<>();
 
-                String masp = getCellString(row, COL_MA_SP);
-                if (masp == null || masp.isBlank()) continue;
-                if (!masp.toUpperCase().startsWith("SP")) continue; // bỏ dòng tổng
+        int dataStart = findDataStart(sheet);
+        if (dataStart < 0) return rows;
 
-                String tenBanh       = getCellString(row, COL_TEN_BANH);
-                BigDecimal tonHomTruoc = getCellDecimalOrZero(row, COL_TON_HOM_TRUOC);
-                BigDecimal banhSang    = getCellDecimalOrZero(row, COL_BANH_SANG);
-                BigDecimal tonToi      = getCellDecimalOrZero(row, COL_TON_TOI);
-                BigDecimal huy         = getCellDecimalOrZero(row, COL_HUY);
-
-                rows.add(new ReportRow(masp, tenBanh, tonHomTruoc, banhSang, tonToi, huy));
+        // Detect offset: nếu header row có "TT" ở col 0 → offset = 1
+        int hdrRow = dataStart - 1;
+        int colOffset = 0;
+        Row header = sheet.getRow(hdrRow);
+        if (header != null) {
+            String col0 = getCellStringDirect(header.getCell(0));
+            if (col0 != null && (col0.equalsIgnoreCase("TT") || col0.equalsIgnoreCase("TT."))) {
+                colOffset = 1;
             }
+        }
+
+        int colMaSP      = colOffset;
+        int colTenBanh   = colOffset + 1;
+        int colTonTruoc  = colOffset + 2;
+        int colSang      = colOffset + 3;
+        int colToi       = colOffset + 4;
+        int colHuy       = colOffset + 5;
+
+        for (int i = dataStart; i <= sheet.getLastRowNum(); i++) {
+            Row row = sheet.getRow(i);
+            if (row == null) continue;
+
+            String masp = getCellString(row, colMaSP);
+            if (masp == null || masp.isBlank()) continue;
+
+            // Chỉ lấy dòng có IN_CODE hợp lệ
+            String prefix = masp.contains("-") ? masp.split("-")[0].toUpperCase() : masp.toUpperCase();
+            if (!VALID_PREFIXES.contains(prefix)) continue;
+
+            rows.add(new ReportRow(
+                masp,
+                getCellString(row, colTenBanh),
+                getCellDecimalOrZero(row, colTonTruoc),
+                getCellDecimalOrZero(row, colSang),
+                getCellDecimalOrZero(row, colToi),
+                getCellDecimalOrZero(row, colHuy)
+            ));
         }
 
         return rows;
     }
 
     /**
-     * Tìm dòng bắt đầu data.
-     * Nhận diện: dòng tiếp theo sau dòng có "Tồn hôm trước" hoặc "tồn hôm trước"
+     * Tìm dòng bắt đầu data — dòng sau header có "Tồn hôm trước".
      */
     private int findDataStart(Sheet sheet) {
-        for (int i = 0; i <= Math.min(5, sheet.getLastRowNum()); i++) {
+        for (int i = 0; i <= Math.min(6, sheet.getLastRowNum()); i++) {
             Row row = sheet.getRow(i);
             if (row == null) continue;
             for (Cell cell : row) {
                 String val = getCellStringDirect(cell);
                 if (val != null && val.toLowerCase().contains("tồn hôm trước")) {
-                    return i + 1; // data bắt đầu sau dòng sub-header
+                    return i + 1;
                 }
             }
         }
-        return 2; // fallback: bỏ 2 dòng header
+        return 3; // fallback
     }
 
     // ── Cell helpers ──────────────────────────────────────────

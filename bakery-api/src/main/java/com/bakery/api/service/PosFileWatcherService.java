@@ -121,7 +121,8 @@ public class PosFileWatcherService {
             .errorDetail(result.warnings().isEmpty() ? null : String.join("\n", result.warnings()))
             .importedAt(OffsetDateTime.now())
             .build();
-        txtImportLogRepository.save(log_);
+        // TEMP COMMENT FOR TESTING
+//        txtImportLogRepository.save(log_);
 
         // 4. Move file đã xử lý → done/
         moveToSubDir(filePath, "done");

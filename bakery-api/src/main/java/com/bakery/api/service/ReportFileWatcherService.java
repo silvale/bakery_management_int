@@ -91,7 +91,8 @@ public class ReportFileWatcherService {
     private void processReportFile(Path filePath) {
         log.info("Report watcher: phát hiện file {}", filePath.getFileName());
         try {
-            processFileInternal(filePath, LocalDate.now());
+//            processFileInternal(filePath, LocalDate.now());
+            processFileInternal(filePath, LocalDate.of(2026, 6, 6));
         } catch (Exception e) {
             log.error("BaoCaoNgay xử lý thất bại [{}]: {}", filePath.getFileName(), e.getMessage(), e);
             moveToSubDir(filePath, "error");
@@ -125,7 +126,7 @@ public class ReportFileWatcherService {
                 : null)
             .importedAt(OffsetDateTime.now())
             .build();
-        txtImportLogRepository.save(log_);
+//        txtImportLogRepository.save(log_);
 
         // 4. Move file đã xử lý → done/
         moveToSubDir(filePath, "done");
