@@ -3,6 +3,8 @@ package com.bakery.common.entity;
 import com.bakery.common.entity.enums.BatchStatus;
 import com.bakery.common.entity.enums.FileType;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
@@ -28,7 +30,7 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class FileImportLog extends BaseSystemEntity {
+public class FileImportLog extends BaseLogEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "batch_run_id", nullable = false)
@@ -38,10 +40,12 @@ public class FileImportLog extends BaseSystemEntity {
     private String fileName;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "file_type", nullable = false, length = 50)
     private FileType fileType;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "status", nullable = false, length = 30)
     @Builder.Default
     private BatchStatus status = BatchStatus.RUNNING;

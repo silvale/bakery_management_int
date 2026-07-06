@@ -5,7 +5,6 @@ import com.bakery.common.entity.enums.LotStatus;
 import com.bakery.common.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,34 +34,6 @@ public class CancelFifoService {
     private final CancelLogDetailRepository cancelLogDetailRepository;
     private final BranchRepository         branchRepository;
     private final ProductRepository        productRepository;
-
-    // ── Cron: export danh sách cần hủy lúc 20h ───────────────
-
-    @Scheduled(cron = "${bakery.cancel.export-cron:0 0 20 * * *}")
-    public void exportDailyCancelList() {
-        log.info("=== Export danh sách bánh cần hủy ===");
-
-        Branch shopBranch = branchRepository.findAll().stream()
-            .filter(b -> !b.getIsMain()).findFirst().orElseThrow();
-
-        // Lấy tất cả lô hết hạn hôm nay hoặc ngày mai
-        LocalDate tomorrow = LocalDate.now().plusDays(1);
-        List<ProductionLot> expiringLots = productionLotRepository
-            .findExpiringLots(shopBranch.getId(), tomorrow);
-
-        if (expiringLots.isEmpty()) {
-            log.info("✓ Không có lô nào cần hủy");
-            return;
-        }
-
-        log.info("⚠ {} lô cần hủy:", expiringLots.size());
-        expiringLots.forEach(lot ->
-            log.info("  {} | {} | HSD: {} | Còn: {}",
-                lot.getLotNumber(),
-                lot.getProduct().getName(),
-                lot.getExpiryDate(),
-                lot.getQtyRemaining()));
-    }
 
     // ── Xử lý hủy FIFO ───────────────────────────────────────
 

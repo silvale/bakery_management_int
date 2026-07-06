@@ -3,8 +3,9 @@ package com.bakery.batch.processor;
 import com.bakery.batch.dto.*;
 import com.bakery.batch.util.ErrorRowCollector;
 import com.bakery.common.entity.*;
-import com.bakery.common.entity.enums.ReconcileStatus;
+import com.bakery.common.entity.enums.ProductionOrderStatus;
 import com.bakery.common.repository.*;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -33,6 +34,7 @@ public class DailyImportProcessor {
 
     private final BranchRepository              branchRepository;
     private final ProductRepository             productRepository;
+    private final ProductMappingRepository      productMappingRepository;
     private final ProductionOrderRepository     productionOrderRepository;
     private final ProductionOrderLineRepository productionOrderLineRepository;
     private final StockTransferRepository       stockTransferRepository;
@@ -74,7 +76,7 @@ public class DailyImportProcessor {
         ProductionOrder order = ProductionOrder.builder()
             .branch(kitchenBranch)
             .orderDate(orderDate)
-            .status(ReconcileStatus.PENDING)
+            .status(ProductionOrderStatus.PENDING)
             .build();
 
         List<ProductionOrderLine> lines = new ArrayList<>();
@@ -175,7 +177,7 @@ public class DailyImportProcessor {
                     .transferDate(orderDate)
                     .qtySent(qtySent)
                     .unit(row.getUnit())
-                    .status(ReconcileStatus.PENDING)
+                    .status("PENDING")
                     .build();
 
                 stockTransferRepository.save(transfer);
@@ -251,11 +253,9 @@ public class DailyImportProcessor {
                     BigDecimal threshold = transfer.getQtySent()
                         .multiply(product.getToleranceRate());
 
-                    transfer.setStatus(
-                        diff.compareTo(threshold) <= 0
-                            ? ReconcileStatus.OK
-                            : ReconcileStatus.DISCREPANCY
-                    );
+                    // V12: StockTransfer status chỉ PENDING/CONFIRMED/REJECTED — shop tự xác nhận qua UI
+                    // Không auto-set OK/DISCREPANCY nữa; giữ PENDING để shop review
+                    transfer.setStatus("PENDING");
                     stockTransferRepository.save(transfer);
                 });
 
@@ -279,69 +279,78 @@ public class DailyImportProcessor {
         if (rawRows.isEmpty()) return 0;
 
         LocalDate txDate = rawRows.get(0).getTransactionDate();
-        log.info("processPosExport | Ngày: {} | {} raw rows (trước aggregate)", txDate, rawRows.size());
+        log.info("processPosExport | Ngày: {} | {} raw rows (EX_CODE)", txDate, rawRows.size());
 
-        // Aggregate: SUM qty_sold và revenue theo productCode
-        Map<String, PosTransactionRow> aggregated = new LinkedHashMap<>();
+        // Bước 1: Translate EX_CODE → IN_CODE qua product_mapping, rồi aggregate
+        Map<String, BigDecimal> soldByInCode    = new LinkedHashMap<>();
+        Map<String, BigDecimal> revenueByInCode = new LinkedHashMap<>();
+        List<String> skippedCodes = new ArrayList<>();
+
         for (PosTransactionRow row : rawRows) {
-            aggregated.merge(
-                row.getProductCode(),
-                row,
-                (existing, newRow) -> PosTransactionRow.builder()
-                    .transactionDate(existing.getTransactionDate())
-                    .branchName(existing.getBranchName())
-                    .productCode(existing.getProductCode())
-                    .productName(existing.getProductName())
-                    .qtySold(existing.getQtySold().add(newRow.getQtySold()))
-                    .revenue(existing.getRevenue().add(newRow.getRevenue()))
-                    .qtyReturned(existing.getQtyReturned().add(newRow.getQtyReturned()))
-                    .netRevenue(existing.getNetRevenue().add(newRow.getNetRevenue()))
-                    .rowIndex(existing.getRowIndex())
-                    .build()
-            );
+            Optional<ProductMapping> mappingOpt =
+                productMappingRepository.findWithProductBySkuCode(row.getProductCode());
+
+            if (mappingOpt.isEmpty()) {
+                log.warn("POS batch: SKU '{}' không có trong product_mapping → bỏ qua", row.getProductCode());
+                skippedCodes.add(row.getProductCode());
+                collector.addError(row.getRowIndex(), "Ma_hang",
+                    "SKU không có trong product_mapping: " + row.getProductCode());
+                continue;
+            }
+
+            String inCode = mappingOpt.get().getProduct().getCode();
+            soldByInCode.merge(inCode, row.getQtySold(), BigDecimal::add);
+            revenueByInCode.merge(inCode, row.getNetRevenue(), BigDecimal::add);
         }
 
-        log.info("Sau aggregate: {} sản phẩm unique", aggregated.size());
+        if (!skippedCodes.isEmpty()) {
+            log.warn("processPosExport: {} SKU bỏ qua (chưa có trong product_mapping): {}",
+                skippedCodes.size(), skippedCodes);
+        }
 
-        // Load product map
+        log.info("Sau aggregate theo IN_CODE: {} sản phẩm", soldByInCode.size());
+
+        // Bước 2: Load product entities theo IN_CODE
         Map<String, Product> productMap = productRepository
-            .findAllByCodeIn(aggregated.keySet())
+            .findAllByCodeIn(soldByInCode.keySet())
             .stream()
             .collect(Collectors.toMap(Product::getCode, p -> p));
 
         int saved = 0;
 
-        for (PosTransactionRow row : aggregated.values()) {
-            Product product = productMap.get(row.getProductCode());
+        for (Map.Entry<String, BigDecimal> entry : soldByInCode.entrySet()) {
+            String     inCode  = entry.getKey();
+            BigDecimal qtySold = entry.getValue();
+            BigDecimal revenue = revenueByInCode.getOrDefault(inCode, BigDecimal.ZERO);
+
+            Product product = productMap.get(inCode);
             if (product == null) {
-                log.warn("POS: Không tìm thấy SP {}", row.getProductCode());
-                collector.addError(row.getRowIndex(), "Ma_SP",
-                    "Không tìm thấy SP: " + row.getProductCode());
+                log.warn("POS: Không tìm thấy SP IN_CODE={}", inCode);
                 continue;
             }
 
-            // Overwrite
+            // Overwrite nếu đã tồn tại
             posTransactionRepository
                 .findByBranchIdAndProductIdAndTransactionDate(
                     shopBranch.getId(), product.getId(), txDate)
                 .ifPresent(posTransactionRepository::delete);
 
-            // Tính unit_price = revenue / qty_sold
-            BigDecimal unitPrice = row.getQtySold().compareTo(BigDecimal.ZERO) > 0
-                ? row.getRevenue().divide(row.getQtySold(), 4, RoundingMode.HALF_UP)
+            BigDecimal unitPrice = qtySold.compareTo(BigDecimal.ZERO) > 0
+                ? revenue.divide(qtySold, 4, RoundingMode.HALF_UP)
                 : BigDecimal.ZERO;
 
             PosTransaction tx = PosTransaction.builder()
                 .branch(shopBranch)
                 .product(product)
                 .transactionDate(txDate)
-                .qtySold(row.getQtySold())
+                .qtySold(qtySold)
                 .unitPrice(unitPrice)
-                .revenue(row.getNetRevenue()) // dùng DT thuần
+                .revenue(revenue)
                 .build();
 
             posTransactionRepository.save(tx);
             saved++;
+            log.debug("  PosTransaction: {} qtySold={}", inCode, qtySold);
         }
 
         log.info("processPosExport: lưu {} PosTransaction", saved);

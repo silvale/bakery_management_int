@@ -74,12 +74,14 @@ public class ExCodeDecoderService {
         }
 
         char dayChar = remainder.charAt(0);
-        if (dayChar < '2' || dayChar > '8') {
+
+        // dayChar hợp lệ: '0' = sản xuất trong ngày (HSD trong ngày), '2'..'8' = thứ SX
+        if (dayChar != '0' && (dayChar < '2' || dayChar > '8')) {
             log.warn("EX_CODE thứ sản xuất không hợp lệ '{}': {}", dayChar, exCode);
             return null;
         }
 
-        int dayCode = Character.getNumericValue(dayChar); // 2..8
+        int dayCode = Character.getNumericValue(dayChar); // 0 hoặc 2..8
 
         // 3. Tra cứu HSD sản phẩm
         Product product = matched.getProduct();
@@ -87,8 +89,15 @@ public class ExCodeDecoderService {
             .map(ProductExpiryConfig::getShelfDays)
             .orElse(4); // mặc định 4 ngày nếu chưa cấu hình
 
-        // 4. Tìm ngày SX gần nhất hợp lệ
-        LocalDate productionDate = resolveProductionDate(dayCode, shelfDays, today);
+        // 4. Xác định ngày SX
+        //    dayCode = 0 → HSD trong ngày → productionDate = today
+        //    dayCode = 2..8 → tìm ngày SX gần nhất theo thứ trong tuần
+        LocalDate productionDate;
+        if (dayCode == 0) {
+            productionDate = today; // Sản xuất trong ngày, không cần resolve
+        } else {
+            productionDate = resolveProductionDate(dayCode, shelfDays, today);
+        }
 
         if (productionDate == null) {
             log.warn("Không tìm được ngày SX hợp lệ cho EX_CODE: {} (thứ={}, HSD={}n)",

@@ -1,6 +1,7 @@
 package com.bakery.api.controller;
 
 import com.bakery.api.service.*;
+import com.bakery.common.entity.enums.BranchType;
 import com.bakery.common.entity.*;
 import com.bakery.common.entity.enums.LotCostStatus;
 import com.bakery.common.entity.enums.LotStatus;
@@ -14,7 +15,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
-import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -26,8 +26,6 @@ import java.util.stream.Collectors;
 @Tag(name = "Phase3", description = "File TXT, BanhRaNgay, ProductionLot, FIFO, Hủy bánh")
 public class Phase3Controller {
 
-    private final FileWatcherService            fileWatcherService;
-    private final BanhRaNgayGeneratorService    banhRaNgayGenerator;
     private final FifoEngine                    fifoEngine;
     private final ProductionLotRepository       productionLotRepository;
     private final ProductionTemplateRepository  templateRepository;
@@ -38,53 +36,27 @@ public class Phase3Controller {
     // ── File TXT ─────────────────────────────────────────────
 
     @PostMapping("/txt/import")
-    @Operation(summary = "Import thủ công file TXT tồn kho")
+    @Operation(summary = "[Deprecated V12] Import file TXT tồn kho")
     public ResponseEntity<Map<String, Object>> importTxt(
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-
-        LocalDate processDate = date != null ? date : LocalDate.now();
-        try {
-            var result = fileWatcherService.importTxtFile(
-                    Paths.get(System.getProperty("bakery.batch.input-dir", "./batch-input"), "ton_kho.txt"),
-                    processDate
-            );
-            Map<String, Object> resp = new LinkedHashMap<>();
-            resp.put("skipped",    result.skipped());
-            resp.put("savedCount", result.savedCount());
-            resp.put("errorCount", result.errorCount());
-            resp.put("errors",     result.errors());
-            resp.put("fileHash",   result.fileHash());
-            return ResponseEntity.ok(resp);
-        } catch (Exception e) {
-            Map<String, Object> err = new LinkedHashMap<>();
-            err.put("error", e.getMessage());
-            return ResponseEntity.internalServerError().body(err);
-        }
+        return ResponseEntity.status(410).body(Map.of(
+            "status", "DEPRECATED",
+            "message", "V12: Import TXT không còn dùng. Dùng InventoryAdjustment UI."
+        ));
     }
 
     // ── BanhRaNgay Generator ──────────────────────────────────
 
     @PostMapping("/banh-ra-ngay/generate")
-    @Operation(summary = "Auto-gen BanhRaNgay.xlsx = template - tồn hôm nay")
+    @Operation(summary = "[Deprecated V12] Auto-gen BanhRaNgay.xlsx")
     public ResponseEntity<Map<String, Object>> generateBanhRaNgay(
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate forDate) {
-
-        LocalDate targetDate = forDate != null ? forDate : LocalDate.now().plusDays(1);
-        LocalDate sourceDate = targetDate.minusDays(1);
-        try {
-            var filePath = banhRaNgayGenerator.generate(sourceDate, targetDate);
-            Map<String, Object> resp = new LinkedHashMap<>();
-            resp.put("outputFile", filePath.toString());
-            resp.put("sourceDate", sourceDate.toString());
-            resp.put("targetDate", targetDate.toString());
-            return ResponseEntity.ok(resp);
-        } catch (Exception e) {
-            Map<String, Object> err = new LinkedHashMap<>();
-            err.put("error", e.getMessage());
-            return ResponseEntity.internalServerError().body(err);
-        }
+        return ResponseEntity.status(410).body(Map.of(
+            "status", "DEPRECATED",
+            "message", "V12: BanhRaNgay không còn xuất Excel. Dùng ProductionPlan UI."
+        ));
     }
 
     // ── Production Lot ────────────────────────────────────────
@@ -103,9 +75,8 @@ public class Phase3Controller {
         Product product = productRepository.findByCode(productCode)
                 .orElseThrow(() -> new IllegalArgumentException("SP không tìm thấy: " + productCode));
 
-        Branch kitchenBranch = branchRepository.findByIsMainTrue().orElseThrow();
-        Branch shopBranch    = branchRepository.findAll().stream()
-                .filter(b -> !b.getIsMain()).findFirst().orElseThrow();
+        Branch kitchenBranch = branchRepository.findByBranchType(BranchType.KHO_BEP).orElseThrow();
+        Branch shopBranch    = branchRepository.findByBranchType(BranchType.SHOP).orElseThrow();
 
         // Tính HSD
         int shelfDays = expiryConfigRepository.findByProductId(product.getId())
@@ -118,11 +89,11 @@ public class Phase3Controller {
                 prodDate.format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd")),
                 productCode, seq);
 
-        // Tạo ProductionLot
+        // Tạo ProductionLot tại Kho Bếp
         ProductionLot lot = ProductionLot.builder()
                 .lotNumber(lotNumber)
                 .product(product)
-                .branch(shopBranch)
+                .branch(kitchenBranch)
                 .productionDate(prodDate)
                 .expiryDate(expiryDate)
                 .qtyProduced(qtyProduced)
@@ -152,12 +123,12 @@ public class Phase3Controller {
     public List<Map<String, Object>> getExpiringLots(
             @RequestParam(defaultValue = "1") int days) {
 
-        Branch shopBranch = branchRepository.findAll().stream()
-                .filter(b -> !b.getIsMain()).findFirst().orElseThrow();
-        LocalDate warningDate = LocalDate.now().plusDays(days);
+        Branch shopBranch = branchRepository.findByBranchType(BranchType.KHO_BEP).orElseThrow();
+        LocalDate today = LocalDate.now();
+        LocalDate warningDate = today.plusDays(days);
 
         return productionLotRepository
-                .findExpiringLots(shopBranch.getId(), warningDate)
+                .findExpiringLots(shopBranch.getId(), today, warningDate)
                 .stream()
                 .map(lot -> {
                     Map<String, Object> m = new LinkedHashMap<>();

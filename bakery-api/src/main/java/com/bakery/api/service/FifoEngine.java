@@ -36,7 +36,7 @@ public class FifoEngine {
     private final FifoAllocationLogRepository  allocationLogRepository;
     private final ProductionLotRepository      productionLotRepository;
     private final RecipeRepository             recipeRepository;
-    private final SemiProductCostRepository    semiProductCostRepository;
+    private final CostCalculationService       costCalculationService;
 
     // -------------------------------------------------------
     //  Phân bổ FIFO cho 1 production lot
@@ -76,9 +76,9 @@ public class FifoEngine {
             BigDecimal qty = productionLot.getQtyProduced();
 
             if (line.getSemiProduct() != null) {
-                // Semi product: tính cost từ bảng semi_product_cost
+                // Semi product: tính cost on-the-fly (semi_product_cost đã bị xóa V15)
                 BigDecimal semiCost = allocateSemiProduct(
-                    line, qty, prodDate
+                    line, qty, branch
                 );
                 totalCostPerUnit = totalCostPerUnit.add(semiCost);
 
@@ -298,27 +298,27 @@ public class FifoEngine {
     }
 
     /**
-     * Tính cost cho semi product (phôi/nhân) từ bảng semi_product_cost.
+     * Tính cost cho semi product (phôi/nhân) on-the-fly qua CostCalculationService.
      * Không trừ kho trực tiếp — kho phôi/nhân được tính riêng.
      */
     private BigDecimal allocateSemiProduct(
             RecipeLine line,
             BigDecimal qtyProduced,
-            LocalDate prodDate) {
+            Branch branch) {
 
         SemiProduct sp = line.getSemiProduct();
+        BigDecimal costPerKg = costCalculationService.calculateCostPerKg(sp, branch);
 
-        return semiProductCostRepository
-            .findActiveCost(sp.getId(), prodDate)
-            .map(cost -> line.getQuantityGram()
-                .divide(BigDecimal.valueOf(1000), 10, RoundingMode.HALF_UP)
-                .multiply(cost.getCostPerKg())
-                .divide(qtyProduced.compareTo(BigDecimal.ZERO) > 0 ? qtyProduced : BigDecimal.ONE,
-                    6, RoundingMode.HALF_UP))
-            .orElseGet(() -> {
-                log.warn("Không tìm thấy cost cho SemiProduct: {} tại {}", sp.getCode(), prodDate);
-                return BigDecimal.ZERO;
-            });
+        if (costPerKg.compareTo(BigDecimal.ZERO) == 0) {
+            log.warn("Không tính được cost cho SemiProduct: {}", sp.getCode());
+            return BigDecimal.ZERO;
+        }
+
+        return line.getQuantityGram()
+            .divide(BigDecimal.valueOf(1000), 10, RoundingMode.HALF_UP)
+            .multiply(costPerKg)
+            .divide(qtyProduced.compareTo(BigDecimal.ZERO) > 0 ? qtyProduced : BigDecimal.ONE,
+                6, RoundingMode.HALF_UP);
     }
 
     // -------------------------------------------------------

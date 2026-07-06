@@ -1,24 +1,24 @@
 package com.bakery.common.entity;
 
-import com.bakery.common.entity.enums.ReconcileStatus;
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 
 /**
- * Điều chuyển hàng từ Bếp → Cửa hàng (Tầng 2).
+ * Phiếu xuất bánh từ Kho Bếp → Cửa Hàng.
  *
- * qty_sent     → từ XuatRa.xlsx (bếp báo xuất)
- * qty_received → từ BaoCaoNgay.xlsx (cửa hàng nhận)
+ * Quy trình:
+ *   1. Bếp trưởng tạo phiếu (status = PENDING), nhập qty_sent.
+ *   2. Nhân viên cửa hàng xác nhận nhận hàng (status = CONFIRMED), nhập qty_received.
+ *   3. Nếu qty_received khác qty_sent → ghi chênh lệch, vẫn CONFIRMED.
+ *   4. Nhân viên có thể REJECT nếu hàng chưa đến hoặc có vấn đề.
  *
- * qty_discrepancy = qty_sent - qty_received
- *   Dương = thất thoát (bếp xuất nhiều hơn cửa hàng nhận)
- *   Âm    = nhận nhiều hơn gửi (bất thường)
- *
- * Lưu ý: DB có computed column qty_discrepancy.
- *         JPA dùng @Formula để ánh xạ.
+ * qty_discrepancy = qty_sent - COALESCE(qty_received, qty_sent)
+ *   Dương = thất thoát; Âm = nhận nhiều hơn gửi (bất thường).
+ *   DB có computed column, JPA dùng insertable=false updatable=false.
  */
 @Entity
 @Table(
@@ -71,11 +71,22 @@ public class StockTransfer extends BaseEntity {
     @Column(name = "unit", nullable = false, length = 20)
     private String unit;
 
-    @Column(name = "source_file", length = 500)
-    private String sourceFile;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 30)
+    /**
+     * PENDING   → bếp đã tạo, chờ cửa hàng xác nhận
+     * CONFIRMED → cửa hàng đã xác nhận nhận hàng
+     * REJECTED  → cửa hàng từ chối (hàng chưa đến / có vấn đề)
+     */
+    @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
-    private ReconcileStatus status = ReconcileStatus.PENDING;
+    private String status = "PENDING";
+
+    /** Username người xác nhận / từ chối */
+    @Column(name = "confirmed_by", length = 100)
+    private String confirmedBy;
+
+    @Column(name = "confirmed_at")
+    private OffsetDateTime confirmedAt;
+
+    @Column(name = "rejection_reason", columnDefinition = "TEXT")
+    private String rejectionReason;
 }

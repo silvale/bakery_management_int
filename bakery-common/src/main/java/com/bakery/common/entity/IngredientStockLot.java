@@ -5,6 +5,7 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.UUID;
 
 /**
  * Lô nguyên liệu nhập kho — dùng cho FIFO engine.
@@ -19,7 +20,7 @@ import java.time.LocalDate;
 @Entity
 @Table(name = "ingredient_stock_lot")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
-public class IngredientStockLot extends BaseEntity {
+public class IngredientStockLot extends BaseAdminEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "ingredient_id", nullable = false)
@@ -36,6 +37,10 @@ public class IngredientStockLot extends BaseEntity {
     /** Ngày nhập kho thực tế (hỗ trợ backdate) */
     @Column(name = "import_date", nullable = false)
     private LocalDate importDate;
+
+    /** Hạn sử dụng — dùng cho FEFO (First Expired First Out). NULL nếu NL không có HSD */
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
 
     /** Tổng nhập (gram/ml) */
     @Column(name = "qty_imported", nullable = false, precision = 18, scale = 4)
@@ -58,6 +63,14 @@ public class IngredientStockLot extends BaseEntity {
     @Column(name = "is_backdate", nullable = false)
     @Builder.Default
     private Boolean isBackdate = false;
+
+    /**
+     * Phiếu chuyển kho sinh ra lô này.
+     * Điền khi lô được tạo từ GoodsTransfer (approve).
+     * Cho phép trace: lô KHO_BEP → phiếu TRF → lô KHO_TONG gốc.
+     */
+    @Column(name = "source_transfer_id")
+    private UUID sourceTransferId;
 
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;

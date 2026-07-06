@@ -2,6 +2,8 @@ package com.bakery.common.entity;
 
 import com.bakery.common.entity.enums.ReconcileStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -77,6 +79,7 @@ public class DailyReconcile extends BaseEntity {
     private BigDecimal productionVsOrderDiff;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "production_vs_order_status", nullable = false, length = 30)
     @Builder.Default
     private ReconcileStatus productionVsOrderStatus = ReconcileStatus.PENDING;
@@ -94,6 +97,7 @@ public class DailyReconcile extends BaseEntity {
     private BigDecimal deliveryVsReceiptDiff;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "delivery_vs_receipt_status", nullable = false, length = 30)
     @Builder.Default
     private ReconcileStatus deliveryVsReceiptStatus = ReconcileStatus.PENDING;
@@ -126,6 +130,7 @@ public class DailyReconcile extends BaseEntity {
     private BigDecimal posVsInventoryDiff;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "pos_vs_inventory_status", nullable = false, length = 30)
     @Builder.Default
     private ReconcileStatus posVsInventoryStatus = ReconcileStatus.PENDING;
@@ -177,6 +182,7 @@ public class DailyReconcile extends BaseEntity {
     // Trạng thái tổng
     // -------------------------------------------------------
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "overall_status", nullable = false, length = 30)
     @Builder.Default
     private ReconcileStatus overallStatus = ReconcileStatus.PENDING;

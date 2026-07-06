@@ -2,6 +2,8 @@ package com.bakery.common.entity;
 
 import com.bakery.common.entity.enums.ProductType;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -26,7 +28,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Product extends BaseEntity {
+public class Product extends BaseAdminEntity {
 
     /** Mã SP từ hệ thống bán hàng. VD: SP022575 */
     @Column(name = "code", nullable = false, unique = true, length = 50)
@@ -36,6 +38,7 @@ public class Product extends BaseEntity {
     private String name;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "product_type", nullable = false, length = 30)
     private ProductType productType;
 
@@ -55,10 +58,27 @@ public class Product extends BaseEntity {
     @Builder.Default
     private Boolean isActive = true;
 
+    // ── Accessories only ─────────────────────────────────────
+    /** Đơn vị mua vào (VD: THUNG_12, HOP_6, KG). NULL với STANDARD/SHEET_CAKE */
+    @Column(name = "purchase_unit", length = 50)
+    private String purchaseUnit;
+
+    /** Số đơn vị bán lẻ trong 1 đơn vị mua (VD: 12 cái/thùng). NULL với STANDARD/SHEET_CAKE */
+    @Column(name = "units_per_purchase", precision = 12, scale = 4)
+    private java.math.BigDecimal unitsPerPurchase;
+
+    /** Đơn vị bán lẻ (VD: CAI, HOP, KG). NULL với STANDARD/SHEET_CAKE */
+    @Column(name = "sell_unit", length = 50)
+    private String sellUnit;
+
     // -------------------------------------------------------
     // Relationships
     // -------------------------------------------------------
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<Recipe> recipes = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<ProductPrice> prices = new ArrayList<>();
 }

@@ -31,7 +31,7 @@ public class MaxPriceCostEngine {
 
     private final RecipeRepository              recipeRepository;
     private final IngredientStockLotRepository  stockLotRepository;
-    private final SemiProductCostRepository     semiProductCostRepository;
+    private final CostCalculationService        costCalculationService;
     private final ProductMappingRepository      productMappingRepository;
 
     /**
@@ -96,13 +96,12 @@ public class MaxPriceCostEngine {
             BigDecimal lineCost;
 
             if (line.getSemiProduct() != null) {
-                // Semi product: dùng semi_product_cost (versioning)
-                lineCost = semiProductCostRepository
-                    .findActiveCost(line.getSemiProduct().getId(), reconDate)
-                    .map(cost -> line.getQuantityGram()
-                        .divide(BigDecimal.valueOf(1000), 10, RoundingMode.HALF_UP)
-                        .multiply(cost.getCostPerKg()))
-                    .orElse(BigDecimal.ZERO);
+                // Semi product: tính cost on-the-fly (semi_product_cost đã bị xóa V15)
+                BigDecimal costPerKg = costCalculationService
+                    .calculateCostPerKg(line.getSemiProduct(), branch);
+                lineCost = line.getQuantityGram()
+                    .divide(BigDecimal.valueOf(1000), 10, RoundingMode.HALF_UP)
+                    .multiply(costPerKg);
 
             } else if (line.getIngredient() != null) {
                 // Ingredient: lấy giá CAO NHẤT lô đang còn trong kho

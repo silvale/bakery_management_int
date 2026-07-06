@@ -46,6 +46,22 @@ public class PurchaseOrderController {
                 .collect(Collectors.toList());
     }
 
+    @GetMapping("/suppliers/{code}")
+    @Operation(summary = "Lấy thông tin nhà cung cấp theo code")
+    public ResponseEntity<Map<String, Object>> getSupplierByCode(@PathVariable String code) {
+        return supplierRepository.findByCode(code)
+                .map(s -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id",      s.getId());
+                    m.put("code",    s.getCode());
+                    m.put("name",    s.getName());
+                    m.put("address", s.getAddress() != null ? s.getAddress() : "");
+                    m.put("phone",   s.getPhone()   != null ? s.getPhone()   : "");
+                    return ResponseEntity.ok(m);
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/suppliers")
     @Operation(summary = "Thêm nhà cung cấp mới")
     public ResponseEntity<Map<String, Object>> createSupplier(
@@ -68,8 +84,52 @@ public class PurchaseOrderController {
 
     // ── Purchase Order ────────────────────────────────────────
 
+    @PostMapping("/orders/receive")
+    @Operation(summary = "Tạo đơn nhập hàng + nhận hàng ngay trong 1 lần")
+    public ResponseEntity<Map<String, Object>> createAndReceive(
+            @RequestBody Map<String, Object> body) {
+
+        List<?> rawIngredients = (List<?>) body.get("ingredients");
+        List<ReceiveLineRequest> lines = rawIngredients.stream().map(obj -> {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> item = (Map<String, Object>) obj;
+            String code = item.containsKey("ingredientCode")
+                          ? item.get("ingredientCode").toString() : null;
+            UUID   id   = (code == null || code.isBlank()) && item.containsKey("ingredientId")
+                          ? UUID.fromString(item.get("ingredientId").toString()) : null;
+            return new ReceiveLineRequest(
+                    id,
+                    code,
+                    item.get("purchaseUnit").toString(),
+                    new BigDecimal(item.get("qtyOrdered").toString()),
+                    new BigDecimal(item.get("qtyReceived").toString()),
+                    new BigDecimal(item.get("unitPrice").toString()),
+                    item.get("expiryDate") != null && !item.get("expiryDate").toString().equals("null")
+                            ? java.time.LocalDate.parse(item.get("expiryDate").toString())
+                            : null,
+                    item.getOrDefault("note", "").toString()
+            );
+        }).collect(Collectors.toList());
+
+        PurchaseOrder order = purchaseOrderService.createAndReceive(
+                new PurchaseOrderService.CreateAndReceiveRequest(
+                        UUID.fromString(body.get("supplierId").toString()),
+                        java.time.LocalDate.parse(body.get("orderDate").toString()),
+                        body.getOrDefault("note", "").toString(),
+                        lines
+                )
+        );
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("id",          order.getId());
+        resp.put("code",        order.getCode());
+        resp.put("totalAmount", order.getTotalAmount());
+        resp.put("status",      "RECEIVED");
+        return ResponseEntity.ok(resp);
+    }
+
     @PostMapping("/orders")
-    @Operation(summary = "Tạo đơn nhập hàng")
+    @Operation(summary = "Tạo đơn nhập hàng (chưa nhận — dùng khi đặt hàng trước)")
     public ResponseEntity<Map<String, Object>> createOrder(
             @RequestBody Map<String, Object> body) {
 
@@ -86,24 +146,30 @@ public class PurchaseOrderController {
     }
 
     @PostMapping("/orders/{orderId}/receive")
-    @Operation(summary = "Xác nhận nhận hàng → tạo lot, cập nhật tồn kho")
+    @Operation(summary = "Xác nhận nhận hàng → tạo lot, cập nhật tồn kho. " +
+                         "Dùng ingredientCode (string) hoặc ingredientId (UUID).")
     public ResponseEntity<Map<String, Object>> receiveOrder(
             @PathVariable UUID orderId,
             @RequestBody List<Map<String, Object>> body) {
 
-        List<ReceiveLineRequest> lines = body.stream().map(item ->
-                new ReceiveLineRequest(
-                        UUID.fromString(item.get("ingredientId").toString()),
-                        item.get("purchaseUnit").toString(),
-                        new BigDecimal(item.get("qtyOrdered").toString()),
-                        new BigDecimal(item.get("qtyReceived").toString()),
-                        new BigDecimal(item.get("unitPrice").toString()),
-                        item.get("expiryDate") != null
-                                ? java.time.LocalDate.parse(item.get("expiryDate").toString())
-                                : null,
-                        item.getOrDefault("note", "").toString()
-                )
-        ).collect(Collectors.toList());
+        List<ReceiveLineRequest> lines = body.stream().map(item -> {
+            String code = item.containsKey("ingredientCode")
+                          ? item.get("ingredientCode").toString() : null;
+            UUID   id   = (code == null || code.isBlank()) && item.containsKey("ingredientId")
+                          ? UUID.fromString(item.get("ingredientId").toString()) : null;
+            return new ReceiveLineRequest(
+                    id,
+                    code,
+                    item.get("purchaseUnit").toString(),
+                    new BigDecimal(item.get("qtyOrdered").toString()),
+                    new BigDecimal(item.get("qtyReceived").toString()),
+                    new BigDecimal(item.get("unitPrice").toString()),
+                    item.get("expiryDate") != null
+                            ? java.time.LocalDate.parse(item.get("expiryDate").toString())
+                            : null,
+                    item.getOrDefault("note", "").toString()
+            );
+        }).collect(Collectors.toList());
 
         purchaseOrderService.receiveOrder(orderId, lines);
 
@@ -149,6 +215,26 @@ public class PurchaseOrderController {
                     m.put("paidAmount",    po.getPaidAmount());
                     m.put("debtAmount",    po.getDebtAmount());
                     m.put("paymentStatus", po.getPaymentStatus().name());
+                    return m;
+                })
+                .collect(Collectors.toList());
+    }
+
+    // ── Nguyên liệu (lookup helper) ───────────────────────────
+
+    @GetMapping("/ingredients")
+    @Operation(summary = "Danh sách nguyên liệu (để lấy code dùng khi nhập kho)")
+    public List<Map<String, Object>> getIngredients(
+            @RequestParam(required = false) String q) {
+        return ingredientRepository.findAllByIsActiveTrue().stream()
+                .filter(i -> q == null || i.getCode().toLowerCase().contains(q.toLowerCase())
+                                       || i.getName().toLowerCase().contains(q.toLowerCase()))
+                .map(i -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id",       i.getId());
+                    m.put("code",     i.getCode());
+                    m.put("name",     i.getName());
+                    m.put("baseUnit", i.getBaseUnit());
                     return m;
                 })
                 .collect(Collectors.toList());

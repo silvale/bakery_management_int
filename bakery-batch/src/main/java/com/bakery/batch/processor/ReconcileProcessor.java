@@ -24,7 +24,7 @@ import java.util.*;
  *   Tầng 3: qtySoldPos (POS) vs qtySoldDerived (BaoCaoNgay kiểm kê)
  *
  * Cost:
- *   cost_per_unit = lookup từ Recipe + IngredientPrice + SemiProductCost
+ *   cost_per_unit = lookup từ Recipe + IngredientPrice (SemiProductCost đã xóa V15)
  *   gross_profit  = revenue - sales_cost - cancelled_cost
  */
 @Slf4j
@@ -40,7 +40,6 @@ public class ReconcileProcessor {
     private final DailyReconcileRepository   dailyReconcileRepository;
     private final RecipeRepository           recipeRepository;
     private final IngredientPriceRepository  ingredientPriceRepository;
-    private final SemiProductCostRepository  semiProductCostRepository;
 
     /**
      * Chạy reconcile cho 1 ngày cụ thể.
@@ -147,7 +146,7 @@ public class ReconcileProcessor {
             ? qtySent.subtract(qtyReceived)
             : null;
         ReconcileStatus delivStatus = transfer != null
-            ? transfer.getStatus()
+            ? ReconcileStatus.valueOf(transfer.getStatus())
             : ReconcileStatus.PENDING;
 
         // === Tầng 3: Bán hàng ===
@@ -248,17 +247,7 @@ public class ReconcileProcessor {
 
             if (line.getSemiProduct() != null) {
                 // Semi product: (gram/1000) * cost_per_kg
-                Optional<SemiProductCost> costOpt = semiProductCostRepository
-                    .findActiveCost(line.getSemiProduct().getId(), reconDate);
 
-                if (costOpt.isPresent()) {
-                    contribution = line.getQuantityGram()
-                        .divide(BigDecimal.valueOf(1000), 10, RoundingMode.HALF_UP)
-                        .multiply(costOpt.get().getCostPerKg());
-                } else {
-                    log.warn("Không tìm thấy cost cho SemiProduct: {} tại ngày {}",
-                        line.getSemiProduct().getCode(), reconDate);
-                }
 
             } else if (line.getIngredient() != null) {
                 // Ingredient: gram * price_per_kg / 1,000,000

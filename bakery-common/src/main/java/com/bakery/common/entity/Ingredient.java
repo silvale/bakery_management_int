@@ -2,6 +2,8 @@ package com.bakery.common.entity;
 
 import com.bakery.common.entity.enums.BaseUnit;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 import lombok.*;
 
 import java.util.ArrayList;
@@ -19,7 +21,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Ingredient extends BaseEntity {
+public class Ingredient extends BaseAdminEntity {
 
     @Column(name = "code", nullable = false, unique = true, length = 50)
     private String code;
@@ -28,22 +30,36 @@ public class Ingredient extends BaseEntity {
     private String name;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "base_unit", nullable = false, length = 20, columnDefinition = "base_unit")
     @Builder.Default
     private BaseUnit baseUnit = BaseUnit.GRAM;
 
-    /**
-     * FK → ingredient_group.code.
-     * Nhóm: BM=Bánh Mì, PL=Phòng Lạnh, SDC=Sử Dụng Chung, HC=Hàng Chợ.
-     * Nullable — cho phép nhập NL trước khi phân nhóm.
-     */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "group_code", referencedColumnName = "code")
-    private IngredientGroup group;
-
     @Column(name = "is_active", nullable = false)
     @Builder.Default
     private Boolean isActive = true;
+
+    /**
+     * Đơn vị đóng gói khi nhập kho. VD: BLOCK, THUNG, BAO.
+     * NULL nếu không có quy ước đóng gói đặc biệt.
+     */
+    @Column(name = "packaging_unit", length = 30)
+    private String packagingUnit;
+
+    /**
+     * Số lượng base_unit trong 1 packaging_unit.
+     * VD: bơ 1 block = 5,000 gram → packaging_qty = 5000.
+     */
+    @Column(name = "packaging_qty", precision = 18, scale = 4)
+    private java.math.BigDecimal packagingQty;
+
+    /**
+     * TRUE = chỉ được xuất kho nguyên block/thùng, không xuất lẻ.
+     * Dùng để validate khi tạo GoodsTransferLine.
+     */
+    @Column(name = "is_whole_unit_only", nullable = false)
+    @Builder.Default
+    private Boolean isWholeUnitOnly = false;
 
     // -------------------------------------------------------
     // Relationships

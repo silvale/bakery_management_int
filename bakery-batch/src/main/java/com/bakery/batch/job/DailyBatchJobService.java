@@ -10,6 +10,7 @@ import com.bakery.common.entity.Branch;
 import com.bakery.common.entity.FileImportLog;
 import com.bakery.common.entity.enums.BatchRunType;
 import com.bakery.common.entity.enums.BatchStatus;
+import com.bakery.common.entity.enums.BranchType;
 import com.bakery.common.entity.enums.FileType;
 import com.bakery.common.repository.BatchRunRepository;
 import com.bakery.common.repository.BranchRepository;
@@ -88,12 +89,10 @@ public class DailyBatchJobService {
         }
 
         // 2. Load branches
-        Branch kitchenBranch = branchRepository.findByIsMainTrue()
-                .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho tổng (is_main=true)"));
-        Branch shopBranch = branchRepository.findAll().stream()
-                .filter(b -> !b.getIsMain())
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Không tìm thấy chi nhánh cửa hàng"));
+        Branch kitchenBranch = branchRepository.findByBranchType(BranchType.KHO_BEP)
+                .orElseThrow(() -> new IllegalStateException("Không tìm thấy Kho Bếp (KHO_BEP)"));
+        Branch shopBranch = branchRepository.findByBranchType(BranchType.SHOP)
+                .orElseThrow(() -> new IllegalStateException("Không tìm thấy chi nhánh cửa hàng (SHOP)"));
 
         boolean hasError = false;
 

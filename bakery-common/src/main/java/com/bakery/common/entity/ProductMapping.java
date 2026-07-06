@@ -17,7 +17,7 @@ import lombok.*;
 @Entity
 @Table(name = "product_mapping")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
-public class ProductMapping extends BaseEntity {
+public class ProductMapping extends BaseAdminEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id", nullable = false)

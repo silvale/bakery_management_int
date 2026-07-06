@@ -3,7 +3,7 @@ package com.bakery.api.service;
 import com.bakery.api.dto.ReconcileResultResponse;
 import com.bakery.api.dto.ReconcileResultResponse.*;
 import com.bakery.batch.dto.*;
-import com.bakery.api.service.ReportExcelService;
+//import com.bakery.api.service.ReportExcelService;
 import com.bakery.batch.processor.DailyImportProcessor;
 import com.bakery.batch.processor.ReconcileProcessor;
 import com.bakery.batch.reader.*;
@@ -11,6 +11,7 @@ import com.bakery.batch.util.ErrorRowCollector;
 import com.bakery.common.entity.*;
 import com.bakery.common.entity.enums.BatchRunType;
 import com.bakery.common.entity.enums.BatchStatus;
+import com.bakery.common.entity.enums.BranchType;
 import com.bakery.common.entity.enums.FileType;
 import com.bakery.common.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -40,7 +41,7 @@ public class BatchApiService {
     private final DailyReconcileRepository   dailyReconcileRepository;
     private final ProductRepository          productRepository;
     private final DailyImportProcessor       importProcessor;
-    private final ReportExcelService          reportExcelService;
+//    private final ReportExcelService          reportExcelService;
     private final ReconcileProcessor         reconcileProcessor;
 
     @Value("${bakery.batch.input-dir:./batch-input}")
@@ -62,12 +63,10 @@ public class BatchApiService {
         log.info("API trigger batch | Ngày: {} | By: {}", processDate, triggeredBy);
 
         // Load branches
-        Branch kitchenBranch = branchRepository.findByIsMainTrue()
-            .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho tổng"));
-        Branch shopBranch = branchRepository.findAll().stream()
-            .filter(b -> !b.getIsMain())
-            .findFirst()
-            .orElseThrow(() -> new IllegalStateException("Không tìm thấy chi nhánh cửa hàng"));
+        Branch kitchenBranch = branchRepository.findByBranchType(BranchType.KHO_BEP)
+            .orElseThrow(() -> new IllegalStateException("Không tìm thấy Kho Bếp (KHO_BEP)"));
+        Branch shopBranch = branchRepository.findByBranchType(BranchType.SHOP)
+            .orElseThrow(() -> new IllegalStateException("Không tìm thấy Cửa hàng (SHOP)"));
 
         // Tạo BatchRun
         boolean isRerun = batchRunRepository
@@ -130,7 +129,7 @@ public class BatchApiService {
         batchRunRepository.save(batchRun);
 
         // Step 6: Auto export Excel
-        autoExportExcel(processDate);
+//        autoExportExcel(processDate);
 
         // Build response
         return buildResponse(batchRun, processDate, shopBranch);
@@ -141,10 +140,8 @@ public class BatchApiService {
     // -------------------------------------------------------
     @Transactional(readOnly = true)
     public ReconcileResultResponse getResult(LocalDate date) {
-        Branch shopBranch = branchRepository.findAll().stream()
-            .filter(b -> !b.getIsMain())
-            .findFirst()
-            .orElseThrow();
+        Branch shopBranch = branchRepository.findByBranchType(BranchType.SHOP)
+            .orElseThrow(() -> new IllegalStateException("Không tìm thấy Cửa hàng (SHOP)"));
 
         BatchRun batchRun = batchRunRepository
             .findLatestByProcessDateAndRunType(date, BatchRunType.MANUAL)
@@ -301,30 +298,30 @@ public class BatchApiService {
     // -------------------------------------------------------
     //  Auto export Excel sau khi reconcile xong
     // -------------------------------------------------------
-    private void autoExportExcel(LocalDate date) {
-        try {
-            // Tạo thư mục output theo ngày: batch-output/2026/04/
-            String dateFolder = date.format(java.time.format.DateTimeFormatter.ofPattern("yyyy/MM"));
-            String filename   = "BaoCaoNgay_" +
-                date.format(java.time.format.DateTimeFormatter.ofPattern("ddMMyyyy")) + ".xlsx";
-
-            Path outputPath = Paths.get(outputDir, dateFolder);
-            Files.createDirectories(outputPath);
-
-            Path filePath = outputPath.resolve(filename);
-
-            byte[] excelBytes = reportExcelService.exportDailyReport(date);
-
-            try (FileOutputStream fos = new FileOutputStream(filePath.toFile())) {
-                fos.write(excelBytes);
-            }
-
-            log.info("✓ Export Excel thành công: {}", filePath.toAbsolutePath());
-
-        } catch (Exception e) {
-            // Không throw — lỗi export không nên dừng toàn bộ batch
-            log.error("✗ Export Excel thất bại: {}", e.getMessage(), e);
-        }
-    }
+//    private void autoExportExcel(LocalDate date) {
+//        try {
+//            // Tạo thư mục output theo ngày: batch-output/2026/04/
+//            String dateFolder = date.format(java.time.format.DateTimeFormatter.ofPattern("yyyy/MM"));
+//            String filename   = "BaoCaoNgay_" +
+//                date.format(java.time.format.DateTimeFormatter.ofPattern("ddMMyyyy")) + ".xlsx";
+//
+//            Path outputPath = Paths.get(outputDir, dateFolder);
+//            Files.createDirectories(outputPath);
+//
+//            Path filePath = outputPath.resolve(filename);
+//
+//            byte[] excelBytes = reportExcelService.exportDailyReport(date);
+//
+//            try (FileOutputStream fos = new FileOutputStream(filePath.toFile())) {
+//                fos.write(excelBytes);
+//            }
+//
+//            log.info("✓ Export Excel thành công: {}", filePath.toAbsolutePath());
+//
+//        } catch (Exception e) {
+//            // Không throw — lỗi export không nên dừng toàn bộ batch
+//            log.error("✗ Export Excel thất bại: {}", e.getMessage(), e);
+//        }
+//    }
 
 }

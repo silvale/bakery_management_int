@@ -31,6 +31,18 @@ public interface RecipeRepository extends JpaRepository<Recipe, UUID> {
 
     Optional<Recipe> findByProductIdAndIsActiveTrue(UUID productId);
 
+    /**
+     * Lấy active recipe kèm lines (JOIN FETCH tránh N+1 trong toResponse()).
+     */
+    @Query("""
+        SELECT r FROM Recipe r
+        LEFT JOIN FETCH r.lines l
+        LEFT JOIN FETCH l.ingredient
+        LEFT JOIN FETCH l.semiProduct
+        WHERE r.product.id = :productId AND r.isActive = true
+        """)
+    Optional<Recipe> findActiveWithLines(@Param("productId") UUID productId);
+
     @Query("SELECT COALESCE(MAX(r.version), 0) FROM Recipe r WHERE r.product.id = :productId")
     int findMaxVersion(@Param("productId") UUID productId);
 }

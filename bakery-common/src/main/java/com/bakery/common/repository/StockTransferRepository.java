@@ -1,7 +1,6 @@
 package com.bakery.common.repository;
 
 import com.bakery.common.entity.StockTransfer;
-import com.bakery.common.entity.enums.ReconcileStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -23,8 +22,16 @@ public interface StockTransferRepository extends JpaRepository<StockTransfer, UU
 
     List<StockTransfer> findAllByToBranchIdAndTransferDate(UUID toBranchId, LocalDate transferDate);
 
-    /** Lấy danh sách chênh lệch chưa giải quyết */
-    List<StockTransfer> findAllByStatusNot(ReconcileStatus status);
+    /** Lấy danh sách theo status (dùng String thay ReconcileStatus) */
+    List<StockTransfer> findAllByStatusNot(String status);
+
+    List<StockTransfer> findAllByStatusOrderByTransferDateDesc(String status);
+
+    List<StockTransfer> findAllByTransferDateOrderByCreatedAtDesc(LocalDate transferDate);
+
+    long countByTransferDate(LocalDate transferDate);
+
+    List<StockTransfer> findAllByTransferDateBetweenOrderByTransferDateDesc(LocalDate from, LocalDate to);
 
     @Query("""
         SELECT st FROM StockTransfer st

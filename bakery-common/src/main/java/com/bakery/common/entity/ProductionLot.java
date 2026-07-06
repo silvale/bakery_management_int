@@ -3,13 +3,14 @@ package com.bakery.common.entity;
 import com.bakery.common.entity.enums.LotCostStatus;
 import com.bakery.common.entity.enums.LotStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * Lô sản xuất bánh — 1 barcode/lô.
@@ -75,6 +76,7 @@ public class ProductionLot extends BaseEntity {
     private BigDecimal costPerUnit = BigDecimal.ZERO;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "cost_status", nullable = false, length = 20)
     @Builder.Default
     private LotCostStatus costStatus = LotCostStatus.CONFIRMED;
@@ -97,11 +99,8 @@ public class ProductionLot extends BaseEntity {
 
     // ── Liên kết ─────────────────────────────────────────────
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "production_order_id")
-    private ProductionOrder productionOrder;
-
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
     private LotStatus status = LotStatus.ACTIVE;

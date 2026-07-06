@@ -3,6 +3,8 @@ package com.bakery.common.entity;
 import com.bakery.common.entity.enums.BatchRunType;
 import com.bakery.common.entity.enums.BatchStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 import lombok.*;
 
 import java.time.LocalDate;
@@ -27,6 +29,7 @@ import java.util.List;
 public class BatchRun extends BaseLogEntity {
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "run_type", nullable = false, length = 30)
     private BatchRunType runType;
 
@@ -39,6 +42,7 @@ public class BatchRun extends BaseLogEntity {
     private Boolean isRerun = false;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "status", nullable = false, length = 30)
     @Builder.Default
     private BatchStatus status = BatchStatus.RUNNING;

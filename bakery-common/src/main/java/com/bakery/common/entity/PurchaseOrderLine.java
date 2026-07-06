@@ -6,19 +6,15 @@ import lombok.*;
 import java.math.BigDecimal;
 
 /**
- * Chi tiết từng nguyên liệu trong đơn nhập hàng.
+ * Chi tiết từng mục trong đơn nhập hàng.
  *
- * qty_in_base_unit: quy đổi về gram/ml qua UnitConversion
- *                   → dùng để cập nhật IngredientStock và tạo StockLot
+ * Mỗi line là INGREDIENT hoặc PRODUCT (accessory) — không thể cả hai.
+ * Constraint chk_pol_item đảm bảo tính toàn vẹn ở DB level.
+ *
+ * qty_in_base_unit: chỉ dùng với INGREDIENT, NULL với PRODUCT.
  */
 @Entity
-@Table(
-    name = "purchase_order_line",
-    uniqueConstraints = @UniqueConstraint(
-        name = "uq_pol_order_ingredient_unit",
-        columnNames = {"purchase_order_id", "ingredient_id", "purchase_unit"}
-    )
-)
+@Table(name = "purchase_order_line")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class PurchaseOrderLine extends BaseEntity {
 
@@ -26,9 +22,15 @@ public class PurchaseOrderLine extends BaseEntity {
     @JoinColumn(name = "purchase_order_id", nullable = false)
     private PurchaseOrder purchaseOrder;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "ingredient_id", nullable = false)
+    /** NULL nếu line này là accessory (product_id sẽ có giá trị) */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "ingredient_id")
     private Ingredient ingredient;
+
+    /** NULL nếu line này là nguyên liệu (ingredient_id sẽ có giá trị) */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "product_id")
+    private Product product;
 
     /** Đơn vị mua: BAO_25KG, THUNG_20L, KG, QUA... */
     @Column(name = "purchase_unit", nullable = false, length = 50)

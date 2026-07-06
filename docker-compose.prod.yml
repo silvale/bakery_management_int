@@ -1,0 +1,71 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: bakery-postgres
+    restart: always
+    environment:
+      POSTGRES_DB:       bakery_db
+      POSTGRES_USER:     bakery
+      POSTGRES_PASSWORD: bakery123
+      PGDATA:            /var/lib/postgresql/data/pgdata
+      TZ:                Asia/Ho_Chi_Minh
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/00_enums.sql:/docker-entrypoint-initdb.d/00_enums.sql:ro
+      - ./db/01_init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./db/02_master_data.sql:/docker-entrypoint-initdb.d/02_master_data.sql:ro
+    networks:
+      - bakery-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bakery -d bakery_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  bakery-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bakery-api:latest
+    container_name: bakery-api
+    restart: always
+    environment:
+      DB_HOST:          postgres
+      DB_PORT:          5432
+      DB_NAME:          bakery_db
+      DB_USER:          bakery
+      DB_PASS:          bakery123
+      API_PORT:         8080
+      BATCH_INPUT_DIR:  /app/batch-input
+      BATCH_OUTPUT_DIR: /app/batch-output
+      TZ:               Asia/Ho_Chi_Minh
+      SPRING_PROFILES_ACTIVE: prod
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./batch-input:/app/batch-input
+      - ./batch-output:/app/batch-output
+      - ./logs:/app/logs
+    networks:
+      - bakery-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  bakery-net:
+    driver: bridge

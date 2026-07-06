@@ -12,15 +12,6 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
-/**
- * Base entity với đầy đủ audit fields.
- * Tất cả entity đều extend class này.
- *
- * Audit fields:
- *   createdBy / createdAt   → Spring Data JPA Auditing tự fill
- *   updatedBy / updatedAt   → Spring Data JPA Auditing tự fill
- *   approvedBy / approvedAt → Business logic tự fill (không auto)
- */
 @Getter
 @Setter
 @MappedSuperclass
@@ -47,11 +38,4 @@ public abstract class BaseEntity {
     @LastModifiedDate
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
-
-    // approved_by / approved_at: không auto, do business logic set
-    @Column(name = "approved_by", length = 100)
-    private String approvedBy;
-
-    @Column(name = "approved_at")
-    private OffsetDateTime approvedAt;
 }

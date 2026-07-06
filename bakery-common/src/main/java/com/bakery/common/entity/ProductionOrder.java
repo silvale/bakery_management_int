@@ -1,7 +1,9 @@
 package com.bakery.common.entity;
 
-import com.bakery.common.entity.enums.ReconcileStatus;
+import com.bakery.common.entity.enums.ProductionOrderStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 import lombok.*;
 
 import java.time.LocalDate;
@@ -36,9 +38,10 @@ public class ProductionOrder extends BaseEntity {
     private LocalDate orderDate;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "status", nullable = false, length = 30)
     @Builder.Default
-    private ReconcileStatus status = ReconcileStatus.PENDING;
+    private ProductionOrderStatus status = ProductionOrderStatus.PENDING;
 
     @Column(name = "source_file", length = 500)
     private String sourceFile;

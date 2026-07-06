@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -21,18 +22,31 @@ public interface ProductionLotRepository extends JpaRepository<ProductionLot, UU
 
     List<ProductionLot> findAllByProductIdAndProductionDate(UUID productId, LocalDate date);
 
-    /** Lô sắp hết hạn trong N ngày — dùng cho danh sách cần hủy */
+    /**
+     * Lô hết hạn HÔM NAY hoặc NGÀY MAI — dùng cho danh sách cần hủy (HuyBanh).
+     *
+     * Điều kiện:
+     *   - expiryDate >= processDate  : chưa hết hạn trước hôm nay (loại bỏ lô cũ chưa đánh EXPIRED)
+     *   - expiryDate <= warningDate  : hết hạn hôm nay hoặc ngày mai (warningDate = processDate + 1)
+     *   - status = ACTIVE            : chưa bị hủy / hết hàng
+     *   - qty_remaining > 0          : còn hàng cần hủy
+     *
+     * Nếu thiếu cận dưới (expiryDate >= processDate), query sẽ kéo vào tất cả lô cũ
+     * từ trước đó vẫn còn ACTIVE (chưa được đánh EXPIRED) → file HuyBanh sai.
+     */
     @Query("""
         SELECT pl FROM ProductionLot pl
         JOIN FETCH pl.product
         WHERE pl.branch.id    = :branchId
           AND pl.status       = 'ACTIVE'
+          AND pl.expiryDate  >= :processDate
           AND pl.expiryDate  <= :warningDate
           AND pl.qtyRemaining > 0
         ORDER BY pl.expiryDate ASC, pl.product.code ASC
         """)
     List<ProductionLot> findExpiringLots(
         @Param("branchId")    UUID branchId,
+        @Param("processDate") LocalDate processDate,
         @Param("warningDate") LocalDate warningDate
     );
 
@@ -90,6 +104,23 @@ public interface ProductionLotRepository extends JpaRepository<ProductionLot, UU
         @Param("productCode")    String productCode,
         @Param("productionDate") LocalDate productionDate,
         @Param("branchId")       UUID branchId
+    );
+
+    /**
+     * Tổng SL sản xuất theo sản phẩm + ngày + chi nhánh.
+     * Dùng để đối chiếu với "Bánh sáng" trong BaoCaoNgay (CK2).
+     */
+    @Query("""
+        SELECT COALESCE(SUM(pl.qtyProduced), 0) FROM ProductionLot pl
+        WHERE pl.product.id     = :productId
+          AND pl.branch.id      = :branchId
+          AND pl.productionDate = :date
+          AND pl.status        != 'CANCELLED'
+        """)
+    BigDecimal sumQtyProducedByProductAndDate(
+        @Param("productId") UUID productId,
+        @Param("branchId")  UUID branchId,
+        @Param("date")      LocalDate date
     );
 
     /** Cập nhật cost sau backdate */

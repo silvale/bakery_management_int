@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
 /**
@@ -55,6 +56,14 @@ public class IngredientStock extends BaseEntity {
     @Column(name = "last_updated", nullable = false)
     @Builder.Default
     private OffsetDateTime lastUpdated = OffsetDateTime.now();
+
+    /**
+     * Ngày kiểm đếm phụ kiện gần nhất tại branch này.
+     * NULL = chưa kiểm lần nào.
+     * Dùng làm period_from khi tính POS sold cho đợt kiểm kế tiếp.
+     */
+    @Column(name = "last_reconcile_date")
+    private LocalDate lastReconcileDate;
 
     // -------------------------------------------------------
     // Helpers

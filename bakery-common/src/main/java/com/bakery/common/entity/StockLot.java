@@ -2,6 +2,8 @@ package com.bakery.common.entity;
 
 import com.bakery.common.entity.enums.StockLotStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -20,7 +22,7 @@ import java.time.LocalDate;
 @Entity
 @Table(name = "stock_lot")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
-public class StockLot extends BaseEntity {
+public class StockLot extends BaseAdminEntity {
 
     /** Barcode tự sinh: LOT-{yyyyMMdd}-{random6} */
     @Column(name = "barcode", nullable = false, unique = true, length = 50)
@@ -76,6 +78,7 @@ public class StockLot extends BaseEntity {
     private BigDecimal issuedQty = BigDecimal.ZERO;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
     private StockLotStatus status = StockLotStatus.AVAILABLE;

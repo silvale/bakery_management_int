@@ -1,6 +1,7 @@
 package com.bakery.api.service;
 
 import com.bakery.common.entity.*;
+import com.bakery.common.entity.enums.BranchType;
 import com.bakery.common.entity.enums.LotStatus;
 import com.bakery.common.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.FileInputStream;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.*;
@@ -34,11 +36,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PosFileProcessorService {
 
-    private final ExCodeDecoderService       exCodeDecoder;
-    private final ProductionLotRepository    productionLotRepository;
-    private final BranchRepository           branchRepository;
+    private final ExCodeDecoderService          exCodeDecoder;
+    private final ProductionLotRepository       productionLotRepository;
+    private final BranchRepository              branchRepository;
     private final ProductExpiryConfigRepository expiryConfigRepository;
-    private final HuyBanhExcelService        huyBanhExcelService;
+    private final PosTransactionRepository      posTransactionRepository;
+    private final ProductRepository             productRepository;
+    private final ProductMappingRepository      productMappingRepository;
 
     // ── Cột trong file POS ────────────────────────────────────
     // Cột trong file POS thực tế (0-indexed):
@@ -66,10 +70,8 @@ public class PosFileProcessorService {
     public ProcessResult process(Path filePath, LocalDate processDate) throws Exception {
         log.info("=== POS Processor | file={} | date={} ===", filePath.getFileName(), processDate);
 
-        Branch shopBranch = branchRepository.findAll().stream()
-            .filter(b -> !b.getIsMain())
-            .findFirst()
-            .orElseThrow(() -> new IllegalStateException("Không tìm thấy chi nhánh cửa hàng"));
+        Branch shopBranch = branchRepository.findByBranchType(BranchType.SHOP)
+            .orElseThrow(() -> new IllegalStateException("Không tìm thấy chi nhánh cửa hàng (SHOP)"));
 
         // 1. Parse file POS
         List<PosRow> rows = parsePosFile(filePath, processDate);
@@ -122,10 +124,11 @@ public class PosFileProcessorService {
             }
         }
 
-        // 4. Xuất HuyBanh
-        Path huyBanhPath = huyBanhExcelService.generate(processDate, shopBranch);
-        log.info("✓ Xuất HuyBanh: {}", huyBanhPath);
+        // 4. Upsert PosTransaction — tổng bán mỗi sản phẩm trong ngày
+        //    (aggregate across all productionDates → 1 row per product per day)
+        upsertPosTransactions(aggMap, shopBranch, processDate, filePath);
 
+        // V12: HuyBanh không còn xuất Excel — xử lý qua InventoryWriteOff UI
         log.info("✓ POS Processor xong | rows={} | updatedLots={} | warnings={}",
             rows.size(), updatedLots, warnings.size());
 
@@ -134,9 +137,62 @@ public class PosFileProcessorService {
             rows.size(),
             aggMap.size(),
             updatedLots,
-            huyBanhPath,
             warnings
         );
+    }
+
+    // ── Upsert PosTransaction ─────────────────────────────────
+
+    /**
+     * Gộp tổng bán theo IN_CODE (bỏ qua productionDate) → upsert vào pos_transaction.
+     * Đây là nguồn dữ liệu "Bán POS" trong TongHop.
+     */
+    private void upsertPosTransactions(Map<String, SalesAgg> aggMap,
+                                        Branch shopBranch,
+                                        LocalDate processDate,
+                                        Path filePath) {
+        // Group by inCode → tổng cộng qtySold + netRevenue
+        Map<String, BigDecimal> soldByCode    = new LinkedHashMap<>();
+        Map<String, BigDecimal> revenueByCode = new LinkedHashMap<>();
+
+        for (SalesAgg agg : aggMap.values()) {
+            soldByCode.merge(agg.inCode(), agg.qtySold(), BigDecimal::add);
+            revenueByCode.merge(agg.inCode(), agg.netRevenue(), BigDecimal::add);
+        }
+
+        for (Map.Entry<String, BigDecimal> entry : soldByCode.entrySet()) {
+            String     inCode     = entry.getKey();
+            BigDecimal qtySold    = entry.getValue();
+            BigDecimal revenue    = revenueByCode.getOrDefault(inCode, BigDecimal.ZERO);
+            BigDecimal unitPrice  = qtySold.compareTo(BigDecimal.ZERO) > 0
+                ? revenue.divide(qtySold, 4, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+
+            productRepository.findByCode(inCode).ifPresentOrElse(product -> {
+                posTransactionRepository
+                    .findByBranchIdAndProductIdAndTransactionDate(
+                        shopBranch.getId(), product.getId(), processDate)
+                    .ifPresentOrElse(tx -> {
+                        tx.setQtySold(qtySold);
+                        tx.setUnitPrice(unitPrice);
+                        tx.setRevenue(revenue);
+                        posTransactionRepository.save(tx);
+                    }, () -> posTransactionRepository.save(
+                        PosTransaction.builder()
+                            .branch(shopBranch)
+                            .product(product)
+                            .transactionDate(processDate)
+                            .qtySold(qtySold)
+                            .unitPrice(unitPrice)
+                            .revenue(revenue)
+                            .sourceFile(filePath.getFileName().toString())
+                            .build()
+                    ));
+                log.debug("  PosTransaction upsert: {} qtySold={}", inCode, qtySold);
+            }, () -> log.warn("  PosTransaction: không tìm thấy product code={}", inCode));
+        }
+
+        log.info("✓ Upsert PosTransaction: {} sản phẩm", soldByCode.size());
     }
 
     // ── Parse POS Excel ───────────────────────────────────────
@@ -149,48 +205,69 @@ public class PosFileProcessorService {
 
             Sheet sheet = wb.getSheetAt(0);
 
-            // Tìm header row (có chứa "Mã hàng" hoặc "Mã" ở cột 0)
             int dataStartRow = findDataStartRow(sheet);
             if (dataStartRow < 0) {
                 log.warn("Không tìm thấy header trong file POS: {}", filePath);
                 return rows;
             }
 
+            int skipped = 0;
+            List<String> skippedSkus = new ArrayList<>();
             for (int i = dataStartRow; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) continue;
 
                 String maHang = getCellString(row, COL_MA_HANG);
                 if (maHang == null || maHang.isBlank()) continue;
-
-                // Bỏ qua dòng summary (SL mặt hàng: X)
                 if (maHang.startsWith("SL") || maHang.startsWith("Tổng")) continue;
 
                 BigDecimal slBan = getCellDecimal(row, COL_SL_BAN);
-                BigDecimal doanhThu = getCellDecimal(row, COL_DOANH_THU);
-                BigDecimal slTra = getCellDecimal(row, COL_SL_TRA);
-                BigDecimal giaTriTra = getCellDecimal(row, COL_GT_TRA);
-                BigDecimal dtThuan = getCellDecimal(row, COL_DT_THUAN);
-
                 if (slBan == null || slBan.compareTo(BigDecimal.ZERO) <= 0) continue;
 
-                // Decode EX_CODE
-                ExCodeDecoderService.DecodeResult decoded = exCodeDecoder.decode(maHang, processDate);
-                if (decoded == null) {
-                    log.warn("  Row {}: Không decode được EX_CODE '{}'", i + 1, maHang);
+                // 1. Tìm sản phẩm qua product_mapping (exact SKU → IN_CODE)
+                Optional<ProductMapping> mappingOpt =
+                    productMappingRepository.findWithProductBySkuCode(maHang);
+
+                if (mappingOpt.isEmpty()) {
+                    log.warn("  Row {}: SKU '{}' không có trong product_mapping → bỏ qua (thêm mapping nếu thiếu)", i + 1, maHang);
+                    skipped++;
+                    skippedSkus.add(maHang);
                     continue;
                 }
+                Product product = mappingOpt.get().getProduct();
+
+                // 2. Lấy productionDate từ ExCodeDecoder (dùng cho FIFO lot)
+                //    Nếu decode thất bại (SP..., format lạ) → fallback về processDate
+                LocalDate productionDate;
+                ExCodeDecoderService.DecodeResult decoded = exCodeDecoder.decode(maHang, processDate);
+                if (decoded != null) {
+                    productionDate = decoded.productionDate();
+                } else {
+                    productionDate = processDate;
+                    log.debug("  Row {}: Không decode được ngày SX cho '{}' → dùng processDate", i + 1, maHang);
+                }
+
+                BigDecimal doanhThu  = getCellDecimal(row, COL_DOANH_THU);
+                BigDecimal slTra     = getCellDecimal(row, COL_SL_TRA);
+                BigDecimal giaTriTra = getCellDecimal(row, COL_GT_TRA);
+                BigDecimal dtThuan   = getCellDecimal(row, COL_DT_THUAN);
 
                 rows.add(new PosRow(
                     maHang,
                     getCellString(row, COL_TEN_HANG),
-                    decoded,
+                    product,
+                    productionDate,
                     slBan,
-                    doanhThu != null ? doanhThu : BigDecimal.ZERO,
-                    slTra != null ? slTra : BigDecimal.ZERO,
-                    giaTriTra != null ? giaTriTra : BigDecimal.ZERO,
-                    dtThuan != null ? dtThuan : BigDecimal.ZERO
+                    doanhThu   != null ? doanhThu   : BigDecimal.ZERO,
+                    slTra      != null ? slTra      : BigDecimal.ZERO,
+                    giaTriTra  != null ? giaTriTra  : BigDecimal.ZERO,
+                    dtThuan    != null ? dtThuan    : BigDecimal.ZERO
                 ));
+            }
+
+            if (skipped > 0) {
+                log.warn("  POS parse: {} dòng bỏ qua vì SKU chưa có trong product_mapping: {}",
+                    skipped, skippedSkus);
             }
         }
 
@@ -226,8 +303,8 @@ public class PosFileProcessorService {
         Map<String, SalesAgg> map = new LinkedHashMap<>();
 
         for (PosRow row : rows) {
-            String inCode = row.decoded().product().getCode();
-            LocalDate prodDate = row.decoded().productionDate();
+            String inCode = row.product().getCode();       // từ product_mapping
+            LocalDate prodDate = row.productionDate();     // từ ExCodeDecoder / processDate
             String key = inCode + "_" + prodDate;
 
             SalesAgg existing = map.get(key);
@@ -281,9 +358,10 @@ public class PosFileProcessorService {
     // ── Records ───────────────────────────────────────────────
 
     private record PosRow(
-        String                            exCode,
-        String                            tenHang,
-        ExCodeDecoderService.DecodeResult decoded,
+        String     exCode,
+        String     tenHang,
+        Product    product,        // từ product_mapping
+        LocalDate  productionDate, // từ ExCodeDecoder hoặc processDate
         BigDecimal                        slBan,
         BigDecimal                        doanhThu,
         BigDecimal                        slTra,
@@ -305,7 +383,6 @@ public class PosFileProcessorService {
         int          rowsParsed,
         int          distinctProducts,
         int          lotsUpdated,
-        Path         huyBanhFile,
         List<String> warnings
     ) {
         public boolean hasWarnings() { return !warnings.isEmpty(); }

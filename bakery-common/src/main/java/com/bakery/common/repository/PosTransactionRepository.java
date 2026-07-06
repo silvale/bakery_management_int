@@ -48,4 +48,28 @@ public interface PosTransactionRepository extends JpaRepository<PosTransaction, 
         @Param("branchId") UUID branchId,
         @Param("date")     LocalDate date
     );
+
+    /**
+     * Tổng số lượng bán (qtySold) của 1 sản phẩm trong khoảng thời gian.
+     * Dùng để tính POS sold trong kỳ kiểm đếm phụ kiện.
+     *
+     * @param productCode  product.code (= ingredient.code cho ACC-*)
+     * @param branchId     branch cửa hàng
+     * @param fromDate     exclusive — thường = last_reconcile_date (truyền LocalDate.MIN nếu lần đầu)
+     * @param toDate       inclusive — thường = stocktake_date
+     */
+    @Query("""
+        SELECT COALESCE(SUM(pt.qtySold), 0)
+        FROM PosTransaction pt
+        WHERE pt.product.code   = :productCode
+          AND pt.branch.id      = :branchId
+          AND pt.transactionDate > :fromDate
+          AND pt.transactionDate <= :toDate
+        """)
+    java.math.BigDecimal sumQtySoldByProductCodeAndBranchAndPeriod(
+        @Param("productCode") String    productCode,
+        @Param("branchId")    UUID      branchId,
+        @Param("fromDate")    LocalDate fromDate,
+        @Param("toDate")      LocalDate toDate
+    );
 }

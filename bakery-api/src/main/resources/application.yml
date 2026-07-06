@@ -31,7 +31,7 @@ spring:
         default_schema: public
 
   flyway:
-    enabled: false
+    enabled: true
 
 # ── Server ──────────────────────────────────────────────────
 # Không dùng context-path → call thẳng: POST localhost:8080/batch/run
@@ -44,6 +44,10 @@ bakery:
     input-dir: ${BATCH_INPUT_DIR:./batch-input}
     output-dir: ${BATCH_OUTPUT_DIR:./batch-output}
     # File Excel sẽ được lưu vào: batch-output/{yyyy}/{MM}/BaoCaoNgay_{ddMMyyyy}.xlsx
+  jwt:
+    secret: ${JWT_SECRET:bakery-jwt-secret-key-must-be-at-least-256-bits-long-for-hs256!!}
+    access-token-expiry-minutes: ${JWT_ACCESS_EXPIRY_MINUTES:60}
+    refresh-token-expiry-days: ${JWT_REFRESH_EXPIRY_DAYS:30}
 
 # ── SpringDoc / Swagger UI ───────────────────────────────────
 springdoc:

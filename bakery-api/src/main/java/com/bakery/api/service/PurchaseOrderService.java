@@ -21,13 +21,14 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PurchaseOrderService {
 
-    private final SupplierRepository         supplierRepository;
-    private final PurchaseOrderRepository    purchaseOrderRepository;
-    private final IngredientRepository       ingredientRepository;
-    private final UnitConversionRepository   unitConversionRepository;
-    private final StockLotRepository         stockLotRepository;
-    private final IngredientStockRepository  ingredientStockRepository;
-    private final BranchRepository           branchRepository;
+    private final SupplierRepository             supplierRepository;
+    private final PurchaseOrderRepository        purchaseOrderRepository;
+    private final PurchaseOrderLineRepository    purchaseOrderLineRepository;
+    private final IngredientRepository           ingredientRepository;
+    private final UnitConversionRepository       unitConversionRepository;
+    private final StockLotRepository             stockLotRepository;
+    private final IngredientStockRepository      ingredientStockRepository;
+    private final BranchRepository               branchRepository;
 
     // -------------------------------------------------------
     //  Tạo đơn nhập hàng mới
@@ -69,8 +70,12 @@ public class PurchaseOrderService {
         BigDecimal total = BigDecimal.ZERO;
 
         for (ReceiveLineRequest lineReq : lines) {
-            Ingredient ingredient = ingredientRepository.findById(lineReq.ingredientId())
-                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy NL: " + lineReq.ingredientId()));
+            // Hỗ trợ cả ingredientCode (string) và ingredientId (UUID)
+            Ingredient ingredient = (lineReq.ingredientCode() != null && !lineReq.ingredientCode().isBlank())
+                ? ingredientRepository.findByCode(lineReq.ingredientCode())
+                    .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy NL: " + lineReq.ingredientCode()))
+                : ingredientRepository.findById(lineReq.ingredientId())
+                    .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy NL: " + lineReq.ingredientId()));
 
             // Tính qty_in_base_unit qua UnitConversion
             UnitConversion conversion = unitConversionRepository
@@ -85,7 +90,7 @@ public class PurchaseOrderService {
             BigDecimal pricePerBase = lineReq.unitPrice()
                 .divide(conversion.getBaseQuantity(), 6, RoundingMode.HALF_UP);
 
-            // Tạo PurchaseOrderLine
+            // Tạo và save PurchaseOrderLine trước (StockLot cần FK hợp lệ)
             PurchaseOrderLine line = PurchaseOrderLine.builder()
                 .purchaseOrder(order)
                 .ingredient(ingredient)
@@ -97,6 +102,7 @@ public class PurchaseOrderService {
                 .note(lineReq.note())
                 .build();
 
+            purchaseOrderLineRepository.save(line); // phải save trước khi StockLot tham chiếu
             order.getLines().add(line);
             total = total.add(lineReq.qtyReceived().multiply(lineReq.unitPrice()));
 
@@ -203,7 +209,8 @@ public class PurchaseOrderService {
     ) {}
 
     public record ReceiveLineRequest(
-        UUID       ingredientId,
+        UUID       ingredientId,    // tuỳ chọn — dùng khi có UUID
+        String     ingredientCode,  // tuỳ chọn — dùng thay ingredientId cho dễ test
         String     purchaseUnit,
         BigDecimal qtyOrdered,
         BigDecimal qtyReceived,
@@ -211,4 +218,21 @@ public class PurchaseOrderService {
         LocalDate  expiryDate,
         String     note
     ) {}
+
+    /** Tạo PO + nhận hàng trong 1 lần — dùng khi hàng đến ngay */
+    public record CreateAndReceiveRequest(
+        UUID                   supplierId,
+        LocalDate              orderDate,
+        String                 note,
+        List<ReceiveLineRequest> ingredients
+    ) {}
+
+    @Transactional
+    public PurchaseOrder createAndReceive(CreateAndReceiveRequest req) {
+        PurchaseOrder order = createOrder(new CreateOrderRequest(
+            req.supplierId(), req.orderDate(), req.note()
+        ));
+        receiveOrder(order.getId(), req.ingredients());
+        return purchaseOrderRepository.findById(order.getId()).orElseThrow();
+    }
 }

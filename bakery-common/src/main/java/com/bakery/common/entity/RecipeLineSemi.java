@@ -31,7 +31,7 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class RecipeLineSemi extends BaseEntity {
+public class RecipeLineSemi extends BaseAdminEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "semi_product_id", nullable = false)

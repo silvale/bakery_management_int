@@ -2,6 +2,8 @@ package com.bakery.common.entity;
 
 import com.bakery.common.entity.enums.SemiProductType;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -18,7 +20,7 @@ import java.util.List;
  *   VD: Bột Viên Trắng → 14.201 kg phôi/mẻ
  *       Nhân Xá Xíu   → 1.054 kg nhân/mẻ
  *
- * cost_per_kg KHÔNG lưu ở đây → xem SemiProductCost (có version).
+ * cost_per_kg tính on-the-fly qua CostCalculationService (semi_product_cost đã bị xóa V15).
  */
 @Entity
 @Table(name = "semi_product")
@@ -27,7 +29,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class SemiProduct extends BaseEntity {
+public class SemiProduct extends BaseAdminEntity {
 
     @Column(name = "code", nullable = false, unique = true, length = 50)
     private String code;
@@ -36,6 +38,7 @@ public class SemiProduct extends BaseEntity {
     private String name;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "type", nullable = false, length = 20)
     private SemiProductType type;
 
@@ -57,7 +60,4 @@ public class SemiProduct extends BaseEntity {
     @Builder.Default
     private List<RecipeLineSemi> recipeLines = new ArrayList<>();
 
-    @OneToMany(mappedBy = "semiProduct", cascade = CascadeType.ALL, orphanRemoval = true)
-    @Builder.Default
-    private List<SemiProductCost> costs = new ArrayList<>();
 }

@@ -6,7 +6,7 @@ import lombok.*;
 @Entity
 @Table(name = "supplier")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
-public class Supplier extends BaseEntity {
+public class Supplier extends BaseAdminEntity {
 
     @Column(name = "code", nullable = false, unique = true, length = 20)
     private String code;

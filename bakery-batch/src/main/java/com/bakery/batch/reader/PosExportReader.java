@@ -86,8 +86,8 @@ public class PosExportReader {
                         row.getCell(COL_PRODUCT_CODE)
                     );
 
-                    // Chỉ lấy dòng có Mã SP hợp lệ
-                    if (productCode == null || !productCode.toUpperCase().startsWith("SP")) {
+                    // Bỏ qua dòng không có mã hàng
+                    if (productCode == null || productCode.isBlank()) {
                         continue;
                     }
 

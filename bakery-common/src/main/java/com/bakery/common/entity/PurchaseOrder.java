@@ -2,6 +2,8 @@ package com.bakery.common.entity;
 
 import com.bakery.common.entity.enums.PaymentStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -19,7 +21,7 @@ import java.util.List;
 @Entity
 @Table(name = "purchase_order")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
-public class PurchaseOrder extends BaseEntity {
+public class PurchaseOrder extends BaseAdminEntity {
 
     /** Mã đơn tự sinh: PO-{yyyyMMdd}-{seq} */
     @Column(name = "code", nullable = false, unique = true, length = 30)
@@ -50,6 +52,7 @@ public class PurchaseOrder extends BaseEntity {
     private BigDecimal paidAmount = BigDecimal.ZERO;
 
     @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "payment_status", nullable = false, length = 20)
     @Builder.Default
     private PaymentStatus paymentStatus = PaymentStatus.UNPAID;

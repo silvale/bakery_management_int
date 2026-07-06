@@ -37,7 +37,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Recipe extends BaseEntity {
+public class Recipe extends BaseAdminEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id", nullable = false)
@@ -56,6 +56,23 @@ public class Recipe extends BaseEntity {
 
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
+
+    /**
+     * TRUE nếu đây là công thức tùy chỉnh cho 1 đơn khách hàng cụ thể.
+     * Custom recipe được clone từ recipe gốc, không thay đổi recipe gốc.
+     */
+    @Column(name = "is_custom", nullable = false)
+    @Builder.Default
+    private Boolean isCustom = false;
+
+    /** Trỏ về recipe gốc được clone ra (chỉ có khi is_custom = TRUE) */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_recipe_id")
+    private Recipe parentRecipe;
+
+    /** Lý do tùy chỉnh — ghi rõ khách yêu cầu gì khác (chỉ khi is_custom = TRUE) */
+    @Column(name = "reason", columnDefinition = "TEXT")
+    private String reason;
 
     /**
      * BASE: công thức gốc (phôi + nhân chính).

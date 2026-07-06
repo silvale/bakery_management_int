@@ -3,18 +3,12 @@ package com.bakery.api.controller;
 import com.bakery.api.dto.BatchRunRequest;
 import com.bakery.api.dto.ReconcileResultResponse;
 import com.bakery.api.service.BatchApiService;
-import com.bakery.api.service.BaoCaoNgayProcessorService;
 import com.bakery.api.service.PosFileProcessorService;
-import com.bakery.api.service.PosFileWatcherService;
-import com.bakery.api.service.ReportExcelService;
-import com.bakery.api.service.ReportFileWatcherService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -31,54 +25,36 @@ import java.util.Map;
 @Tag(name = "Batch", description = "Đọc file Excel và đối chiếu dữ liệu")
 public class BatchController {
 
-    private final BatchApiService         batchApiService;
-    private final ReportExcelService      reportExcelService;
-    private final PosFileWatcherService   posFileWatcherService;
-    private final ReportFileWatcherService reportFileWatcherService;
+    private final BatchApiService        batchApiService;
+    private final PosFileProcessorService posFileProcessorService;
 
     /**
      * POST /batch/run
-     * Đọc 4 file Excel → import DB → reconcile → trả kết quả ngay.
-     *
-     * Body (optional):
-     * {
-     *   "processDate": "2026-04-08",
-     *   "triggeredBy": "admin"
-     * }
      */
     @PostMapping("/run")
-    @Operation(summary = "Chạy batch: đọc 4 file và reconcile",
-               description = "Đọc BanhRaNgay, XuatRa, BaoCaoNgay, BigProductBySaleByCat → lưu DB → trả kết quả đối chiếu")
+    @Operation(summary = "Chạy batch: đọc file và reconcile")
     public ResponseEntity<ReconcileResultResponse> run(
             @RequestBody(required = false) BatchRunRequest request) {
 
         LocalDate processDate = (request != null && request.getProcessDate() != null)
-            ? request.getProcessDate()
-            : LocalDate.now();
-
+            ? request.getProcessDate() : LocalDate.now();
         String triggeredBy = (request != null && request.getTriggeredBy() != null)
-            ? request.getTriggeredBy()
-            : "MANUAL";
+            ? request.getTriggeredBy() : "MANUAL";
 
         log.info("POST /batch/run | date={} by={}", processDate, triggeredBy);
-
-        ReconcileResultResponse result = batchApiService.runAndReconcile(processDate, triggeredBy);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(batchApiService.runAndReconcile(processDate, triggeredBy));
     }
 
     /**
      * GET /batch/result?date=2026-04-08
-     * Lấy kết quả reconcile đã có trong DB (không chạy lại).
      */
     @GetMapping("/result")
-    @Operation(summary = "Xem kết quả reconcile",
-               description = "Lấy kết quả đối chiếu đã lưu trong DB theo ngày")
+    @Operation(summary = "Xem kết quả reconcile theo ngày")
     public ResponseEntity<ReconcileResultResponse> getResult(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
 
         log.info("GET /batch/result | date={}", date);
-        ReconcileResultResponse result = batchApiService.getResult(date);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(batchApiService.getResult(date));
     }
 
     /**
@@ -87,7 +63,7 @@ public class BatchController {
      */
     @PostMapping("/pos/upload")
     @Operation(summary = "Upload file POS thủ công",
-               description = "Upload file POS Excel → decode EX_CODE → cập nhật qtySold → xuất HuyBanh")
+               description = "Upload file POS Excel → decode EX_CODE → cập nhật qtySold")
     public ResponseEntity<Map<String, Object>> uploadPos(
             @RequestParam("file") MultipartFile file,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
@@ -100,23 +76,16 @@ public class BatchController {
             file.transferTo(tmp.toFile());
 
             PosFileProcessorService.ProcessResult result =
-                posFileWatcherService.processManual(tmp, processDate);
+                posFileProcessorService.process(tmp, processDate);
 
             Files.deleteIfExists(tmp);
 
-            if (result == null) {
-                return ResponseEntity.ok(Map.of(
-                    "status", "SKIPPED",
-                    "message", "File đã được xử lý trước đó (MD5 trùng)"
-                ));
-            }
-
             return ResponseEntity.ok(Map.of(
-                "status", "OK",
-                "rowsParsed", result.rowsParsed(),
-                "lotsUpdated", result.lotsUpdated(),
-                "warnings", result.warnings(),
-                "huyBanhFile", result.huyBanhFile().getFileName().toString()
+                "status",           "OK",
+                "rowsParsed",       result.rowsParsed(),
+                "distinctProducts", result.distinctProducts(),
+                "lotsUpdated",      result.lotsUpdated(),
+                "warnings",         result.warnings()
             ));
 
         } catch (Exception e) {
@@ -127,82 +96,57 @@ public class BatchController {
     }
 
     /**
-     * POST /batch/report/upload?date=2026-05-29
-     * Upload file BaoCaoNgay thủ công → xử lý ngay.
+     * POST /batch/report/upload — V12: deprecated, dùng UI thay thế
      */
     @PostMapping("/report/upload")
-    @Operation(summary = "Upload file BaoCaoNgay thủ công",
-               description = "Upload file BaoCaoNgay Excel → đối chiếu → xuất TongHop + BanhRaNgay")
+    @Operation(summary = "[Deprecated V12] Upload BaoCaoNgay — dùng UI thay thế")
     public ResponseEntity<Map<String, Object>> uploadReport(
             @RequestParam("file") MultipartFile file,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-
-        LocalDate processDate = date != null ? date : LocalDate.now();
-        log.info("POST /batch/report/upload | date={} | file={}", processDate, file.getOriginalFilename());
-
-        try {
-            Path tmp = Files.createTempFile("report_", ".xlsx");
-            file.transferTo(tmp.toFile());
-
-            BaoCaoNgayProcessorService.ProcessResult result =
-                reportFileWatcherService.processManual(tmp, processDate);
-
-            Files.deleteIfExists(tmp);
-
-            if (result == null) {
-                return ResponseEntity.ok(Map.of(
-                    "status", "SKIPPED",
-                    "message", "File đã được xử lý trước đó (MD5 trùng)"
-                ));
-            }
-
-            return ResponseEntity.ok(Map.of(
-                "status", "OK",
-                "rowsProcessed", result.rowsProcessed(),
-                "discrepancyCount", result.discrepancyCount(),
-                "tongHopFile", result.tongHopFile().getFileName().toString(),
-                "banhRaNgayFile", result.banhRaNgayFile().getFileName().toString()
-            ));
-
-        } catch (Exception e) {
-            log.error("Upload BaoCaoNgay thất bại: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError()
-                .body(Map.of("status", "ERROR", "message", e.getMessage()));
-        }
+        return ResponseEntity.status(410).body(Map.of(
+            "status", "DEPRECATED",
+            "message", "V12: BaoCaoNgay không còn upload file. Dùng UI ProductionPlan/StockTransfer."
+        ));
     }
 
     /**
-     * GET /batch/export?date=2026-04-08
-     * Export báo cáo ngày ra file Excel.
-     * Highlight đỏ các dòng có lỗi.
+     * POST /batch/bepxuat/upload — V12: deprecated, dùng ProductionRequest UI
+     */
+    @PostMapping("/bepxuat/upload")
+    @Operation(summary = "[Deprecated V12] Upload BanhRaNgay bếp — dùng UI thay thế")
+    public ResponseEntity<Map<String, Object>> uploadBepXuat(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ResponseEntity.status(410).body(Map.of(
+            "status", "DEPRECATED",
+            "message", "V12: Bếp khai báo sản xuất qua ProductionRequest UI."
+        ));
+    }
+
+    /**
+     * POST /batch/opening-stock/upload — V12: deprecated
+     */
+    @PostMapping("/opening-stock/upload")
+    @Operation(summary = "[Deprecated V12] Import tồn kho ban đầu — dùng UI thay thế")
+    public ResponseEntity<Map<String, Object>> uploadOpeningStock(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ResponseEntity.status(410).body(Map.of(
+            "status", "DEPRECATED",
+            "message", "V12: Nhập tồn kho ban đầu qua InventoryAdjustment UI."
+        ));
+    }
+
+    /**
+     * GET /batch/export — V12: deprecated
      */
     @GetMapping("/export")
-    @Operation(summary = "Export báo cáo ngày ra Excel",
-               description = "Xuất file Excel với highlight đỏ các dòng có chênh lệch")
-    public ResponseEntity<byte[]> exportExcel(
+    @Operation(summary = "[Deprecated V12] Export báo cáo Excel — dùng UI thay thế")
+    public ResponseEntity<Map<String, Object>> exportExcel(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-
-        log.info("GET /batch/export | date={}", date);
-
-        try {
-            byte[] excelBytes = reportExcelService.exportDailyReport(date);
-
-            String filename = "BaoCaoNgay_" +
-                date.format(java.time.format.DateTimeFormatter.ofPattern("ddMMyyyy")) + ".xlsx";
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.parseMediaType(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
-            headers.setContentDispositionFormData("attachment", filename);
-            headers.setContentLength(excelBytes.length);
-
-            return ResponseEntity.ok()
-                .headers(headers)
-                .body(excelBytes);
-
-        } catch (Exception e) {
-            log.error("Export Excel thất bại: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError().build();
-        }
+        return ResponseEntity.status(410).body(Map.of(
+            "status", "DEPRECATED",
+            "message", "V12: Báo cáo xem trực tiếp trên UI, không còn xuất Excel."
+        ));
     }
 }
