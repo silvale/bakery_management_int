@@ -30,9 +30,8 @@
          MODULES
          ===================================================== -->
     <modules>
-        <module>bakery-common</module>
-        <module>bakery-batch</module>
         <module>bakery-api</module>
+        <!-- bakery-common and bakery-batch merged into bakery-api (single-module) -->
     </modules>
 
     <!-- =====================================================
@@ -59,18 +58,6 @@
          ===================================================== -->
     <dependencyManagement>
         <dependencies>
-
-            <!-- Internal modules -->
-            <dependency>
-                <groupId>com.bakery</groupId>
-                <artifactId>bakery-common</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.bakery</groupId>
-                <artifactId>bakery-batch</artifactId>
-                <version>${project.version}</version>
-            </dependency>
 
             <!-- MapStruct -->
             <dependency>

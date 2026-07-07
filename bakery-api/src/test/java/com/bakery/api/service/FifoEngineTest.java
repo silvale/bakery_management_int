@@ -1,8 +1,8 @@
 package com.bakery.api.service;
 
-import com.bakery.common.entity.*;
-import com.bakery.common.entity.enums.*;
-import com.bakery.common.repository.*;
+import com.bakery.api.framework.*;
+import com.bakery.api.framework.enums.*;
+import com.bakery.api.framework.repositories.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
