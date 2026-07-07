@@ -130,18 +130,20 @@ public class TransactionController {
             @AuthenticationPrincipal UserDetails actor) {
 
         String actorName = actor != null ? actor.getUsername() : "system";
-        InventoryTransaction tx = switch (type) {
+        // approve() đóng transaction của nó → entity trả về đã detach, lazy proxy không còn session.
+        // Gọi getById() để fetch lại entity sạch trong transaction mới (readOnly).
+        switch (type) {
             case IMPORT     -> importService.approve(id, actorName);
             case TRANSFER   -> transferService.approve(id, actorName);
             case ADJUSTMENT -> adjustmentService.approve(id, actorName);
             default -> throw new IllegalArgumentException("TransactionType không được hỗ trợ: " + type);
-        };
+        }
 
         return ResponseEntity.ok(switch (type) {
-            case IMPORT     -> importService.toResponse(tx);
-            case TRANSFER   -> transferService.toResponse(tx);
-            case ADJUSTMENT -> adjustmentService.toResponse(tx);
-            default -> tx;
+            case IMPORT     -> importService.getById(id);
+            case TRANSFER   -> transferService.getById(id);
+            case ADJUSTMENT -> adjustmentService.getById(id);
+            default -> throw new IllegalArgumentException("TransactionType không được hỗ trợ: " + type);
         });
     }
 
