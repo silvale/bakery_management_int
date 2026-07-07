@@ -17,7 +17,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Branch extends BaseAdminEntity {
+public class Branch extends BaseEntity {
 
     @Column(name = "code", nullable = false, unique = true, length = 20)
     private String code;

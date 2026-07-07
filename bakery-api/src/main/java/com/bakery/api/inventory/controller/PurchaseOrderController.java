@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   POST /api/v1/purchase-orders/{id}/approve — duyệt (1 bước: PENDING→ACTIVE)
  *   POST /api/v1/purchase-orders/{id}/reject  — từ chối
  */
-@RestController
+@RestController("inventoryPurchaseOrderController")
 @RequestMapping("/api/v1/purchase-orders")
 @Tag(name = "Purchase Orders", description = "Quản lý phiếu nhập kho nguyên liệu / hàng hóa")
 public class PurchaseOrderController extends TransactionBaseResource<ImportRequest, ImportResponse> {

@@ -112,6 +112,20 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ---------------------------------------------------------------------------
+-- LEGACY / V1 COMPATIBILITY
+-- ---------------------------------------------------------------------------
+
+-- Used in stock_lot.status
+DO $$ BEGIN
+    CREATE TYPE stock_lot_status AS ENUM ('AVAILABLE', 'DEPLETED', 'EXPIRED');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Used in daily_reconcile (3-layer reconciliation — V1 batch)
+DO $$ BEGIN
+    CREATE TYPE reconcile_status AS ENUM ('PENDING', 'OK', 'OVER', 'UNDER', 'DISCREPANCY');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ---------------------------------------------------------------------------
 -- PRODUCTION REQUEST
 -- ---------------------------------------------------------------------------
 
