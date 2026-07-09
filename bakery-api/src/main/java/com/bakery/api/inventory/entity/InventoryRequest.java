@@ -1,11 +1,14 @@
 package com.bakery.api.inventory.entity;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.entity.Warehouse;
 import com.bakery.framework.entity.BaseEntity;
 import com.bakery.framework.entity.InventoryRequestType;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -13,6 +16,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
@@ -64,4 +69,12 @@ public class InventoryRequest extends BaseEntity {
 
     @Column(name = "note", length = 500)
     private String note;
+
+    /**
+     * Lines của phiếu. Cascade ALL + orphanRemoval cho phép save toàn bộ graph
+     * chỉ qua repository.save(inventoryRequest).
+     */
+    @OneToMany(mappedBy = "inventoryRequest", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @OrderBy("sortOrder ASC")
+    private List<InventoryRequestLine> lines = new ArrayList<>();
 }

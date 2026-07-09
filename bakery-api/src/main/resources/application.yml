@@ -115,6 +115,7 @@ admin:
 bakery:
   security:
     jwt:
+      disable-auth: true
       secret-key: ${JWT_SECRET_KEY:changeme-please-use-a-32-char-min-key}
       access-token-expire-ms: ${JWT_ACCESS_EXPIRE_MS:3600000}
       refresh-token-expire-ms: ${JWT_REFRESH_EXPIRE_MS:604800000}

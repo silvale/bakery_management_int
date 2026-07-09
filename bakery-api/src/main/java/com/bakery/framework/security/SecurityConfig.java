@@ -34,15 +34,28 @@ public class SecurityConfig {
         "/api/v1/auth/**", "/actuator/health", "/actuator/info", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html"
     };
 
+    /**
+     * Set bakery.security.disable-auth=true (in application-local.yml or env var)
+     * to bypass JWT for local development / testing.
+     */
+    @org.springframework.beans.factory.annotation.Value("${bakery.security.jwt.disable-auth:false}")
+    private boolean disableAuth;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.requestMatchers(PUBLIC_PATHS)
-                        .permitAll()
-                        .anyRequest()
-                        .authenticated())
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+
+        if (disableAuth) {
+            // Dev mode: permit all — no JWT required
+            http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        } else {
+            http.authorizeHttpRequests(auth -> auth.requestMatchers(PUBLIC_PATHS)
+                            .permitAll()
+                            .anyRequest()
+                            .authenticated())
+                    .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        }
 
         return http.build();
     }

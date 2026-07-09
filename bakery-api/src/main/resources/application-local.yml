@@ -20,6 +20,7 @@ spring:
 bakery:
   security:
     jwt:
-      secret-key: local-dev-secret-key-minimum-32-chars!!
-      access-token-expire-ms: 86400000   # 24h for dev convenience
-      refresh-token-expire-ms: 604800000 # 7d
+      disable-auth: true
+#      secret-key: local-dev-secret-key-minimum-32-chars!!
+#      access-token-expire-ms: 86400000   # 24h for dev convenience
+#      refresh-token-expire-ms: 604800000 # 7d

@@ -10,7 +10,6 @@ ALTER TABLE item
     ADD COLUMN IF NOT EXISTS product_category VARCHAR(50);
 
 COMMENT ON COLUMN item.product_category IS 'Code value: PRODUCT_CATEGORY. Chỉ dùng cho item_type = PRODUCT';
-COMMENT ON COLUMN item.warehouse_type    IS 'WarehouseType enum: MAIN | KITCHEN | SHOP';
 
 -- ── 2. Seed CodeValue ─────────────────────────────────────────
 -- Dùng INSERT ... ON CONFLICT DO NOTHING để idempotent

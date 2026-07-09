@@ -6,6 +6,8 @@ import com.bakery.api.master.entity.Ingredient;
 import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.repository.IngredientRepository;
 import com.bakery.api.master.repository.SupplierRepository;
+import com.bakery.api.pricing.entity.IngredientPrice;
+import com.bakery.api.pricing.repository.IngredientPriceRepository;
 import com.bakery.framework.exception.ResourceNotFoundException;
 import com.bakery.framework.metadata.ReferenceValue;
 import com.bakery.framework.repository.BaseRepository;
@@ -21,6 +23,7 @@ public class IngredientService extends AbstractBakeryAdminService<Ingredient, In
 
     private final IngredientRepository repository;
     private final SupplierRepository supplierRepository;
+    private final IngredientPriceRepository ingredientPriceRepository;
     private final CommandRequestRepository commandRequestRepository;
     private final BakeryActorResolver actorResolver;
 
@@ -71,6 +74,16 @@ public class IngredientService extends AbstractBakeryAdminService<Ingredient, In
             r.setDefaultSupplier(new ReferenceValue(
                     e.getDefaultSupplier().getCode(), e.getDefaultSupplier().getName()));
         }
+
+        // Giá nhập mới nhất (theo effectiveDate DESC)
+        ingredientPriceRepository.findByItemIdOrderByEffectiveDateDesc(e.getId())
+                .stream()
+                .findFirst()
+                .ifPresent(p -> {
+                    r.setLastPrice(p.getPrice());
+                    r.setLastPriceDate(p.getEffectiveDate());
+                });
+
         return r;
     }
 }
