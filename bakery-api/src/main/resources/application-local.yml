@@ -1,0 +1,25 @@
+logging:
+  level:
+    com.bakery.api: DEBUG
+    org.springframework.security: INFO
+    org.hibernate.SQL: DEBUG
+
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/bakery
+    username: postgres
+    password: postgres
+    hikari:
+      pool-name: Hikari-Bakery-Local
+      maximum-pool-size: 5
+      minimum-idle: 1
+
+bakery:
+  security:
+    jwt:
+      secret-key: local-dev-secret-key-minimum-32-chars!!
+      access-token-expire-ms: 86400000   # 24h for dev convenience
+      refresh-token-expire-ms: 604800000 # 7d
