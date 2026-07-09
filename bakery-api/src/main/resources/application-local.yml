@@ -9,9 +9,9 @@ server:
 
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/bakery
-    username: postgres
-    password: postgres
+    url: jdbc:postgresql://localhost:5432/bakery_db
+    username: bakery
+    password: bakery123
     hikari:
       pool-name: Hikari-Bakery-Local
       maximum-pool-size: 5
