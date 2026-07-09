@@ -10,7 +10,9 @@ public record InventoryRequestRequest(
         InventoryRequestType requestType,
         LocalDate requestDate,
         LocalDate expectedDeliveryDate,
-        /** Kho nhận hàng (bắt buộc) */
+        /** Kho xuất — bắt buộc khi TRANSFER */
+        UUID sourceWarehouseId,
+        /** Kho nhận hàng — bắt buộc khi PURCHASE/TRANSFER, hoặc kho điều chỉnh khi ADJUSTMENT */
         UUID targetWarehouseId,
         /** NCC — bắt buộc khi PURCHASE */
         UUID supplierId,

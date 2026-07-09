@@ -90,6 +90,10 @@ public class InventoryRequestService
         e.setExpectedDeliveryDate(req.expectedDeliveryDate());
         e.setNote(req.note());
 
+        if (req.sourceWarehouseId() != null) {
+            e.setSourceWarehouse(warehouseRepository.findById(req.sourceWarehouseId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Warehouse", req.sourceWarehouseId())));
+        }
         if (req.targetWarehouseId() != null) {
             e.setTargetWarehouse(warehouseRepository.findById(req.targetWarehouseId())
                     .orElseThrow(() -> new ResourceNotFoundException("Warehouse", req.targetWarehouseId())));
@@ -124,6 +128,10 @@ public class InventoryRequestService
         e.setExpectedDeliveryDate(req.expectedDeliveryDate());
         e.setNote(req.note());
 
+        if (req.sourceWarehouseId() != null) {
+            e.setSourceWarehouse(warehouseRepository.findById(req.sourceWarehouseId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Warehouse", req.sourceWarehouseId())));
+        }
         if (req.targetWarehouseId() != null) {
             e.setTargetWarehouse(warehouseRepository.findById(req.targetWarehouseId())
                     .orElseThrow(() -> new ResourceNotFoundException("Warehouse", req.targetWarehouseId())));
@@ -164,15 +172,15 @@ public class InventoryRequestService
 
         if (e.getSourceWarehouse() != null) {
             r.setSourceWarehouse(new ReferenceValue(
-                    e.getSourceWarehouse().getId().toString(), e.getSourceWarehouse().getName()));
+                    e.getSourceWarehouse().getCode(), e.getSourceWarehouse().getName()));
         }
         if (e.getTargetWarehouse() != null) {
             r.setTargetWarehouse(new ReferenceValue(
-                    e.getTargetWarehouse().getId().toString(), e.getTargetWarehouse().getName()));
+                    e.getTargetWarehouse().getCode(), e.getTargetWarehouse().getName()));
         }
         if (e.getSupplier() != null) {
             r.setSupplier(new ReferenceValue(
-                    e.getSupplier().getId().toString(), e.getSupplier().getName()));
+                    e.getSupplier().getCode(), e.getSupplier().getName()));
         }
 
         List<InventoryRequestLineResponse> lineResponses = e.getLines().stream()
@@ -181,7 +189,7 @@ public class InventoryRequestService
                     lr.applyFrom(line);
                     if (line.getItem() != null) {
                         lr.setItem(new ReferenceValue(
-                                line.getItem().getId().toString(), line.getItem().getName()));
+                                line.getItem().getCode(), line.getItem().getName()));
                     }
                     lr.setQuantity(line.getQuantity());
                     lr.setUnit(line.getUnit());
@@ -202,14 +210,16 @@ public class InventoryRequestService
      */
     @Override
     protected void beforeCreate(InventoryRequest e) {
-        String prefix = e.getRequestType() == InventoryRequestType.PURCHASE ? "PO" : "TR";
+        String prefix = switch (e.getRequestType()) {
+            case PURCHASE -> "PO";
+            case TRANSFER -> "TR";
+            case ADJUSTMENT -> "ADJ";
+        };
         String dateStr = LocalDate.now().format(DATE_FMT);
         String codePrefix = prefix + "-" + dateStr + "-";
 
-        long todayCount = repository.findByRequestTypeAndRequestDate(
-                        e.getRequestType(), LocalDate.now())
-                .size();
-        String seq = String.format("%03d", todayCount + 1);
+        long count = repository.countByCodeStartingWith(codePrefix);
+        String seq = String.format("%03d", count + 1);
         e.setCode(codePrefix + seq);
     }
 
@@ -219,11 +229,18 @@ public class InventoryRequestService
      */
     @Override
     protected void afterApprove(InventoryRequest e) {
-        if (e.getRequestType() != InventoryRequestType.PURCHASE) {
-            return; // TRANSFER handled separately
+        if (e.getRequestType() == InventoryRequestType.PURCHASE) {
+            approvePurchase(e);
+        } else if (e.getRequestType() == InventoryRequestType.TRANSFER) {
+            approveTransfer(e);
+        } else if (e.getRequestType() == InventoryRequestType.ADJUSTMENT) {
+            approveAdjustment(e);
         }
+    }
 
-        UUID warehouseId = e.getTargetWarehouse() != null ? e.getTargetWarehouse().getId() : null;
+    /** PURCHASE: tạo StockLot + StockMovement(IN) cho mỗi line */
+    private void approvePurchase(InventoryRequest e) {
+
         LocalDate receivedDate = e.getRequestDate();
 
         for (InventoryRequestLine line : e.getLines()) {
@@ -238,7 +255,7 @@ public class InventoryRequestService
             StockLot lot = new StockLot();
             lot.setItem(item);
             lot.setSupplier(e.getSupplier());
-            lot.setWarehouseId(warehouseId);
+            lot.setWarehouse(e.getTargetWarehouse());
             lot.setQtyInitial(line.getQuantity());
             lot.setQtyRemaining(line.getQuantity());
             lot.setUnitCost(line.getUnitCost() != null ? line.getUnitCost() : BigDecimal.ZERO);
@@ -255,6 +272,153 @@ public class InventoryRequestService
             movement.setRefType(REF_TYPE);
             movement.setNote("Nhập hàng từ phiếu " + e.getCode());
             stockMovementRepository.save(movement);
+        }
+    }
+
+    /**
+     * TRANSFER: FIFO deduct từ source warehouse → tạo StockMovement(OUT) mỗi lô.
+     * Nếu tồn kho không đủ → throw IllegalStateException.
+     */
+    private void approveTransfer(InventoryRequest e) {
+        UUID sourceWarehouseId = e.getSourceWarehouse() != null ? e.getSourceWarehouse().getId() : null;
+
+        for (InventoryRequestLine line : e.getLines()) {
+            BigDecimal remaining = line.getQuantity();
+
+            // FIFO: lấy các lot còn hàng của item này trong source warehouse, cũ nhất trước
+            List<StockLot> lots = stockLotRepository
+                    .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
+                            line.getItem().getId(), BigDecimal.ZERO);
+
+            // Filter theo source warehouse nếu có
+            if (sourceWarehouseId != null) {
+                lots = lots.stream()
+                        .filter(l -> l.getWarehouse() != null
+                                && l.getWarehouse().getId().equals(sourceWarehouseId))
+                        .toList();
+            }
+
+            for (StockLot lot : lots) {
+                if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
+
+                BigDecimal deduct = remaining.min(lot.getQtyRemaining());
+                lot.setQtyRemaining(lot.getQtyRemaining().subtract(deduct));
+                stockLotRepository.save(lot);
+
+                // OUT tại source
+                StockMovement outMovement = new StockMovement();
+                outMovement.setLot(lot);
+                outMovement.setMovementType(MovementType.OUT);
+                outMovement.setQty(deduct);
+                outMovement.setRefId(e.getId());
+                outMovement.setRefType(REF_TYPE);
+                outMovement.setNote("Xuất hàng từ phiếu " + e.getCode());
+                stockMovementRepository.save(outMovement);
+
+                // IN tại target — tạo StockLot mới tại kho đích, giữ nguyên unitCost của lot gốc
+                StockLot inLot = new StockLot();
+                inLot.setItem(lot.getItem());
+                inLot.setWarehouse(e.getTargetWarehouse());
+                inLot.setSupplier(lot.getSupplier());
+                inLot.setQtyInitial(deduct);
+                inLot.setQtyRemaining(deduct);
+                inLot.setUnitCost(lot.getUnitCost());
+                inLot.setReceivedDate(e.getRequestDate());
+                inLot.setExpiryDate(lot.getExpiryDate());
+                StockLot savedInLot = stockLotRepository.save(inLot);
+
+                StockMovement inMovement = new StockMovement();
+                inMovement.setLot(savedInLot);
+                inMovement.setMovementType(MovementType.IN);
+                inMovement.setQty(deduct);
+                inMovement.setRefId(e.getId());
+                inMovement.setRefType(REF_TYPE);
+                inMovement.setNote("Nhận hàng từ phiếu " + e.getCode());
+                stockMovementRepository.save(inMovement);
+
+                remaining = remaining.subtract(deduct);
+            }
+
+            if (remaining.compareTo(BigDecimal.ZERO) > 0) {
+                throw new IllegalStateException(
+                        "Không đủ tồn kho cho sản phẩm: " + line.getItem().getName()
+                        + " (còn thiếu " + remaining + " " + line.getUnit() + ")");
+            }
+        }
+    }
+
+    /**
+     * ADJUSTMENT: điều chỉnh tồn kho trong targetWarehouse.
+     *   quantity > 0 → tăng kho: tạo StockLot mới + StockMovement(IN)
+     *   quantity < 0 → giảm kho: FIFO deduct + StockMovement(OUT)
+     */
+    private void approveAdjustment(InventoryRequest e) {
+        UUID warehouseId = e.getTargetWarehouse() != null ? e.getTargetWarehouse().getId() : null;
+
+        for (InventoryRequestLine line : e.getLines()) {
+            BigDecimal qty = line.getQuantity();
+            if (qty == null || qty.compareTo(BigDecimal.ZERO) == 0) continue;
+
+            if (qty.compareTo(BigDecimal.ZERO) > 0) {
+                // Tăng kho — tạo StockLot mới
+                StockLot lot = new StockLot();
+                lot.setItem(line.getItem());
+                lot.setWarehouse(e.getTargetWarehouse());
+                lot.setQtyInitial(qty);
+                lot.setQtyRemaining(qty);
+                lot.setUnitCost(line.getUnitCost() != null ? line.getUnitCost() : BigDecimal.ZERO);
+                lot.setReceivedDate(e.getRequestDate());
+                StockLot savedLot = stockLotRepository.save(lot);
+
+                StockMovement movement = new StockMovement();
+                movement.setLot(savedLot);
+                movement.setMovementType(MovementType.IN);
+                movement.setQty(qty);
+                movement.setRefId(e.getId());
+                movement.setRefType(REF_TYPE);
+                movement.setNote("Điều chỉnh tăng từ phiếu " + e.getCode());
+                stockMovementRepository.save(movement);
+
+            } else {
+                // Giảm kho — FIFO deduct
+                BigDecimal remaining = qty.abs();
+
+                List<StockLot> lots = stockLotRepository
+                        .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
+                                line.getItem().getId(), BigDecimal.ZERO);
+
+                if (warehouseId != null) {
+                    lots = lots.stream()
+                            .filter(l -> l.getWarehouse() != null
+                                    && l.getWarehouse().getId().equals(warehouseId))
+                            .toList();
+                }
+
+                for (StockLot lot : lots) {
+                    if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
+
+                    BigDecimal deduct = remaining.min(lot.getQtyRemaining());
+                    lot.setQtyRemaining(lot.getQtyRemaining().subtract(deduct));
+                    stockLotRepository.save(lot);
+
+                    StockMovement movement = new StockMovement();
+                    movement.setLot(lot);
+                    movement.setMovementType(MovementType.OUT);
+                    movement.setQty(deduct);
+                    movement.setRefId(e.getId());
+                    movement.setRefType(REF_TYPE);
+                    movement.setNote("Điều chỉnh giảm từ phiếu " + e.getCode());
+                    stockMovementRepository.save(movement);
+
+                    remaining = remaining.subtract(deduct);
+                }
+
+                if (remaining.compareTo(BigDecimal.ZERO) > 0) {
+                    throw new IllegalStateException(
+                            "Không đủ tồn kho để điều chỉnh giảm: " + line.getItem().getName()
+                            + " (còn thiếu " + remaining + " " + line.getUnit() + ")");
+                }
+            }
         }
     }
 }

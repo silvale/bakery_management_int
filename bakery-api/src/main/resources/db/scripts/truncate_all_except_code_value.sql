@@ -8,6 +8,7 @@ TRUNCATE TABLE
     -- Giao dịch kho
     stock_movement,
     stock_lot,
+    stock_adjustment,
     inventory_request_line,
     inventory_request,
 

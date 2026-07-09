@@ -2,10 +2,10 @@ package com.bakery.api.inventory.entity;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.UUID;
 
 import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.entity.Supplier;
+import com.bakery.api.master.entity.Warehouse;
 import com.bakery.framework.entity.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -34,8 +34,9 @@ public class StockLot extends BaseEntity {
     @JoinColumn(name = "supplier_id")
     private Supplier supplier;
 
-    @Column(name = "warehouse_id")
-    private UUID warehouseId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "warehouse_id")
+    private Warehouse warehouse;
 
     @Column(name = "qty_initial", nullable = false, precision = 15, scale = 4)
     private BigDecimal qtyInitial;

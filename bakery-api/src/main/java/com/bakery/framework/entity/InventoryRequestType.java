@@ -5,5 +5,8 @@ public enum InventoryRequestType {
     PURCHASE,
 
     /** Điều chuyển hàng hóa giữa các kho */
-    TRANSFER
+    TRANSFER,
+
+    /** Điều chỉnh kho (tăng/giảm) — cần approval trước khi áp dụng */
+    ADJUSTMENT
 }
