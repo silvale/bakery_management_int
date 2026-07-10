@@ -34,4 +34,12 @@ public class Recipe extends BaseEntity {
 
     @Column(name = "note", length = 500)
     private String note;
+
+    /**
+     * NULL = công thức gốc (base).
+     * Non-null = bản sao custom từ recipe gốc (full snapshot).
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_recipe_id")
+    private Recipe parentRecipe;
 }

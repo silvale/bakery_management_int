@@ -43,4 +43,19 @@ public abstract class Item extends BaseEntity {
      */
     @Column(name = "product_category", length = 50)
     private String productCategory;
+
+    /**
+     * Kích thước đơn vị tối thiểu không thể tách lẻ.
+     * Chỉ có ý nghĩa khi isSplittable = false.
+     * Ví dụ: bơ 5kg/cục → unitSize = 5.0
+     */
+    @Column(name = "unit_size", precision = 15, scale = 4)
+    private java.math.BigDecimal unitSize;
+
+    /**
+     * true (default) = có thể xuất lẻ từ kho tổng.
+     * false = phải xuất theo bội số của unitSize.
+     */
+    @Column(name = "is_splittable", nullable = false)
+    private boolean splittable = true;
 }

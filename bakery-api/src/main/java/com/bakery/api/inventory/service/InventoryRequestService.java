@@ -283,7 +283,8 @@ public class InventoryRequestService
         UUID sourceWarehouseId = e.getSourceWarehouse() != null ? e.getSourceWarehouse().getId() : null;
 
         for (InventoryRequestLine line : e.getLines()) {
-            BigDecimal remaining = line.getQuantity();
+            // Fixed unit: nếu item không tách lẻ → làm tròn lên bội số của unitSize
+            BigDecimal remaining = roundUpToUnitSize(line.getQuantity(), line.getItem());
 
             // FIFO: lấy các lot còn hàng của item này trong source warehouse, cũ nhất trước
             List<StockLot> lots = stockLotRepository
@@ -420,5 +421,20 @@ public class InventoryRequestService
                 }
             }
         }
+    }
+
+    /**
+     * Nếu item không tách lẻ (isSplittable=false) và có unitSize → làm tròn lên bội số gần nhất.
+     * Ví dụ: cần 4kg, unitSize=5 → xuất 5kg. Cần 6kg, unitSize=5 → xuất 10kg.
+     */
+    private BigDecimal roundUpToUnitSize(BigDecimal qty, com.bakery.api.master.entity.Item item) {
+        if (item.isSplittable() || item.getUnitSize() == null
+                || item.getUnitSize().compareTo(BigDecimal.ZERO) <= 0) {
+            return qty;
+        }
+        BigDecimal unitSize = item.getUnitSize();
+        // Math.ceil(qty / unitSize) * unitSize
+        BigDecimal units = qty.divide(unitSize, 0, java.math.RoundingMode.CEILING);
+        return units.multiply(unitSize);
     }
 }
