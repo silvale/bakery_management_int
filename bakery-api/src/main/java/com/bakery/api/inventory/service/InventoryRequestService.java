@@ -427,6 +427,16 @@ public class InventoryRequestService
      * Nếu item không tách lẻ (isSplittable=false) và có unitSize → làm tròn lên bội số gần nhất.
      * Ví dụ: cần 4kg, unitSize=5 → xuất 5kg. Cần 6kg, unitSize=5 → xuất 10kg.
      */
+    /**
+     * Tất cả phiếu liên quan đến 1 kho (source OR target) theo approvalStatus.
+     * Dùng cho tab pending/approved của từng kho trên UI.
+     */
+    public List<InventoryRequestResponse> findByWarehouse(String warehouseCode, String approvalStatusStr) {
+        return repository.findByWarehouseAndStatus(warehouseCode, approvalStatusStr.toUpperCase()).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     private BigDecimal roundUpToUnitSize(BigDecimal qty, com.bakery.api.master.entity.Item item) {
         if (item.isSplittable() || item.getUnitSize() == null
                 || item.getUnitSize().compareTo(BigDecimal.ZERO) <= 0) {

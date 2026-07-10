@@ -311,7 +311,7 @@ public class ProductionRequestService
         dr.setDiscrepancy(dr.getQtyProduced().subtract(qtyReceived));
         dr.setDeliveryStatus(DeliveryStatus.CONFIRMED);
         dr.setConfirmedAt(Instant.now());
-        dr.setConfirmedBy(actorResolver.getCurrentActor());
+        dr.setConfirmedBy(actorResolver.currentUserId());
         dr.setNote(note);
 
         return toDeliveryResponse(deliveryRecordRepository.save(dr));
