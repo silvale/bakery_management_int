@@ -16,6 +16,7 @@ import com.bakery.api.master.entity.Warehouse;
 import com.bakery.api.master.repository.ItemLookupRepository;
 import com.bakery.api.master.repository.WarehouseRepository;
 import com.bakery.api.production.dto.DeliveryRecordResponse;
+import com.bakery.api.production.dto.CompleteLineRequest;
 import com.bakery.api.production.dto.ProductionRequestLineRequest;
 import com.bakery.api.production.dto.ProductionRequestLineResponse;
 import com.bakery.api.production.dto.ProductionRequestRequest;
@@ -322,6 +323,32 @@ public class ProductionRequestService
 
         line.setLineStatus(ProductionLineStatus.COMPLETED);
         return toResponse(repository.save(e));
+    }
+
+    /**
+     * Batch complete nhiều line cùng lúc — wrapper gọi lại completeLine() cho từng item.
+     * Toàn bộ xử lý trong 1 transaction: nếu 1 line lỗi thì rollback tất cả.
+     *
+     * @param requestId ID phiếu sản xuất
+     * @param items     danh sách line cần complete
+     * @return ProductionRequestResponse sau khi xử lý xong tất cả line
+     */
+    @Transactional
+    public ProductionRequestResponse completeLines(UUID requestId, List<CompleteLineRequest> items) {
+        if (items == null || items.isEmpty()) {
+            throw new IllegalArgumentException("Danh sách line không được để trống.");
+        }
+        ProductionRequestResponse response = null;
+        for (CompleteLineRequest item : items) {
+            response = completeLine(
+                    requestId,
+                    item.lineId(),
+                    item.qtyProduced(),
+                    item.adjustmentType(),
+                    item.reason(),
+                    item.note());
+        }
+        return response;
     }
 
     /**
