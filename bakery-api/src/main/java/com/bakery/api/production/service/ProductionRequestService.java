@@ -21,14 +21,19 @@ import com.bakery.api.production.dto.ProductionRequestLineResponse;
 import com.bakery.api.production.dto.ProductionRequestRequest;
 import com.bakery.api.production.dto.ProductionRequestResponse;
 import com.bakery.api.production.entity.DeliveryRecord;
+import com.bakery.api.production.entity.ProductionAdjustment;
 import com.bakery.api.production.entity.ProductionRequest;
 import com.bakery.api.production.entity.ProductionRequestLine;
 import com.bakery.api.production.repository.DeliveryRecordRepository;
+import com.bakery.api.production.repository.ProductionAdjustmentRepository;
 import com.bakery.api.production.repository.ProductionRequestRepository;
 import com.bakery.api.recipe.entity.Recipe;
 import com.bakery.api.recipe.entity.RecipeLine;
 import com.bakery.api.recipe.repository.RecipeLineRepository;
 import com.bakery.api.recipe.repository.RecipeRepository;
+import com.bakery.framework.entity.AdjustmentSource;
+import com.bakery.framework.entity.AdjustmentType;
+import com.bakery.framework.entity.ApprovalStatus;
 import com.bakery.framework.entity.DeliveryStatus;
 import com.bakery.framework.entity.MovementType;
 import com.bakery.framework.entity.ProductionLineStatus;
@@ -67,6 +72,7 @@ public class ProductionRequestService
     private final StockLotRepository stockLotRepository;
     private final StockMovementRepository stockMovementRepository;
     private final DeliveryRecordRepository deliveryRecordRepository;
+    private final ProductionAdjustmentRepository adjustmentRepository;
     private final CommandRequestRepository commandRequestRepository;
     private final BakeryActorResolver actorResolver;
 
@@ -238,8 +244,17 @@ public class ProductionRequestService
     /**
      * Bếp bấm "Completed" trên 1 line → tạo DeliveryRecord(READY) + StockLot bánh thành phẩm.
      */
+    /**
+     * Bếp bấm "Completed" trên 1 line → tạo DeliveryRecord(READY) + StockLot bánh thành phẩm.
+     *
+     * <p>Nếu qtyProduced ≠ plannedQty, bắt buộc phải cung cấp adjustmentType + reason.
+     * Hệ thống tự tạo ProductionAdjustment(PENDING_APPROVAL) để bếp trưởng duyệt.
+     *
+     * @param adjustmentType INGREDIENT_VARIANCE | PRODUCTION_WASTAGE (null nếu qty bằng plannedQty)
+     */
     @Transactional
-    public ProductionRequestResponse completeLine(UUID requestId, UUID lineId, BigDecimal qtyProduced, String note) {
+    public ProductionRequestResponse completeLine(UUID requestId, UUID lineId,
+            BigDecimal qtyProduced, AdjustmentType adjustmentType, String reason, String note) {
         ProductionRequest e = repository.findById(requestId)
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionRequest", requestId));
 
@@ -252,6 +267,14 @@ public class ProductionRequestService
             throw new IllegalStateException("Line đã Completed rồi.");
         }
 
+        // Validate: nếu lệch plannedQty phải có lý do
+        BigDecimal plannedQty = line.getPlannedQty();
+        boolean hasDeviation = qtyProduced.compareTo(plannedQty) != 0;
+        if (hasDeviation && adjustmentType == null) {
+            throw new IllegalArgumentException(
+                    "qtyProduced (" + qtyProduced + ") ≠ plannedQty (" + plannedQty + "). Vui lòng chọn adjustmentType.");
+        }
+
         // Tạo StockLot bánh thành phẩm tại KITCHEN
         Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
                 .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
@@ -261,7 +284,7 @@ public class ProductionRequestService
         productLot.setWarehouse(kitchen);
         productLot.setQtyInitial(qtyProduced);
         productLot.setQtyRemaining(qtyProduced);
-        productLot.setUnitCost(BigDecimal.ZERO); // cost tính sau
+        productLot.setUnitCost(BigDecimal.ZERO);
         productLot.setReceivedDate(e.getProductionDate());
         StockLot savedLot = stockLotRepository.save(productLot);
 
@@ -280,18 +303,24 @@ public class ProductionRequestService
         dr.setQtyProduced(qtyProduced);
         dr.setDeliveryStatus(DeliveryStatus.READY);
         dr.setNote(note);
-        deliveryRecordRepository.save(dr);
+        DeliveryRecord savedDr = deliveryRecordRepository.save(dr);
 
-        // Cập nhật line status
-        line.setLineStatus(ProductionLineStatus.COMPLETED);
-
-        // Nếu tất cả lines đều COMPLETED → update request status
-        boolean allDone = e.getLines().stream()
-                .allMatch(l -> l.getLineStatus() == ProductionLineStatus.COMPLETED);
-        if (allDone) {
-            // Giữ approvalStatus = APPROVED, chỉ đánh dấu qua note hoặc có thể thêm DONE status sau
+        // Nếu lệch → tạo ProductionAdjustment chờ bếp trưởng duyệt
+        if (hasDeviation) {
+            ProductionAdjustment adj = new ProductionAdjustment();
+            adj.setDeliveryRecord(savedDr);
+            adj.setAdjustmentType(adjustmentType);
+            adj.setSource(AdjustmentSource.KITCHEN_COMPLETE);
+            adj.setOriginalQty(plannedQty);
+            adj.setAdjustedQty(qtyProduced);
+            adj.setDelta(qtyProduced.subtract(plannedQty));
+            adj.setReason(reason);
+            adj.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+            adj.setCreatedBy(actorResolver.currentUserId());
+            adjustmentRepository.save(adj);
         }
 
+        line.setLineStatus(ProductionLineStatus.COMPLETED);
         return toResponse(repository.save(e));
     }
 

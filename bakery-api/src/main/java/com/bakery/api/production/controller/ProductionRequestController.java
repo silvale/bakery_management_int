@@ -3,11 +3,11 @@ package com.bakery.api.production.controller;
 import java.math.BigDecimal;
 import java.util.UUID;
 
-import com.bakery.api.production.dto.DeliveryRecordResponse;
 import com.bakery.api.production.dto.ProductionRequestRequest;
 import com.bakery.api.production.dto.ProductionRequestResponse;
 import com.bakery.api.production.service.ProductionRequestService;
 import com.bakery.framework.controller.BakeryAdminResource;
+import com.bakery.framework.entity.AdjustmentType;
 import com.bakery.framework.service.BakeryAdminService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -47,19 +47,22 @@ public class ProductionRequestController
     }
 
     /**
-     * Bếp bấm "Completed" trên 1 line → tạo DeliveryRecord(READY) + StockLot bánh.
+     * Bếp bấm "Completed" trên 1 line → tạo DeliveryRecord(READY) + StockLot bánh thành phẩm.
      *
-     * @param id          ProductionRequest ID
-     * @param lineId      ProductionRequestLine ID
-     * @param qtyProduced số lượng thực tế làm ra
-     * @param note        ghi chú (optional)
+     * <p>Nếu qtyProduced ≠ plannedQty, bắt buộc truyền adjustmentType:
+     * <ul>
+     *   <li>INGREDIENT_VARIANCE — bếp lấy nhiều/ít NL → cần duyệt → cộng/trừ NL kho bếp</li>
+     *   <li>PRODUCTION_WASTAGE  — hao hụt sản xuất → chỉ ghi nhận, không động NL</li>
+     * </ul>
      */
     @PostMapping("/{id}/lines/{lineId}/complete")
     public ProductionRequestResponse completeLine(
             @PathVariable UUID id,
             @PathVariable UUID lineId,
             @RequestParam BigDecimal qtyProduced,
+            @RequestParam(required = false) AdjustmentType adjustmentType,
+            @RequestParam(required = false) String reason,
             @RequestParam(required = false) String note) {
-        return service.completeLine(id, lineId, qtyProduced, note);
+        return service.completeLine(id, lineId, qtyProduced, adjustmentType, reason, note);
     }
 }
