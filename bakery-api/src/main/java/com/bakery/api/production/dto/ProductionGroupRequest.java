@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 
 public record ProductionGroupRequest(
         @NotBlank String code,
@@ -22,7 +23,7 @@ public record ProductionGroupRequest(
         @Valid List<ProductionGroupItemRequest> items) {
 
     public record ProductionGroupItemRequest(
-            @NotBlank UUID itemId,
+            @NotNull UUID itemId,
             /** Gram/cái — chỉ bắt buộc với BATCH_FORMULA. */
             BigDecimal gramsPerUnit,
             int sortOrder) {}

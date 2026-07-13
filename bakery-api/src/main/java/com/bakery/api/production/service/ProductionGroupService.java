@@ -25,18 +25,21 @@ public class ProductionGroupService {
     private final ItemGroupRepository itemGroupRepository;
     private final ItemLookupRepository itemRepository;
 
+    @Transactional(readOnly = true)
     public List<ProductionGroupResponse> findAll() {
         return repository.findByActiveTrue().stream()
                 .map(ProductionGroupResponse::from)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public List<ProductionGroupResponse> findByItemGroup(UUID itemGroupId) {
         return repository.findByItemGroupIdOrderByCodeAsc(itemGroupId).stream()
                 .map(ProductionGroupResponse::from)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public ProductionGroupResponse findById(UUID id) {
         return ProductionGroupResponse.from(getById(id));
     }

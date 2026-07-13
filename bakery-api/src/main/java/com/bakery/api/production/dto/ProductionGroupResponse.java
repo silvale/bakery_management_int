@@ -32,6 +32,7 @@ public class ProductionGroupResponse extends BaseResponse {
     @NoArgsConstructor
     public static class GroupItemResponse {
         private UUID id;
+        private UUID itemId;   // UUID của item — dùng để call API
         private ReferenceValue item;
         private BigDecimal gramsPerUnit;
         private int sortOrder;
@@ -42,6 +43,7 @@ public class ProductionGroupResponse extends BaseResponse {
             r.setGramsPerUnit(gi.getGramsPerUnit());
             r.setSortOrder(gi.getSortOrder());
             if (gi.getItem() != null) {
+                r.setItemId(gi.getItem().getId());
                 r.setItem(new ReferenceValue(gi.getItem().getCode(), gi.getItem().getName()));
             }
             return r;
