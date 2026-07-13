@@ -40,4 +40,18 @@ public interface RecipeRepository extends BaseRepository<Recipe> {
     @Modifying
     @Query("UPDATE Recipe r SET r.active = false WHERE r.semiProduct.id = :semiProductId AND r.active = true")
     void deactivateAllBySemiProduct(@Param("semiProductId") UUID semiProductId);
+
+    /** Phiên bản mới nhất của recipe cho 1 product (dùng trong toResponse). */
+    Optional<Recipe> findFirstByProductIdOrderByVersionDesc(UUID productId);
+
+    /** Phiên bản PENDING_APPROVAL mới nhất của recipe cho 1 product (dùng để upsert khi update product). */
+    Optional<Recipe> findFirstByProductIdAndApprovalStatusOrderByVersionDesc(
+            UUID productId, com.bakery.framework.entity.ApprovalStatus approvalStatus);
+
+    /** Phiên bản mới nhất của recipe cho 1 semi-product (dùng trong toResponse). */
+    Optional<Recipe> findFirstBySemiProductIdOrderByVersionDesc(UUID semiProductId);
+
+    /** Phiên bản PENDING_APPROVAL mới nhất của recipe cho 1 semi-product (dùng để upsert khi update). */
+    Optional<Recipe> findFirstBySemiProductIdAndApprovalStatusOrderByVersionDesc(
+            UUID semiProductId, com.bakery.framework.entity.ApprovalStatus approvalStatus);
 }

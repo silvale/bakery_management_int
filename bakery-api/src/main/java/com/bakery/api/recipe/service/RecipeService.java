@@ -212,6 +212,13 @@ public class RecipeService
                 .toList();
     }
 
+    // ── Public mapping (dùng bởi ProductService) ─────────────────
+
+    /** Expose mapping cho ProductService dùng khi nhúng recipe vào ProductResponse. */
+    public RecipeResponse mapToResponse(Recipe recipe) {
+        return toResponse(recipe);
+    }
+
     // ── Private helpers ──────────────────────────────────────────
 
     private void validateTarget(RecipeRequest req) {

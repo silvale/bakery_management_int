@@ -1,5 +1,8 @@
 package com.bakery.api.master.service;
 
+import java.util.Optional;
+import java.util.UUID;
+
 import com.bakery.api.master.dto.IngredientRequest;
 import com.bakery.api.master.dto.IngredientResponse;
 import com.bakery.api.master.entity.Ingredient;
@@ -85,5 +88,12 @@ public class IngredientService extends AbstractBakeryAdminService<Ingredient, In
                 });
 
         return r;
+    }
+
+    /** Dùng bởi ItemService khi map toResponse cho INGREDIENT */
+    public Optional<IngredientPrice> findLatestPrice(UUID ingredientId) {
+        return ingredientPriceRepository.findByItemIdOrderByEffectiveDateDesc(ingredientId)
+                .stream()
+                .findFirst();
     }
 }
