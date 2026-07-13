@@ -22,6 +22,9 @@ public record ItemRequest(
         @NotBlank String name,
         @NotBlank String unit,
 
+        /** Nhóm sản phẩm / phòng SX — thay thế productCategory */
+        UUID itemGroupId,
+
         // ── Ingredient only ──────────────────────────────────
         /** Code value key: INGREDIENT_TYPE */
         String ingredientType,
@@ -30,8 +33,6 @@ public record ItemRequest(
         // ── Product only ─────────────────────────────────────
         /** Code value key: PRODUCT_TYPE */
         String productType,
-        /** Code value key: PRODUCT_CATEGORY */
-        String productCategory,
         BigDecimal sellingPrice,
 
         // ── Recipe (Product + SemiProduct) ───────────────────

@@ -30,8 +30,8 @@ public class ItemResponse extends BaseResponse {
     private String name;
     private String unit;
 
-    /** Code value key: PRODUCT_CATEGORY — chỉ có với PRODUCT */
-    private String productCategory;
+    /** Nhóm sản phẩm / phòng SX — thay thế productCategory */
+    private ReferenceValue itemGroup;
 
     // ── Ingredient only ───────────────────────────────────────
     /** Code value key: INGREDIENT_TYPE */

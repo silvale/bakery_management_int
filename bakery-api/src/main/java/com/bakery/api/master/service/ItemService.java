@@ -17,6 +17,8 @@ import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.repository.ItemLookupRepository;
 import com.bakery.api.master.repository.SupplierRepository;
 import com.bakery.api.pricing.repository.IngredientPriceRepository;
+import com.bakery.api.production.entity.ItemGroup;
+import com.bakery.api.production.repository.ItemGroupRepository;
 import com.bakery.api.recipe.dto.RecipeLineRequest;
 import com.bakery.api.recipe.entity.Recipe;
 import com.bakery.api.recipe.entity.RecipeLine;
@@ -58,6 +60,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     private final IngredientPriceRepository ingredientPriceRepository;
     private final RecipeRepository recipeRepository;
     private final RecipeService recipeService;
+    private final ItemGroupRepository itemGroupRepository;
     private final BakeryActorResolver actorResolver;
     private final CommandRequestRepository commandRequestRepository;
 
@@ -172,7 +175,10 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         r.setCode(item.getCode());
         r.setName(item.getName());
         r.setUnit(item.getUnit());
-        r.setProductCategory(item.getProductCategory());
+        if (item.getItemGroup() != null) {
+            r.setItemGroup(new ReferenceValue(
+                    item.getItemGroup().getCode(), item.getItemGroup().getName()));
+        }
 
         if (item instanceof Ingredient ing) {
             r.setItemType("INGREDIENT");
@@ -308,7 +314,13 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         e.setCode(req.code());
         e.setName(req.name());
         e.setUnit(req.unit());
-        e.setProductCategory(req.productCategory());
+        if (req.itemGroupId() != null) {
+            ItemGroup ig = itemGroupRepository.findById(req.itemGroupId())
+                    .orElseThrow(() -> new ResourceNotFoundException("ItemGroup", req.itemGroupId()));
+            e.setItemGroup(ig);
+        } else {
+            e.setItemGroup(null);
+        }
     }
 
     private void applyProductFields(Product e, ItemRequest req) {

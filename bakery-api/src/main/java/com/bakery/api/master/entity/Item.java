@@ -41,16 +41,8 @@ public abstract class Item extends BaseEntity {
     private String unit;
 
     /**
-     * Phân loại sản phẩm theo nhóm hàng. Code value key: PRODUCT_CATEGORY.
-     * e.g., BMN, BMM, COO, PK, PL, LAN, ACC.
-     * Chỉ có ý nghĩa với item_type = PRODUCT.
-     */
-    @Column(name = "product_category", length = 50)
-    private String productCategory;
-
-    /**
      * Phòng/bộ phận sản xuất: PL=Phòng Lạnh, PK=Phòng Kem, BMN=Bánh Mì Ngọt...
-     * Dùng để filter sản phẩm theo khu vực trên màn hình kế hoạch SX.
+     * Dùng cho cả phân loại sản phẩm (thay thế productCategory) và filter kế hoạch SX.
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_group_id")
