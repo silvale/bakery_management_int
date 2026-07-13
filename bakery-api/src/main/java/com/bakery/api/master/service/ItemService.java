@@ -7,115 +7,166 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-import com.bakery.api.master.dto.IngredientRequest;
-import com.bakery.api.master.dto.IngredientResponse;
 import com.bakery.api.master.dto.ItemRequest;
 import com.bakery.api.master.dto.ItemResponse;
-import com.bakery.api.master.dto.ProductRequest;
-import com.bakery.api.master.dto.ProductResponse;
-import com.bakery.api.master.dto.SemiProductRequest;
-import com.bakery.api.master.dto.SemiProductResponse;
 import com.bakery.api.master.entity.Ingredient;
 import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.entity.Product;
 import com.bakery.api.master.entity.SemiProduct;
+import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.repository.ItemLookupRepository;
+import com.bakery.api.master.repository.SupplierRepository;
+import com.bakery.api.pricing.repository.IngredientPriceRepository;
+import com.bakery.api.recipe.dto.RecipeLineRequest;
+import com.bakery.api.recipe.entity.Recipe;
+import com.bakery.api.recipe.entity.RecipeLine;
 import com.bakery.api.recipe.repository.RecipeRepository;
 import com.bakery.api.recipe.service.RecipeService;
-import com.bakery.framework.dto.PageResult;
-import com.bakery.framework.dto.RejectRequest;
+import com.bakery.framework.entity.ApprovalStatus;
 import com.bakery.framework.exception.ResourceNotFoundException;
 import com.bakery.framework.metadata.ReferenceValue;
+import com.bakery.framework.repository.BaseRepository;
+import com.bakery.framework.repository.CommandRequestRepository;
+import com.bakery.framework.security.BakeryActorResolver;
+import com.bakery.framework.service.AbstractBakeryAdminService;
 import com.bakery.framework.util.SpecificationBuilder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
 /**
- * Facade service cho /api/v1/items.
+ * Service thống nhất cho mọi loại Item (INGREDIENT, SEMI_PRODUCT, PRODUCT).
  *
- * <p>READ: query trực tiếp từ ItemLookupRepository với Specification lọc theo
- * discriminator type (item_type) khi có param ?itemType=...
+ * <p>Extend {@link AbstractBakeryAdminService} với generic type {@code Item} — đúng pattern
+ * của toàn bộ hệ thống. Logic phân loại (toEntity / applyUpdate) dùng switch/instanceof
+ * vì mapping là polymorphic và không thể delegate cho MapStruct.
  *
- * <p>WRITE: route tới IngredientService / SemiProductService / ProductService
- * dựa vào itemType trong request.
+ * <p>Recipe bundling (PRODUCT + SEMI_PRODUCT) được xử lý trong lifecycle hooks:
+ * afterCreate → afterUpdate → afterApprove → beforeDelete.
  */
 @Service
 @RequiredArgsConstructor
-public class ItemService {
+public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, ItemResponse> {
 
-    private final ItemLookupRepository itemRepository;
-    private final IngredientService ingredientService;
-    private final SemiProductService semiProductService;
-    private final ProductService productService;
+    private final ItemLookupRepository repository;
+    private final SupplierRepository supplierRepository;
+    private final IngredientPriceRepository ingredientPriceRepository;
     private final RecipeRepository recipeRepository;
     private final RecipeService recipeService;
+    private final BakeryActorResolver actorResolver;
+    private final CommandRequestRepository commandRequestRepository;
 
-    // ── READ ─────────────────────────────────────────────────────────────────
+    /**
+     * ThreadLocal chuyển ItemRequest xuống lifecycle hooks (afterCreate / afterUpdate).
+     * Luôn được clear trong finally để tránh memory leak.
+     */
+    private final ThreadLocal<ItemRequest> currentRequest = new ThreadLocal<>();
 
-    public PageResult<ItemResponse> findAll(MultiValueMap<String, String> params, Pageable pageable) {
-        Specification<Item> spec = buildSpec(params);
-        Page<ItemResponse> page = itemRepository.findAll(spec, pageable).map(this::toResponse);
-        return PageResult.of(page);
+    // ── Framework wiring ──────────────────────────────────────────────────────
+
+    @Override protected BaseRepository<Item> getRepository() { return repository; }
+    @Override protected BakeryActorResolver getActorResolver() { return actorResolver; }
+    @Override protected CommandRequestRepository getCommandRequestRepository() { return commandRequestRepository; }
+    @Override protected String getEntityName() { return "Item"; }
+
+    // ── Override findAll — xử lý discriminator spec ───────────────────────────
+
+    /**
+     * Hỗ trợ filter theo {@code ?itemType=INGREDIENT|SEMI_PRODUCT|PRODUCT} bằng cách tách
+     * param này ra trước, build JPA discriminator predicate ({@code root.type()}), rồi AND
+     * với Specification còn lại từ SpecificationBuilder.
+     */
+    @Override
+    public Page<ItemResponse> findAll(MultiValueMap<String, String> params, Pageable pageable) {
+        String itemType = params.getFirst("itemType");
+
+        MultiValueMap<String, String> rest = new LinkedMultiValueMap<>(params);
+        rest.remove("itemType");
+
+        Specification<Item> spec = SpecificationBuilder.from(rest);
+
+        if (itemType != null && !itemType.isBlank()) {
+            Class<? extends Item> typeClass = resolveClass(itemType);
+            spec = spec.and((root, query, cb) -> cb.equal(root.type(), typeClass));
+        }
+
+        return repository.findAll(spec, pageable).map(this::toResponse);
     }
 
-    public List<ItemResponse> findAll() {
-        return itemRepository.findAll().stream().map(this::toResponse).toList();
-    }
+    // ── Override create/update — inject ThreadLocal ───────────────────────────
 
-    public Optional<ItemResponse> findById(UUID id) {
-        return itemRepository.findById(id).map(this::toResponse);
-    }
-
-    // ── WRITE ────────────────────────────────────────────────────────────────
-
+    @Override
+    @Transactional
     public ItemResponse create(ItemRequest req) {
-        return switch (req.itemType().toUpperCase()) {
-            case "INGREDIENT" -> fromIngredient(ingredientService.create(toIngredientReq(req)));
-            case "SEMI_PRODUCT" -> fromSemiProduct(semiProductService.create(toSemiProductReq(req)));
-            case "PRODUCT" -> fromProduct(productService.create(toProductReq(req)));
-            default -> throw new IllegalArgumentException("Unknown itemType: " + req.itemType());
-        };
+        currentRequest.set(req);
+        try {
+            return super.create(req);
+        } finally {
+            currentRequest.remove();
+        }
     }
 
+    @Override
+    @Transactional
     public ItemResponse update(UUID id, ItemRequest req) {
+        currentRequest.set(req);
+        try {
+            return super.update(id, req);
+        } finally {
+            currentRequest.remove();
+        }
+    }
+
+    // ── toEntity ──────────────────────────────────────────────────────────────
+
+    @Override
+    protected Item toEntity(ItemRequest req) {
         return switch (req.itemType().toUpperCase()) {
-            case "INGREDIENT" -> fromIngredient(ingredientService.update(id, toIngredientReq(req)));
-            case "SEMI_PRODUCT" -> fromSemiProduct(semiProductService.update(id, toSemiProductReq(req)));
-            case "PRODUCT" -> fromProduct(productService.update(id, toProductReq(req)));
+            case "INGREDIENT" -> {
+                Ingredient e = new Ingredient();
+                applyCommonFields(e, req);
+                e.setIngredientType(req.ingredientType());
+                applySupplier(e, req);
+                yield e;
+            }
+            case "SEMI_PRODUCT" -> {
+                SemiProduct e = new SemiProduct();
+                applyCommonFields(e, req);
+                yield e;
+            }
+            case "PRODUCT" -> {
+                Product e = new Product();
+                applyCommonFields(e, req);
+                applyProductFields(e, req);
+                yield e;
+            }
             default -> throw new IllegalArgumentException("Unknown itemType: " + req.itemType());
         };
     }
 
-    public void delete(UUID id) {
-        Item item = loadItem(id);
-        if (item instanceof Ingredient) ingredientService.delete(id);
-        else if (item instanceof SemiProduct) semiProductService.delete(id);
-        else if (item instanceof Product) productService.delete(id);
+    // ── applyUpdate ───────────────────────────────────────────────────────────
+
+    @Override
+    protected void applyUpdate(Item e, ItemRequest req) {
+        applyCommonFields(e, req);
+        if (e instanceof Ingredient ing) {
+            ing.setIngredientType(req.ingredientType());
+            applySupplier(ing, req);
+        } else if (e instanceof Product prod) {
+            applyProductFields(prod, req);
+        }
+        // SemiProduct: chỉ có common fields, không cần xử lý thêm
     }
 
-    public ItemResponse approve(UUID id) {
-        Item item = loadItem(id);
-        if (item instanceof Ingredient) return fromIngredient(ingredientService.approve(id));
-        if (item instanceof SemiProduct) return fromSemiProduct(semiProductService.approve(id));
-        if (item instanceof Product) return fromProduct(productService.approve(id));
-        throw new IllegalStateException("Unknown item type for id: " + id);
-    }
+    // ── toResponse ────────────────────────────────────────────────────────────
 
-    public ItemResponse reject(UUID id, String reason) {
-        Item item = loadItem(id);
-        if (item instanceof Ingredient) return fromIngredient(ingredientService.reject(id, reason));
-        if (item instanceof SemiProduct) return fromSemiProduct(semiProductService.reject(id, reason));
-        if (item instanceof Product) return fromProduct(productService.reject(id, reason));
-        throw new IllegalStateException("Unknown item type for id: " + id);
-    }
-
-    // ── Mapping ──────────────────────────────────────────────────────────────
-
-    private ItemResponse toResponse(Item item) {
+    @Override
+    protected ItemResponse toResponse(Item item) {
         ItemResponse r = new ItemResponse();
         r.applyFrom(item);
         r.setCode(item.getCode());
@@ -128,148 +179,213 @@ public class ItemService {
             r.setIngredientType(ing.getIngredientType());
             if (ing.getDefaultSupplier() != null) {
                 r.setDefaultSupplier(new ReferenceValue(
-                        ing.getDefaultSupplier().getCode(), ing.getDefaultSupplier().getName()));
+                        ing.getDefaultSupplier().getCode(),
+                        ing.getDefaultSupplier().getName()));
             }
-            // Giá nhập mới nhất
-            ingredientService.findLatestPrice(ing.getId()).ifPresent(p -> {
-                r.setLastPrice(p.getPrice());
-                r.setLastPriceDate(p.getEffectiveDate());
-            });
+            ingredientPriceRepository
+                    .findByItemIdOrderByEffectiveDateDesc(ing.getId())
+                    .stream().findFirst()
+                    .ifPresent(p -> {
+                        r.setLastPrice(p.getPrice());
+                        r.setLastPriceDate(p.getEffectiveDate());
+                    });
+
         } else if (item instanceof SemiProduct) {
             r.setItemType("SEMI_PRODUCT");
-            // Recipe: active trước, fallback latest
             recipeRepository.findBySemiProductIdAndActiveTrue(item.getId())
                     .or(() -> recipeRepository.findFirstBySemiProductIdOrderByVersionDesc(item.getId()))
                     .ifPresent(recipe -> r.setRecipe(recipeService.mapToResponse(recipe)));
+
         } else if (item instanceof Product prod) {
             r.setItemType("PRODUCT");
             r.setProductType(prod.getProductType());
             r.setSellingPrice(prod.getSellingPrice());
-            // Recipe: active trước, fallback latest
             recipeRepository.findByProductIdAndActiveTrue(item.getId())
                     .or(() -> recipeRepository.findFirstByProductIdOrderByVersionDesc(item.getId()))
                     .ifPresent(recipe -> r.setRecipe(recipeService.mapToResponse(recipe)));
         }
+
         return r;
     }
 
-    /** Convert IngredientResponse → ItemResponse */
-    private ItemResponse fromIngredient(IngredientResponse src) {
-        ItemResponse r = new ItemResponse();
-        r.setId(src.getId());
-        r.setStatus(src.getStatus());
-        r.setApprovalStatus(src.getApprovalStatus());
-        r.setCreatedAt(src.getCreatedAt());
-        r.setUpdatedAt(src.getUpdatedAt());
-        r.setCreatedBy(src.getCreatedBy());
-        r.setApprovedAt(src.getApprovedAt());
-        r.setApprovedBy(src.getApprovedBy());
-        r.setRejectedReason(src.getRejectedReason());
-        r.setItemType("INGREDIENT");
-        r.setCode(src.getCode());
-        r.setName(src.getName());
-        r.setUnit(src.getUnit());
-        r.setIngredientType(src.getIngredientType());
-        r.setDefaultSupplier(src.getDefaultSupplier());
-        r.setLastPrice(src.getLastPrice());
-        r.setLastPriceDate(src.getLastPriceDate());
-        return r;
+    // ── Lifecycle hooks — Recipe bundling ─────────────────────────────────────
+
+    /** Tạo Recipe (nếu có lines) cùng lúc với Item. Recipe inherits approvalStatus của Item. */
+    @Override
+    protected void afterCreate(Item item) {
+        ItemRequest req = currentRequest.get();
+        if (req == null || !hasRecipeLines(req)) return;
+
+        if (item instanceof Product prod) {
+            int version = recipeRepository.maxVersionByProduct(prod.getId()) + 1;
+            Recipe recipe = buildProductRecipe(prod, req, version);
+            recipe.setApprovalStatus(prod.getApprovalStatus());
+            recipeRepository.save(recipe);
+        } else if (item instanceof SemiProduct sp) {
+            int version = recipeRepository.maxVersionBySemiProduct(sp.getId()) + 1;
+            Recipe recipe = buildSemiProductRecipe(sp, req, version);
+            recipe.setApprovalStatus(sp.getApprovalStatus());
+            recipeRepository.save(recipe);
+        }
     }
-
-    /** Convert SemiProductResponse → ItemResponse */
-    private ItemResponse fromSemiProduct(SemiProductResponse src) {
-        ItemResponse r = new ItemResponse();
-        r.setId(src.getId());
-        r.setStatus(src.getStatus());
-        r.setApprovalStatus(src.getApprovalStatus());
-        r.setCreatedAt(src.getCreatedAt());
-        r.setUpdatedAt(src.getUpdatedAt());
-        r.setCreatedBy(src.getCreatedBy());
-        r.setApprovedAt(src.getApprovedAt());
-        r.setApprovedBy(src.getApprovedBy());
-        r.setRejectedReason(src.getRejectedReason());
-        r.setItemType("SEMI_PRODUCT");
-        r.setCode(src.getCode());
-        r.setName(src.getName());
-        r.setUnit(src.getUnit());
-        return r;
-    }
-
-    /** Convert ProductResponse → ItemResponse */
-    private ItemResponse fromProduct(ProductResponse src) {
-        ItemResponse r = new ItemResponse();
-        r.setId(src.getId());
-        r.setStatus(src.getStatus());
-        r.setApprovalStatus(src.getApprovalStatus());
-        r.setCreatedAt(src.getCreatedAt());
-        r.setUpdatedAt(src.getUpdatedAt());
-        r.setCreatedBy(src.getCreatedBy());
-        r.setApprovedAt(src.getApprovedAt());
-        r.setApprovedBy(src.getApprovedBy());
-        r.setRejectedReason(src.getRejectedReason());
-        r.setItemType("PRODUCT");
-        r.setCode(src.getCode());
-        r.setName(src.getName());
-        r.setUnit(src.getUnit());
-        r.setProductType(src.getProductType());
-        r.setProductCategory(src.getProductCategory());
-        r.setSellingPrice(src.getSellingPrice());
-        r.setRecipe(src.getRecipe());
-        return r;
-    }
-
-    // ── Request converters ────────────────────────────────────────────────────
-
-    private IngredientRequest toIngredientReq(ItemRequest r) {
-        return new IngredientRequest(r.code(), r.name(), r.unit(), r.ingredientType(), r.defaultSupplierId());
-    }
-
-    private SemiProductRequest toSemiProductReq(ItemRequest r) {
-        return new SemiProductRequest(r.code(), r.name(), r.unit());
-    }
-
-    private ProductRequest toProductReq(ItemRequest r) {
-        return new ProductRequest(r.code(), r.name(), r.unit(),
-                r.productType(), r.productCategory(), r.sellingPrice(),
-                r.recipeNote(), r.recipeLines());
-    }
-
-    // ── Specification ─────────────────────────────────────────────────────────
 
     /**
-     * Xây Specification từ params.
-     * Tách riêng param "itemType" để build discriminator predicate (root.type()),
-     * còn lại delegate cho SpecificationBuilder.
+     * Upsert Recipe khi Item được cập nhật:
+     * - Có bản PENDING_APPROVAL → replace lines
+     * - Không có → tạo version mới PENDING_APPROVAL
      */
-    private Specification<Item> buildSpec(MultiValueMap<String, String> params) {
-        String itemType = params.getFirst("itemType");
+    @Override
+    protected void afterUpdate(Item item) {
+        ItemRequest req = currentRequest.get();
+        if (req == null || !hasRecipeLines(req)) return;
 
-        // Remove itemType khỏi params trước khi pass vào SpecificationBuilder
-        // (nếu không, SpecificationBuilder sẽ thử root.get("itemType") và bị lỗi)
-        MultiValueMap<String, String> rest = new org.springframework.util.LinkedMultiValueMap<>(params);
-        rest.remove("itemType");
-
-        Specification<Item> base = SpecificationBuilder.from(rest);
-
-        if (itemType == null || itemType.isBlank()) {
-            return base;
+        if (item instanceof Product prod) {
+            recipeRepository
+                    .findFirstByProductIdAndApprovalStatusOrderByVersionDesc(
+                            prod.getId(), ApprovalStatus.PENDING_APPROVAL)
+                    .ifPresentOrElse(
+                            recipe -> replaceRecipeLines(recipe, req),
+                            () -> {
+                                int v = recipeRepository.maxVersionByProduct(prod.getId()) + 1;
+                                Recipe r = buildProductRecipe(prod, req, v);
+                                r.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+                                recipeRepository.save(r);
+                            });
+        } else if (item instanceof SemiProduct sp) {
+            recipeRepository
+                    .findFirstBySemiProductIdAndApprovalStatusOrderByVersionDesc(
+                            sp.getId(), ApprovalStatus.PENDING_APPROVAL)
+                    .ifPresentOrElse(
+                            recipe -> replaceRecipeLines(recipe, req),
+                            () -> {
+                                int v = recipeRepository.maxVersionBySemiProduct(sp.getId()) + 1;
+                                Recipe r = buildSemiProductRecipe(sp, req, v);
+                                r.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+                                recipeRepository.save(r);
+                            });
         }
-
-        Class<? extends Item> typeClass = switch (itemType.toUpperCase()) {
-            case "INGREDIENT" -> Ingredient.class;
-            case "SEMI_PRODUCT" -> SemiProduct.class;
-            case "PRODUCT" -> Product.class;
-            default -> throw new IllegalArgumentException("Unknown itemType: " + itemType);
-        };
-
-        Specification<Item> typeSpec = (root, query, cb) -> cb.equal(root.type(), typeClass);
-        return base.and(typeSpec);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    /** Khi Item được APPROVE → tự động APPROVE + ACTIVATE recipe PENDING mới nhất. */
+    @Override
+    protected void afterApprove(Item item) {
+        if (item instanceof Product prod) {
+            recipeRepository
+                    .findFirstByProductIdAndApprovalStatusOrderByVersionDesc(
+                            prod.getId(), ApprovalStatus.PENDING_APPROVAL)
+                    .ifPresent(recipe -> {
+                        recipeRepository.deactivateAllByProduct(prod.getId());
+                        activateRecipe(recipe);
+                    });
+        } else if (item instanceof SemiProduct sp) {
+            recipeRepository
+                    .findFirstBySemiProductIdAndApprovalStatusOrderByVersionDesc(
+                            sp.getId(), ApprovalStatus.PENDING_APPROVAL)
+                    .ifPresent(recipe -> {
+                        recipeRepository.deactivateAllBySemiProduct(sp.getId());
+                        activateRecipe(recipe);
+                    });
+        }
+    }
 
-    private Item loadItem(UUID id) {
-        return itemRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Item", id));
+    /** Trước khi xóa Item → deactivate tất cả recipe đi kèm. */
+    @Override
+    protected void beforeDelete(Item item) {
+        List<Recipe> recipes = item instanceof Product prod
+                ? recipeRepository.findByProductId(prod.getId())
+                : item instanceof SemiProduct sp
+                        ? recipeRepository.findBySemiProductId(sp.getId())
+                        : List.of();
+        if (!recipes.isEmpty()) {
+            recipes.forEach(r -> r.setActive(false));
+            recipeRepository.saveAll(recipes);
+        }
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private void applyCommonFields(Item e, ItemRequest req) {
+        e.setCode(req.code());
+        e.setName(req.name());
+        e.setUnit(req.unit());
+        e.setProductCategory(req.productCategory());
+    }
+
+    private void applyProductFields(Product e, ItemRequest req) {
+        e.setProductType(req.productType());
+        e.setSellingPrice(req.sellingPrice());
+    }
+
+    private void applySupplier(Ingredient e, ItemRequest req) {
+        if (req.defaultSupplierId() != null) {
+            Supplier supplier = supplierRepository.findById(req.defaultSupplierId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Supplier", req.defaultSupplierId()));
+            e.setDefaultSupplier(supplier);
+        } else {
+            e.setDefaultSupplier(null);
+        }
+    }
+
+    private Recipe buildProductRecipe(Product product, ItemRequest req, int version) {
+        Recipe recipe = new Recipe();
+        recipe.setProduct(product);
+        recipe.setNote(req.recipeNote());
+        recipe.setActive(false);
+        recipe.setVersion(version);
+        recipe.setCreatedBy(actorResolver.currentUserId());
+        applyRecipeLines(recipe, req.recipeLines());
+        return recipe;
+    }
+
+    private Recipe buildSemiProductRecipe(SemiProduct sp, ItemRequest req, int version) {
+        Recipe recipe = new Recipe();
+        recipe.setSemiProduct(sp);
+        recipe.setNote(req.recipeNote());
+        recipe.setActive(false);
+        recipe.setVersion(version);
+        recipe.setCreatedBy(actorResolver.currentUserId());
+        applyRecipeLines(recipe, req.recipeLines());
+        return recipe;
+    }
+
+    private void replaceRecipeLines(Recipe recipe, ItemRequest req) {
+        recipe.setNote(req.recipeNote());
+        recipe.getLines().clear();
+        applyRecipeLines(recipe, req.recipeLines());
+        recipeRepository.save(recipe);
+    }
+
+    private void activateRecipe(Recipe recipe) {
+        recipe.setApprovalStatus(ApprovalStatus.APPROVED);
+        recipe.setActive(true);
+        recipeRepository.save(recipe);
+    }
+
+    private void applyRecipeLines(Recipe recipe, List<RecipeLineRequest> lineRequests) {
+        for (int i = 0; i < lineRequests.size(); i++) {
+            RecipeLineRequest lr = lineRequests.get(i);
+            Item item = repository.findById(lr.itemId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Item", lr.itemId()));
+            RecipeLine line = new RecipeLine();
+            line.setRecipe(recipe);
+            line.setItem(item);
+            line.setQuantity(lr.quantity());
+            line.setUnit(lr.unit());
+            line.setSortOrder(lr.sortOrder() != null ? lr.sortOrder() : i + 1);
+            recipe.getLines().add(line);
+        }
+    }
+
+    private boolean hasRecipeLines(ItemRequest req) {
+        return req.recipeLines() != null && !req.recipeLines().isEmpty();
+    }
+
+    private Class<? extends Item> resolveClass(String itemType) {
+        return switch (itemType.toUpperCase()) {
+            case "INGREDIENT"   -> Ingredient.class;
+            case "SEMI_PRODUCT" -> SemiProduct.class;
+            case "PRODUCT"      -> Product.class;
+            default -> throw new IllegalArgumentException("Unknown itemType: " + itemType);
+        };
     }
 }

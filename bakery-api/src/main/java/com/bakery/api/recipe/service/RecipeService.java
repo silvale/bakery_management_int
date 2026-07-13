@@ -212,9 +212,9 @@ public class RecipeService
                 .toList();
     }
 
-    // ── Public mapping (dùng bởi ProductService) ─────────────────
+    // ── Public mapping ────────────────────────────────────────────
 
-    /** Expose mapping cho ProductService dùng khi nhúng recipe vào ProductResponse. */
+    /** Expose mapping cho ItemService khi nhúng recipe vào ItemResponse. */
     public RecipeResponse mapToResponse(Recipe recipe) {
         return toResponse(recipe);
     }

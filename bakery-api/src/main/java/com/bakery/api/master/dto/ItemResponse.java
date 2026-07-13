@@ -14,8 +14,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * Unified response cho /api/v1/items.
- * Superset của IngredientResponse + SemiProductResponse + ProductResponse.
+ * Unified response cho /api/v1/items — superset của mọi loại Item.
  * Fields không áp dụng cho loại đó sẽ là null.
  */
 @Getter
