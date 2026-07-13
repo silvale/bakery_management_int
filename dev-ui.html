@@ -1,0 +1,1368 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Bakery Dev UI</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;font-size:14px;display:flex;height:100vh;overflow:hidden;background:#f5f5f5}
+#sidebar{width:210px;background:#1e293b;color:#94a3b8;flex-shrink:0;display:flex;flex-direction:column;overflow-y:auto}
+#sidebar h1{font-size:13px;font-weight:700;color:#f1f5f9;padding:16px 14px 8px;letter-spacing:.05em;text-transform:uppercase}
+.nav-group{padding:4px 0;border-top:1px solid #334155}
+.nav-label{font-size:10px;font-weight:700;color:#64748b;padding:8px 14px 3px;text-transform:uppercase;letter-spacing:.1em}
+.nav-item{display:block;padding:6px 14px 6px 20px;cursor:pointer;color:#94a3b8;border-left:3px solid transparent;transition:all .15s;font-size:13px}
+.nav-item:hover{background:#334155;color:#e2e8f0}
+.nav-item.active{background:#0f172a;color:#38bdf8;border-left-color:#38bdf8}
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#topbar{background:#fff;border-bottom:1px solid #e2e8f0;padding:10px 24px;display:flex;align-items:center;gap:12px}
+#topbar h2{font-size:15px;font-weight:600;color:#0f172a;flex:1}
+#content{flex:1;overflow-y:auto;padding:20px 24px}
+#toast{position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast-item{padding:10px 16px;border-radius:6px;font-size:13px;font-weight:500;min-width:200px;max-width:360px;box-shadow:0 4px 12px rgba(0,0,0,.15);animation:slideIn .2s ease}
+.toast-ok{background:#dcfce7;color:#166534;border:1px solid #bbf7d0}
+.toast-err{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+@keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:18px 20px;margin-bottom:14px}
+.card-title{font-size:13px;font-weight:600;color:#374151;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #f1f5f9}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#f8fafc;text-align:left;padding:7px 10px;font-weight:600;color:#475569;border-bottom:2px solid #e2e8f0;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #f1f5f9;color:#374151;vertical-align:middle}
+tr:hover td{background:#f8fafc}
+.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:600}
+.b-ing{background:#fef3c7;color:#92400e}.b-semi{background:#ede9fe;color:#5b21b6}.b-prod{background:#dcfce7;color:#166534}
+.b-draft{background:#f1f5f9;color:#475569}.b-pending{background:#fef9c3;color:#713f12}
+.b-approved{background:#d1fae5;color:#065f46}.b-rejected{background:#fee2e2;color:#991b1b}
+.b-free{background:#dbeafe;color:#1e40af}.b-batch{background:#fce7f3;color:#9d174d}
+.b-purchase{background:#e0f2fe;color:#0369a1}.b-transfer{background:#f3e8ff;color:#7c3aed}
+.b-finalized{background:#d1fae5;color:#065f46}.b-active{background:#d1fae5;color:#065f46}
+.btn{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
+.btn-primary{background:#2563eb;color:#fff}.btn-primary:hover{background:#1d4ed8}
+.btn-success{background:#16a34a;color:#fff}.btn-success:hover{background:#15803d}
+.btn-danger{background:#dc2626;color:#fff}.btn-danger:hover{background:#b91c1c}
+.btn-warn{background:#d97706;color:#fff}.btn-warn:hover{background:#b45309}
+.btn-ghost{background:#f1f5f9;color:#374151;border:1px solid #e2e8f0}.btn-ghost:hover{background:#e2e8f0}
+.btn-sm{padding:3px 9px;font-size:12px}.btn:disabled{opacity:.4;cursor:not-allowed}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form-grid.cols3{grid-template-columns:1fr 1fr 1fr}
+.form-full{grid-column:1/-1}
+.field{display:flex;flex-direction:column;gap:3px}
+.field label{font-size:11px;font-weight:600;color:#475569}
+.field input,.field select,.field textarea{border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;color:#111827;background:#fff;transition:border .15s}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.field textarea{resize:vertical;min-height:56px}
+.filter-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.filter-bar select,.filter-bar input{border:1px solid #d1d5db;border-radius:6px;padding:5px 9px;font-size:13px;background:#fff}
+.action-row{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.divider{border:none;border-top:1px solid #f1f5f9;margin:14px 0}
+.empty{text-align:center;padding:36px;color:#94a3b8;font-size:13px}
+.tabs{display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px}
+.tab{padding:8px 16px;font-size:13px;font-weight:500;cursor:pointer;color:#64748b;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
+.tab.active{color:#2563eb;border-bottom-color:#2563eb}
+.tab:hover{color:#374151}
+.recipe-table{width:100%;border-collapse:collapse;margin-top:6px}
+.recipe-table th{background:#f8fafc;padding:5px 7px;font-size:12px;font-weight:600;color:#475569;border:1px solid #e2e8f0}
+.recipe-table td{padding:3px 5px;border:1px solid #e2e8f0}
+.recipe-table select,.recipe-table input{width:100%;border:none;padding:4px 5px;font-size:13px;background:transparent;outline:none}
+.recipe-table select:focus,.recipe-table input:focus{background:#eff6ff;border-radius:3px}
+.rule-row{display:grid;grid-template-columns:110px 60px 100px 110px 90px 36px;gap:6px;align-items:center;margin-bottom:5px}
+.rule-row input,.rule-row select{border:1px solid #d1d5db;border-radius:5px;padding:5px 7px;font-size:13px;width:100%}
+.group-item-row{display:grid;grid-template-columns:1fr 110px 60px 32px;gap:6px;align-items:center;margin-bottom:5px}
+.group-item-row select,.group-item-row input{border:1px solid #d1d5db;border-radius:5px;padding:5px 7px;font-size:13px;width:100%}
+.detail-expand td{padding:0;background:#f8fafc}
+.detail-inner{padding:14px 18px}
+.stat-row{display:flex;gap:20px;flex-wrap:wrap}
+.stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 16px;min-width:130px}
+.stat-label{font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.stat-value{font-size:22px;font-weight:700;color:#0f172a;margin-top:2px}
+</style>
+</head>
+<body>
+<nav id="sidebar">
+  <h1>🥐 Bakery Dev</h1>
+  <div class="nav-group">
+    <div class="nav-label">Master Data</div>
+    <div class="nav-item active" onclick="nav('items-list')">📋 Sản phẩm</div>
+    <div class="nav-item" onclick="nav('item-form',{})">➕ Tạo sản phẩm</div>
+    <div class="nav-item" onclick="nav('suppliers')">🏭 Nhà cung cấp</div>
+    <div class="nav-item" onclick="nav('product-mapping')">🔗 Product Mapping</div>
+    <div class="nav-item" onclick="nav('item-groups')">🏠 Item Groups</div>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Kế hoạch SX</div>
+    <div class="nav-item" onclick="nav('prod-groups')">🔧 Prod Groups</div>
+    <div class="nav-item" onclick="nav('threshold-rules')">📏 Threshold Rules</div>
+    <div class="nav-item" onclick="nav('prod-plans')">📅 Kế hoạch ngày</div>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Sản xuất</div>
+    <div class="nav-item" onclick="nav('prod-requests')">📝 Phiếu SX</div>
+    <div class="nav-item" onclick="nav('prod-adjustments')">⚠️ Điều chỉnh SX</div>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Kho</div>
+    <div class="nav-item" onclick="nav('stock-summary')">📦 Tồn kho</div>
+    <div class="nav-item" onclick="nav('inventory-requests')">📋 Phiếu kho</div>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Báo cáo</div>
+    <div class="nav-item" onclick="nav('daily-report')">📊 Báo cáo ngày</div>
+    <div class="nav-item" onclick="nav('pos-sales')">🏪 POS Sales</div>
+  </div>
+</nav>
+
+<div id="main">
+  <div id="topbar"><h2 id="page-title">Danh sách sản phẩm</h2></div>
+  <div id="content"></div>
+</div>
+<div id="toast"></div>
+
+<script>
+const BASE='http://localhost:8080';
+let allItems=[],allWarehouses=[],allSuppliers=[];
+let itemsPage=0; const PAGE_SIZE=20;
+
+// ── API ───────────────────────────────────────────────────────────────────────
+async function api(method,path,body){
+  try{
+    const res=await fetch(BASE+path,{method,headers:{'Content-Type':'application/json'},body:body!=null?JSON.stringify(body):undefined});
+    if(!res.ok){const t=await res.text();throw new Error(t||res.statusText)}
+    if(res.status===204)return null;
+    return res.json();
+  }catch(e){toast(e.message,'err');throw e}
+}
+async function apiForm(path,formData){
+  try{
+    const res=await fetch(BASE+path,{method:'POST',body:formData});
+    if(!res.ok){const t=await res.text();throw new Error(t||res.statusText)}
+    return res.json();
+  }catch(e){toast(e.message,'err');throw e}
+}
+async function loadAllItems(){
+  try{const d=await api('GET','/api/v1/items?size=500');allItems=d?.content??d??[];}catch(_){allItems=[]}
+}
+async function loadAllWarehouses(){
+  try{const d=await api('GET','/api/v1/warehouses/all');allWarehouses=d??[];}catch(_){allWarehouses=[]}
+}
+async function loadAllSuppliers(){
+  try{const d=await api('GET','/api/v1/suppliers/all');allSuppliers=d??[];}catch(_){allSuppliers=[]}
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg,type='ok'){
+  const el=document.createElement('div');
+  el.className=`toast-item toast-${type}`;
+  el.textContent=typeof msg==='string'?msg:JSON.stringify(msg);
+  document.getElementById('toast').appendChild(el);
+  setTimeout(()=>el.remove(),3500);
+}
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
+const PAGE_TITLES={'items-list':'Danh sách sản phẩm','item-form':'Tạo / Sửa sản phẩm',
+  'suppliers':'Nhà cung cấp','product-mapping':'Product Mapping','item-groups':'Item Groups',
+  'prod-groups':'Production Groups','threshold-rules':'Threshold Rules','prod-plans':'Kế hoạch sản xuất',
+  'prod-requests':'Phiếu sản xuất','prod-adjustments':'Điều chỉnh SX',
+  'stock-summary':'Tồn kho','inventory-requests':'Phiếu kho',
+  'daily-report':'Báo cáo ngày','pos-sales':'POS Sales'};
+const PAGE_FNS={'items-list':pageItemsList,'item-form':pageItemForm,'suppliers':pageSuppliers,
+  'product-mapping':pageProductMapping,'item-groups':pageItemGroups,'prod-groups':pageProdGroups,
+  'threshold-rules':pageThresholdRules,'prod-plans':pageProdPlans,'prod-requests':pageProdRequests,
+  'prod-adjustments':pageProdAdjustments,'stock-summary':pageStockSummary,
+  'inventory-requests':pageInventoryRequests,'daily-report':pageDailyReport,'pos-sales':pagePosSales};
+
+function nav(page,data){
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el=>{
+    if(el.getAttribute('onclick')?.includes(`'${page}'`))el.classList.add('active');
+  });
+  document.getElementById('page-title').textContent=PAGE_TITLES[page]||page;
+  PAGE_FNS[page]?.(data);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function badge(val){
+  const map={INGREDIENT:'b-ing NL',SEMI_PRODUCT:'b-semi BTP',PRODUCT:'b-prod SP',
+    DRAFT:'b-draft Draft',PENDING_APPROVAL:'b-pending Pending',APPROVED:'b-approved Approved',
+    REJECTED:'b-rejected Rejected',FREE_GROUP:'b-free Free',BATCH_FORMULA:'b-batch Batch',
+    FINALIZED:'b-finalized Finalized',ACTIVE:'b-active Active',
+    PURCHASE:'b-purchase Nhập',TRANSFER:'b-transfer Điều chuyển',ADJUSTMENT:'b-pending Điều chỉnh',
+    PENDING:'b-pending Pending',READY:'b-approved Ready',COMPLETED:'b-finalized Done'};
+  if(map[val]){const[cls,label]=map[val].split(' ');return`<span class="badge ${cls}">${label}</span>`}
+  return val?`<span class="badge b-draft">${val}</span>`:'—';
+}
+function fmt(n){return n!=null?Number(n).toLocaleString('vi'):'—'}
+function fmtDate(s){return s?new Date(s).toLocaleDateString('vi'):'—'}
+function itemOpts(filter){
+  return allItems.filter(filter||(()=>true))
+    .map(i=>`<option value="${i.id}">[${i.itemType?.[0]}] ${i.code} — ${i.name}</option>`).join('');
+}
+function whOpts(){return allWarehouses.map(w=>`<option value="${w.id}">${w.code} — ${w.name}</option>`).join('')}
+function supOpts(){return allSuppliers.map(s=>`<option value="${s.id}">${s.code} — ${s.name}</option>`).join('')}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ITEMS
+// ══════════════════════════════════════════════════════════════════════════════
+async function pageItemsList(){
+  itemsPage=0;
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div class="filter-bar">
+      <select id="ft" onchange="itemsPage=0;loadItems()">
+        <option value="">Tất cả loại</option>
+        <option value="INGREDIENT">Nguyên liệu</option>
+        <option value="SEMI_PRODUCT">Bán thành phẩm</option>
+        <option value="PRODUCT">Sản phẩm</option>
+      </select>
+      <input id="fn" placeholder="Tìm tên / code..." oninput="itemsPage=0;loadItems()" style="width:200px">
+      <button class="btn btn-primary" onclick="nav('item-form',{})">+ Tạo mới</button>
+    </div>
+    <div id="items-wrap"><div class="empty">Đang tải...</div></div>
+    <div id="items-pag" style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:10px"></div>
+  </div>`;
+  await loadAllItems(); loadItems();
+}
+async function loadItems(){
+  const type=document.getElementById('ft')?.value||'';
+  const name=document.getElementById('fn')?.value||'';
+  let path=`/api/v1/items?size=${PAGE_SIZE}&page=${itemsPage}`;
+  if(type)path+=`&itemType=${type}`;
+  if(name)path+=`&name=${encodeURIComponent(name)}`;
+  const data=await api('GET',path);
+  const items=data?.content??[];
+  const total=data?.totalElements??0, totalPages=data?.totalPages??1;
+  const wrap=document.getElementById('items-wrap'),pag=document.getElementById('items-pag');
+  if(!wrap)return;
+  if(!items.length){wrap.innerHTML='<div class="empty">Không có dữ liệu</div>';if(pag)pag.innerHTML='';return;}
+  wrap.innerHTML=`<table><thead><tr>
+    <th>Loại</th><th>Code</th><th>Tên</th><th>Đơn vị</th><th>Giá bán</th><th>Status</th><th></th>
+  </tr></thead><tbody>
+  ${items.map(i=>`<tr>
+    <td>${badge(i.itemType)}</td><td><code>${i.code}</code></td><td>${i.name}</td><td>${i.unit}</td>
+    <td>${i.sellingPrice!=null?fmt(i.sellingPrice)+'đ':'—'}</td>
+    <td>${badge(i.approvalStatus)}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" onclick='nav("item-form",${JSON.stringify(i)})'>Sửa</button>
+      ${i.approvalStatus==='DRAFT'||i.approvalStatus==='PENDING_APPROVAL'
+        ?`<button class="btn btn-success btn-sm" onclick="approveItem('${i.id}')">Approve</button>`:''}
+    </td>
+  </tr>`).join('')}</tbody></table>`;
+  if(pag){
+    const from=itemsPage*PAGE_SIZE+1,to=Math.min((itemsPage+1)*PAGE_SIZE,total);
+    pag.innerHTML=`<span style="font-size:12px;color:#64748b">${from}–${to} / ${total}</span>
+      <button class="btn btn-ghost btn-sm" onclick="itemsPage--;loadItems()" ${itemsPage===0?'disabled':''}>‹</button>
+      <span style="font-size:13px">Trang ${itemsPage+1}/${totalPages}</span>
+      <button class="btn btn-ghost btn-sm" onclick="itemsPage++;loadItems()" ${itemsPage>=totalPages-1?'disabled':''}>›</button>`;
+  }
+}
+async function approveItem(id){await api('POST',`/api/v1/items/${id}/approve`);toast('Đã approve');loadItems();}
+
+// Item Form
+let recipeLines=[];
+async function pageItemForm(item={}){
+  await loadAllItems();
+  const isEdit=!!item.id;
+  recipeLines=(item.recipe?.lines??[]).map(l=>({itemId:l.item?.id??'',qty:l.quantity??'',unit:l.unit??'',sort:l.sortOrder??1}));
+  let groups=[];try{groups=await api('GET','/api/v1/item-groups');}catch(_){}
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div class="card-title">${isEdit?'Sửa: '+item.name:'Tạo sản phẩm mới'}</div>
+    <div class="form-grid">
+      <div class="field"><label>Loại *</label>
+        <select id="f-type" onchange="onItemTypeChange()" ${isEdit?'disabled':''}>
+          <option value="">-- Chọn --</option>
+          <option value="INGREDIENT" ${item.itemType==='INGREDIENT'?'selected':''}>Nguyên liệu</option>
+          <option value="SEMI_PRODUCT" ${item.itemType==='SEMI_PRODUCT'?'selected':''}>Bán thành phẩm</option>
+          <option value="PRODUCT" ${item.itemType==='PRODUCT'?'selected':''}>Sản phẩm</option>
+        </select></div>
+      <div class="field"><label>Item Group</label>
+        <select id="f-ig">
+          <option value="">-- Không có --</option>
+          ${groups.map(g=>`<option value="${g.id}" ${item.itemGroup?.key===g.code?'selected':''}>${g.code} — ${g.name}</option>`).join('')}
+        </select></div>
+      <div class="field"><label>Code *</label><input id="f-code" value="${item.code??''}"></div>
+      <div class="field"><label>Tên *</label><input id="f-name" value="${item.name??''}"></div>
+      <div class="field"><label>Đơn vị *</label><input id="f-unit" value="${item.unit??''}" placeholder="cái, kg..."></div>
+      <div class="field" id="f-price-wrap" style="${item.itemType==='PRODUCT'?'':'display:none'}">
+        <label>Giá bán</label><input id="f-price" type="number" value="${item.sellingPrice??''}"></div>
+      <div class="field" id="f-ingtype-wrap" style="${item.itemType==='INGREDIENT'?'':'display:none'}">
+        <label>Ingredient Type</label><input id="f-ingtype" value="${item.ingredientType??''}" placeholder="DRY, WET..."></div>
+    </div>
+    <div id="recipe-section" style="${item.itemType==='PRODUCT'||item.itemType==='SEMI_PRODUCT'?'':'display:none'}">
+      <hr class="divider">
+      <div class="card-title">Công thức</div>
+      <div class="field" style="margin-bottom:8px"><label>Ghi chú công thức</label>
+        <textarea id="f-rnote">${item.recipe?.note??''}</textarea></div>
+      <table class="recipe-table"><thead><tr>
+        <th style="width:45%">Nguyên liệu / BTP</th><th style="width:20%">Số lượng</th>
+        <th style="width:20%">Đơn vị</th><th style="width:10%">Sort</th><th></th>
+      </tr></thead><tbody id="recipe-tbody"></tbody></table>
+      <button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="addRL()">+ Thêm dòng</button>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-ghost" onclick="nav('items-list')">Huỷ</button>
+      <button class="btn btn-primary" onclick="saveItem('${item.id??''}')">
+        ${isEdit?'Lưu thay đổi':'Tạo sản phẩm'}</button>
+    </div>
+  </div>`;
+  renderRL();
+}
+function onItemTypeChange(){
+  const t=document.getElementById('f-type').value;
+  document.getElementById('f-price-wrap').style.display=t==='PRODUCT'?'':'none';
+  document.getElementById('f-ingtype-wrap').style.display=t==='INGREDIENT'?'':'none';
+  document.getElementById('recipe-section').style.display=(t==='PRODUCT'||t==='SEMI_PRODUCT')?'':'none';
+}
+function renderRL(){
+  const tb=document.getElementById('recipe-tbody');if(!tb)return;
+  tb.innerHTML=recipeLines.map((l,i)=>`<tr>
+    <td><select onchange="recipeLines[${i}].itemId=this.value">
+      <option value="">-- Chọn --</option>
+      ${allItems.filter(x=>x.itemType!=='PRODUCT').map(x=>`<option value="${x.id}" ${x.id===l.itemId?'selected':''}>[${x.itemType?.[0]}] ${x.code} — ${x.name}</option>`).join('')}
+    </select></td>
+    <td><input type="number" step="0.001" value="${l.qty}" onchange="recipeLines[${i}].qty=+this.value"></td>
+    <td><input value="${l.unit}" onchange="recipeLines[${i}].unit=this.value" placeholder="kg,g..."></td>
+    <td><input type="number" value="${l.sort||i+1}" onchange="recipeLines[${i}].sort=+this.value" style="width:50px"></td>
+    <td><button class="btn btn-danger btn-sm" onclick="recipeLines.splice(${i},1);renderRL()">✕</button></td>
+  </tr>`).join('');
+}
+function addRL(){recipeLines.push({itemId:'',qty:'',unit:'',sort:recipeLines.length+1});renderRL();}
+async function saveItem(id){
+  const itemType=document.getElementById('f-type').value;
+  if(!itemType){toast('Chọn loại sản phẩm','err');return;}
+  const igVal=document.getElementById('f-ig').value;
+  const body={itemType,code:document.getElementById('f-code').value.trim(),
+    name:document.getElementById('f-name').value.trim(),unit:document.getElementById('f-unit').value.trim(),
+    itemGroupId:igVal||null,
+    ingredientType:document.getElementById('f-ingtype')?.value.trim()||null,
+    sellingPrice:document.getElementById('f-price')?.value?+document.getElementById('f-price').value:null,
+    recipeNote:document.getElementById('f-rnote')?.value||null,
+    recipeLines:recipeLines.filter(l=>l.itemId).map(l=>({itemId:l.itemId,quantity:+l.qty,unit:l.unit,sortOrder:l.sort}))};
+  if(!body.code||!body.name||!body.unit){toast('Code, Tên, Đơn vị là bắt buộc','err');return;}
+  id?await api('PUT',`/api/v1/items/${id}`,body):await api('POST','/api/v1/items',body);
+  toast(id?'Đã cập nhật':'Đã tạo sản phẩm');nav('items-list');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SUPPLIERS
+// ══════════════════════════════════════════════════════════════════════════════
+async function pageSuppliers(){
+  document.getElementById('content').innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="card">
+      <div class="card-title" id="sup-form-title">Thêm nhà cung cấp</div>
+      <div class="form-grid">
+        <div class="field"><label>Code *</label><input id="s-code"></div>
+        <div class="field"><label>Tên *</label><input id="s-name"></div>
+        <div class="field"><label>Người liên hệ</label><input id="s-contact"></div>
+        <div class="field"><label>Điện thoại</label><input id="s-phone"></div>
+        <div class="field"><label>Email</label><input id="s-email"></div>
+        <div class="field"><label>Địa chỉ</label><input id="s-addr"></div>
+      </div>
+      <input type="hidden" id="s-id">
+      <div class="action-row">
+        <button class="btn btn-ghost btn-sm" onclick="clearSupForm()">Xóa trắng</button>
+        <button class="btn btn-primary" onclick="saveSup()">Lưu</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Danh sách</div>
+      <div id="sup-list"><div class="empty">Đang tải...</div></div>
+    </div>
+  </div>`;
+  loadSuppliers();
+}
+async function loadSuppliers(){
+  const data=await api('GET','/api/v1/suppliers/all');
+  allSuppliers=data??[];
+  const el=document.getElementById('sup-list');if(!el)return;
+  if(!data?.length){el.innerHTML='<div class="empty">Chưa có nhà cung cấp</div>';return;}
+  el.innerHTML=`<table><thead><tr><th>Code</th><th>Tên</th><th>SĐT</th><th>Status</th><th></th></tr></thead>
+  <tbody>${data.map(s=>`<tr>
+    <td><strong>${s.code}</strong></td><td>${s.name}</td>
+    <td>${s.phone??'—'}</td><td>${badge(s.approvalStatus)}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" onclick='editSup(${JSON.stringify(s)})'>Sửa</button>
+      ${s.approvalStatus==='DRAFT'||s.approvalStatus==='PENDING_APPROVAL'
+        ?`<button class="btn btn-success btn-sm" onclick="approveSup('${s.id}')">Approve</button>`:''}
+    </td>
+  </tr>`).join('')}</tbody></table>`;
+}
+function editSup(s){
+  document.getElementById('s-id').value=s.id;
+  document.getElementById('s-code').value=s.code??'';
+  document.getElementById('s-name').value=s.name??'';
+  document.getElementById('s-contact').value=s.contactName??'';
+  document.getElementById('s-phone').value=s.phone??'';
+  document.getElementById('s-email').value=s.email??'';
+  document.getElementById('s-addr').value=s.address??'';
+  document.getElementById('sup-form-title').textContent='Sửa: '+s.name;
+}
+function clearSupForm(){
+  ['s-id','s-code','s-name','s-contact','s-phone','s-email','s-addr'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('sup-form-title').textContent='Thêm nhà cung cấp';
+}
+async function saveSup(){
+  const id=document.getElementById('s-id').value;
+  const body={code:document.getElementById('s-code').value.trim(),name:document.getElementById('s-name').value.trim(),
+    contactName:document.getElementById('s-contact').value.trim()||null,
+    phone:document.getElementById('s-phone').value.trim()||null,
+    email:document.getElementById('s-email').value.trim()||null,
+    address:document.getElementById('s-addr').value.trim()||null};
+  if(!body.code||!body.name){toast('Code và Tên là bắt buộc','err');return;}
+  id?await api('PUT',`/api/v1/suppliers/${id}`,body):await api('POST','/api/v1/suppliers',body);
+  toast('Đã lưu');clearSupForm();loadSuppliers();
+}
+async function approveSup(id){await api('POST',`/api/v1/suppliers/${id}/approve`);toast('Đã approve');loadSuppliers();}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRODUCT MAPPING
+// ══════════════════════════════════════════════════════════════════════════════
+async function pageProductMapping(){
+  await loadAllItems();
+  const products=allItems.filter(i=>i.itemType==='PRODUCT');
+  document.getElementById('content').innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:14px">
+    <div class="card">
+      <div class="card-title">Thêm mapping</div>
+      <div class="form-grid">
+        <div class="field form-full"><label>Sản phẩm *</label>
+          <select id="pm-item">
+            <option value="">-- Chọn SP --</option>
+            ${products.map(p=>`<option value="${p.id}">${p.code} — ${p.name}</option>`).join('')}
+          </select></div>
+        <div class="field"><label>EX_CODE (POS) *</label><input id="pm-ex" placeholder="VD: TIRA-12"></div>
+        <div class="field"><label>Production Day</label><input id="pm-day" type="number" placeholder="0=hôm nay,1=ngày mai..."></div>
+        <div class="field form-full"><label>Ghi chú</label><input id="pm-note"></div>
+      </div>
+      <div class="action-row"><button class="btn btn-primary" onclick="savePM()">Thêm mapping</button></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Danh sách mappings</div>
+      <div id="pm-list"><div class="empty">Đang tải...</div></div>
+    </div>
+  </div>`;
+  loadPM();
+}
+async function loadPM(){
+  const data=await api('GET','/api/v1/product-mappings/all');
+  const el=document.getElementById('pm-list');if(!el)return;
+  if(!data?.length){el.innerHTML='<div class="empty">Chưa có mapping</div>';return;}
+  el.innerHTML=`<table><thead><tr><th>SP (IN_CODE)</th><th>EX_CODE</th><th>Prod Day</th><th>Ghi chú</th><th></th></tr></thead>
+  <tbody>${data.map(m=>`<tr>
+    <td>${m.item?.name??m.item?.key??'?'}</td>
+    <td><code>${m.exCode}</code></td>
+    <td>${m.productionDay??0}</td>
+    <td>${m.note??'—'}</td>
+    <td><button class="btn btn-danger btn-sm" onclick="deletePM('${m.id}')">Xóa</button></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+async function savePM(){
+  const itemId=document.getElementById('pm-item').value;
+  const exCode=document.getElementById('pm-ex').value.trim();
+  if(!itemId||!exCode){toast('Cần chọn SP và nhập EX_CODE','err');return;}
+  await api('POST','/api/v1/product-mappings',{itemId,exCode,
+    productionDay:document.getElementById('pm-day').value?+document.getElementById('pm-day').value:null,
+    note:document.getElementById('pm-note').value||null});
+  toast('Đã thêm mapping');
+  document.getElementById('pm-item').value='';
+  document.getElementById('pm-ex').value='';
+  loadPM();
+}
+async function deletePM(id){
+  if(!confirm('Xóa mapping này?'))return;
+  await api('DELETE',`/api/v1/product-mappings/${id}`);
+  toast('Đã xóa');loadPM();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ITEM GROUPS
+// ══════════════════════════════════════════════════════════════════════════════
+async function pageItemGroups(){
+  document.getElementById('content').innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:14px">
+    <div class="card">
+      <div class="card-title">Thêm Item Group</div>
+      <div class="form-grid cols3">
+        <div class="field"><label>Code *</label><input id="ig-code" placeholder="PL"></div>
+        <div class="field"><label>Tên *</label><input id="ig-name" placeholder="Phòng Lạnh"></div>
+        <div class="field"><label>Sort</label><input id="ig-sort" type="number" value="0"></div>
+      </div>
+      <div class="action-row"><button class="btn btn-primary" onclick="createIG()">Thêm</button></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Danh sách</div>
+      <div id="ig-list"><div class="empty">Đang tải...</div></div>
+    </div>
+  </div>`;
+  loadIGs();
+}
+async function loadIGs(){
+  const data=await api('GET','/api/v1/item-groups');
+  const el=document.getElementById('ig-list');if(!el)return;
+  if(!data?.length){el.innerHTML='<div class="empty">Chưa có item group</div>';return;}
+  el.innerHTML=`<table><thead><tr><th>Code</th><th>Tên</th><th>Sort</th><th></th></tr></thead>
+  <tbody>${data.map(g=>`<tr>
+    <td><strong>${g.code}</strong></td><td>${g.name}</td><td>${g.sortOrder}</td>
+    <td><button class="btn btn-danger btn-sm" onclick="deleteIG('${g.id}')">Xóa</button></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+async function createIG(){
+  const code=document.getElementById('ig-code').value.trim(),name=document.getElementById('ig-name').value.trim();
+  if(!code||!name){toast('Code và Tên là bắt buộc','err');return;}
+  await api('POST','/api/v1/item-groups',{code,name,sortOrder:+document.getElementById('ig-sort').value||0});
+  toast('Đã tạo');document.getElementById('ig-code').value='';document.getElementById('ig-name').value='';loadIGs();
+}
+async function deleteIG(id){
+  if(!confirm('Xóa item group này?'))return;
+  await api('DELETE',`/api/v1/item-groups/${id}`);toast('Đã xóa');loadIGs();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRODUCTION GROUPS
+// ══════════════════════════════════════════════════════════════════════════════
+let pgItems=[];
+async function pageProdGroups(){
+  await loadAllItems();
+  let groups=[];try{groups=await api('GET','/api/v1/item-groups');}catch(_){}
+  pgItems=[];
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div class="card-title">Tạo Production Group</div>
+    <div class="form-grid">
+      <div class="field"><label>Code *</label><input id="pg-code" placeholder="BANH_BAP"></div>
+      <div class="field"><label>Tên *</label><input id="pg-name" placeholder="Nhóm Bánh Bắp"></div>
+      <div class="field"><label>Loại *</label>
+        <select id="pg-type" onchange="onPgType()">
+          <option value="FREE_GROUP">FREE_GROUP</option>
+          <option value="BATCH_FORMULA">BATCH_FORMULA</option>
+        </select></div>
+      <div class="field"><label>Item Group</label>
+        <select id="pg-ig"><option value="">-- Không có --</option>
+          ${groups.map(g=>`<option value="${g.id}">${g.code} — ${g.name}</option>`).join('')}
+        </select></div>
+      <div id="pg-targets" class="form-full">
+        <div class="form-grid cols3">
+          <div class="field"><label>Target Weekday</label><input id="pg-tw" type="number" placeholder="40"></div>
+          <div class="field"><label>Target Weekend</label><input id="pg-twe" type="number" placeholder="50"></div>
+        </div>
+      </div>
+      <div id="pg-batch" class="form-full" style="display:none">
+        <div class="field" style="max-width:200px"><label>Trọng lượng cối (gram)</label><input id="pg-bw" type="number" placeholder="10000"></div>
+      </div>
+      <div class="field form-full"><label>Ghi chú</label><textarea id="pg-note" rows="2"></textarea></div>
+    </div>
+    <hr class="divider">
+    <div class="card-title" style="margin-bottom:6px">Items trong group</div>
+    <div style="display:grid;grid-template-columns:1fr 110px 60px 32px;gap:6px;margin-bottom:4px;padding:0 2px">
+      <small style="font-weight:600;color:#64748b">Sản phẩm</small>
+      <small style="font-weight:600;color:#64748b" id="pg-gram-hdr" style="display:none">Gram/cái</small>
+      <small style="font-weight:600;color:#64748b">Sort</small><div></div>
+    </div>
+    <div id="pg-items-rows"></div>
+    <button class="btn btn-ghost btn-sm" onclick="addPgItem()">+ Thêm item</button>
+    <div class="action-row"><button class="btn btn-primary" onclick="savePG()">Tạo group</button></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Danh sách Production Groups</div>
+    <div id="pg-list"><div class="empty">Đang tải...</div></div>
+  </div>`;
+  loadPGs();
+}
+function onPgType(){
+  const t=document.getElementById('pg-type').value;
+  document.getElementById('pg-targets').style.display=t==='FREE_GROUP'?'':'none';
+  document.getElementById('pg-batch').style.display=t==='BATCH_FORMULA'?'':'none';
+  renderPgItems();
+}
+function renderPgItems(){
+  const isBatch=document.getElementById('pg-type')?.value==='BATCH_FORMULA';
+  const el=document.getElementById('pg-items-rows');if(!el)return;
+  el.innerHTML=pgItems.map((it,i)=>`
+    <div class="group-item-row">
+      <select onchange="pgItems[${i}].itemId=this.value">
+        <option value="">-- Chọn SP --</option>${itemOpts(x=>x.itemType==='PRODUCT')}
+      </select>
+      ${isBatch?`<input type="number" step="0.01" placeholder="gram/cái" value="${it.g??''}" onchange="pgItems[${i}].g=+this.value">`:'<div></div>'}
+      <input type="number" value="${it.s||i+1}" onchange="pgItems[${i}].s=+this.value">
+      <button class="btn btn-danger btn-sm" onclick="pgItems.splice(${i},1);renderPgItems()">✕</button>
+    </div>`).join('');
+}
+function addPgItem(){pgItems.push({itemId:'',g:null,s:pgItems.length+1});renderPgItems();}
+async function savePG(){
+  const body={code:document.getElementById('pg-code').value.trim(),name:document.getElementById('pg-name').value.trim(),
+    groupType:document.getElementById('pg-type').value,itemGroupId:document.getElementById('pg-ig').value||null,
+    targetWeekday:document.getElementById('pg-tw')?.value?+document.getElementById('pg-tw').value:null,
+    targetWeekend:document.getElementById('pg-twe')?.value?+document.getElementById('pg-twe').value:null,
+    batchWeightGrams:document.getElementById('pg-bw')?.value?+document.getElementById('pg-bw').value:null,
+    note:document.getElementById('pg-note').value||null,
+    items:pgItems.filter(i=>i.itemId).map(i=>({itemId:i.itemId,gramsPerUnit:i.g??null,sortOrder:i.s??0}))};
+  if(!body.code||!body.name){toast('Code và Tên là bắt buộc','err');return;}
+  await api('POST','/api/v1/production-groups',body);
+  toast('Đã tạo production group');pgItems=[];loadPGs();
+}
+let pgExpandId=null;
+async function loadPGs(){
+  const data=await api('GET','/api/v1/production-groups');
+  const el=document.getElementById('pg-list');if(!el)return;
+  if(!data?.length){el.innerHTML='<div class="empty">Chưa có production group</div>';return;}
+  el.innerHTML=`<table><thead><tr><th>Code</th><th>Tên</th><th>Loại</th><th>Item Group</th><th>Target W/WE</th><th>Cối(g)</th><th></th></tr></thead>
+  <tbody>${data.map(g=>`
+    <tr style="cursor:pointer" onclick="togglePG('${g.id}')">
+      <td><strong>${g.code}</strong></td><td>${g.name}</td><td>${badge(g.groupType)}</td>
+      <td>${g.itemGroup?`<span class="badge b-draft">${g.itemGroup.key}</span>`:'—'}</td>
+      <td>${g.targetWeekday??'—'} / ${g.targetWeekend??'—'}</td>
+      <td>${g.batchWeightGrams?fmt(g.batchWeightGrams)+'g':'—'}</td>
+      <td style="white-space:nowrap" onclick="event.stopPropagation()">
+        <button class="btn btn-ghost btn-sm" onclick="togglePG('${g.id}')">Chi tiết</button>
+        <button class="btn btn-danger btn-sm" onclick="deletePG('${g.id}')">Xóa</button>
+      </td>
+    </tr>
+    <tr id="pgd-${g.id}" class="detail-expand" style="display:none">
+      <td colspan="7"><div class="detail-inner">${renderPGDetail(g)}</div></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+function renderPGDetail(g){
+  const isBatch=g.groupType==='BATCH_FORMULA';const items=g.items??[];
+  return`<div style="display:flex;gap:28px;flex-wrap:wrap">
+    <div><div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px;text-transform:uppercase">Thông tin</div>
+      <table style="font-size:13px;border-collapse:collapse">
+        <tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Loại</td><td>${badge(g.groupType)}</td></tr>
+        <tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Item Group</td><td>${g.itemGroup?g.itemGroup.key+' — '+g.itemGroup.name:'—'}</td></tr>
+        ${isBatch?`<tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Trọng lượng cối</td><td><strong>${(g.batchWeightGrams/1000).toFixed(1)}kg</strong></td></tr>`
+          :`<tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Target WD</td><td><strong>${g.targetWeekday??'—'}</strong></td></tr>
+           <tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Target WE</td><td><strong>${g.targetWeekend??'—'}</strong></td></tr>`}
+        ${g.note?`<tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Ghi chú</td><td>${g.note}</td></tr>`:''}
+      </table></div>
+    <div style="flex:1;min-width:260px">
+      <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px;text-transform:uppercase">Sản phẩm (${items.length})</div>
+      ${items.length?`<table style="width:100%;font-size:13px;border-collapse:collapse">
+        <thead><tr>
+          <th style="text-align:left;padding:4px 8px;background:#f1f5f9;color:#475569">Sản phẩm</th>
+          ${isBatch?'<th style="text-align:right;padding:4px 8px;background:#f1f5f9;color:#475569">Gram/cái</th>':''}
+          <th style="text-align:center;padding:4px 8px;background:#f1f5f9;color:#475569">Sort</th>
+        </tr></thead>
+        <tbody>${items.map(gi=>`<tr>
+          <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">${gi.item?.name??gi.item?.key??'?'}</td>
+          ${isBatch?`<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">${gi.gramsPerUnit?gi.gramsPerUnit+'g':'—'}</td>`:''}
+          <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:center;color:#94a3b8">${gi.sortOrder}</td>
+        </tr>`).join('')}</tbody>
+      </table>`:'<div style="color:#94a3b8;font-size:12px">Chưa có item</div>'}
+    </div></div>`;
+}
+function togglePG(id){
+  const row=document.getElementById(`pgd-${id}`);if(!row)return;
+  const open=row.style.display!=='none';
+  document.querySelectorAll('[id^="pgd-"]').forEach(r=>r.style.display='none');
+  if(!open)row.style.display='';
+}
+async function deletePG(id){
+  if(!confirm('Xóa production group?'))return;
+  await api('DELETE',`/api/v1/production-groups/${id}`);toast('Đã xóa');loadPGs();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THRESHOLD RULES
+// ══════════════════════════════════════════════════════════════════════════════
+let trRulesMap={},trProdGroups=[];
+async function pageThresholdRules(){
+  trProdGroups=[];try{trProdGroups=await api('GET','/api/v1/production-groups');}catch(_){}
+  await loadAllItems();
+  const products=allItems.filter(i=>i.itemType==='PRODUCT');
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div class="card-title">Chọn theo nhóm hoặc sản phẩm riêng lẻ</div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">
+      <div class="field" style="min-width:260px"><label>Production Group</label>
+        <select id="tr-group" onchange="onTrGroup(this.value)">
+          <option value="">-- Chọn nhóm --</option>
+          ${trProdGroups.map(g=>`<option value="${g.id}">${g.code} — ${g.name} ${g.groupType==='BATCH_FORMULA'?'🧪':'🔢'}</option>`).join('')}
+        </select></div>
+      <div style="color:#94a3b8;padding-bottom:8px">hoặc</div>
+      <div class="field" style="min-width:260px"><label>Sản phẩm riêng lẻ</label>
+        <select id="tr-single" onchange="onTrSingle(this.value)">
+          <option value="">-- Chọn sản phẩm --</option>
+          ${products.map(p=>`<option value="${p.id}">${p.code} — ${p.name}</option>`).join('')}
+        </select></div>
+    </div>
+  </div>
+  <div id="tr-editor" style="display:none"></div>`;
+}
+async function onTrGroup(groupId){
+  const sg=document.getElementById('tr-single');if(sg){sg.value='';sg.disabled=!!groupId;}
+  const group=trProdGroups.find(g=>g.id===groupId);
+  const cont=document.getElementById('tr-editor');trRulesMap={};
+  if(!group||!group.items?.length){cont.style.display='none';return;}
+  cont.style.display='';cont.innerHTML='<div class="empty">Đang tải rules...</div>';
+  const valid=group.items.filter(gi=>gi.itemId);
+  await Promise.all(valid.map(async gi=>{
+    try{const d=await api('GET',`/api/v1/items/${gi.itemId}/threshold-rules`);
+      trRulesMap[gi.itemId]=(d??[]).map(r=>({...r}));}
+    catch(_){trRulesMap[gi.itemId]=[];}
+  }));
+  renderTrAll({items:valid});
+}
+async function onTrSingle(itemId){
+  const gg=document.getElementById('tr-group');if(gg){gg.value='';gg.disabled=!!itemId;}
+  const cont=document.getElementById('tr-editor');trRulesMap={};
+  if(!itemId){cont.style.display='none';return;}
+  cont.style.display='';cont.innerHTML='<div class="empty">Đang tải...</div>';
+  try{const d=await api('GET',`/api/v1/items/${itemId}/threshold-rules`);trRulesMap[itemId]=(d??[]).map(r=>({...r}));}
+  catch(_){trRulesMap[itemId]=[];}
+  const sel=document.getElementById('tr-single');
+  const name=sel?.options[sel.selectedIndex]?.text??itemId;
+  renderTrAll({items:[{itemId,item:{name},gramsPerUnit:null}]});
+}
+function renderTrAll(group){
+  const cont=document.getElementById('tr-editor');
+  const valid=group.items.filter(gi=>gi.itemId);
+  if(!valid.length){cont.innerHTML='<div class="empty">Không có item hợp lệ</div>';return;}
+  cont.innerHTML=valid.map(gi=>{
+    const itemId=gi.itemId;
+    const name=gi.item?.name??gi.item?.key??itemId;
+    const extra=gi.gramsPerUnit?` — ${gi.gramsPerUnit}g/cái`:'';
+    return`<div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div><strong>${name}</strong><span style="color:#94a3b8;font-size:12px">${extra}</span></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="addTrRule('${itemId}')">+ Rule</button>
+          <button class="btn btn-primary btn-sm" onclick="saveTrFor('${itemId}')">💾 Lưu</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:110px 60px 100px 110px 90px 36px;gap:6px;margin-bottom:4px;padding:0 2px">
+        <small style="font-weight:600;color:#64748b">Day Type</small>
+        <small style="font-weight:600;color:#64748b">Sort</small>
+        <small style="font-weight:600;color:#64748b">Cond. Type</small>
+        <small style="font-weight:600;color:#64748b">Cond. Value</small>
+        <small style="font-weight:600;color:#64748b">Làm thêm</small><div></div>
+      </div>
+      <div id="tr-rows-${itemId}"></div>
+    </div>`;
+  }).join('');
+  valid.forEach(gi=>renderTrRows(gi.itemId));
+}
+function renderTrRows(itemId){
+  const el=document.getElementById(`tr-rows-${itemId}`);if(!el)return;
+  const rules=trRulesMap[itemId]??[];
+  if(!rules.length){el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:4px">Chưa có rule — bấm "+ Rule"</div>';return;}
+  el.innerHTML=rules.map((r,i)=>`<div class="rule-row">
+    <select onchange="trRulesMap['${itemId}'][${i}].dayType=this.value">
+      <option value="WEEKDAY" ${r.dayType==='WEEKDAY'?'selected':''}>WEEKDAY</option>
+      <option value="WEEKEND" ${r.dayType==='WEEKEND'?'selected':''}>WEEKEND</option>
+    </select>
+    <input type="number" value="${r.sortOrder??i+1}" onchange="trRulesMap['${itemId}'][${i}].sortOrder=+this.value">
+    <select onchange="trRulesMap['${itemId}'][${i}].conditionType=this.value">
+      <option value="COUNT" ${r.conditionType==='COUNT'?'selected':''}>COUNT</option>
+      <option value="PERCENT" ${r.conditionType==='PERCENT'?'selected':''}>PERCENT</option>
+    </select>
+    <input type="number" step="0.01" value="${r.conditionValue??''}" onchange="trRulesMap['${itemId}'][${i}].conditionValue=+this.value" placeholder="12">
+    <input type="number" value="${r.produceQty??''}" onchange="trRulesMap['${itemId}'][${i}].produceQty=+this.value" placeholder="24">
+    <button class="btn btn-danger btn-sm" onclick="trRulesMap['${itemId}'].splice(${i},1);renderTrRows('${itemId}')">✕</button>
+  </div>`).join('');
+}
+function addTrRule(itemId){
+  if(!trRulesMap[itemId])trRulesMap[itemId]=[];
+  trRulesMap[itemId].push({dayType:'WEEKDAY',sortOrder:trRulesMap[itemId].length+1,conditionType:'COUNT',conditionValue:'',produceQty:''});
+  renderTrRows(itemId);
+}
+async function saveTrFor(itemId){
+  const rules=(trRulesMap[itemId]??[]).map(r=>({dayType:r.dayType,sortOrder:r.sortOrder,conditionType:r.conditionType,conditionValue:r.conditionValue,produceQty:r.produceQty}));
+  await api('PUT',`/api/v1/items/${itemId}/threshold-rules`,{rules});
+  toast('Đã lưu rules');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRODUCTION PLANS
+// ══════════════════════════════════════════════════════════════════════════════
+async function pageProdPlans(){
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div class="field"><label>Xem theo ngày</label>
+        <input type="date" id="plan-date" value="${today}" onchange="loadPlanByDate(this.value)">
+      </div>
+      <button class="btn btn-ghost" onclick="loadPlanByDate(document.getElementById('plan-date').value)">🔍 Tải</button>
+    </div>
+  </div>
+  <div id="plan-detail"></div>
+  <div class="card" style="margin-top:4px">
+    <div class="card-title">Danh sách kế hoạch DRAFT</div>
+    <div id="plan-list"><div class="empty">Đang tải...</div></div>
+  </div>`;
+  loadPlanList();
+  loadPlanByDate(today);
+}
+async function loadPlanList(){
+  const data=await api('GET','/api/v1/production/plans');
+  const el=document.getElementById('plan-list');if(!el)return;
+  if(!data?.length){el.innerHTML='<div class="empty">Không có kế hoạch APPROVED</div>';return;}
+  el.innerHTML=`<table><thead><tr><th>Ngày</th><th>Day Type</th><th>Status</th><th>Approved by</th><th></th></tr></thead>
+  <tbody>${data.map(p=>`<tr>
+    <td><strong>${p.planDate}</strong></td><td>${p.dayType}</td><td>${badge(p.approvalStatus)}</td>
+    <td>${p.approvedBy??'—'}</td>
+    <td><button class="btn btn-ghost btn-sm" onclick="loadPlanById('${p.id}')">Xem</button></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+async function loadPlanByDate(date){
+  if(!date)return;
+  const cont=document.getElementById('plan-detail');
+  try{const plan=await api('GET',`/api/v1/production/plans/by-date?date=${date}`);renderPlan(plan);}
+  catch(_){if(cont)cont.innerHTML=`<div class="card"><div class="empty">Không có kế hoạch cho ngày ${date}</div></div>`;}
+}
+async function loadPlanById(id){
+  const plan=await api('GET',`/api/v1/production/plans/${id}`);renderPlan(plan);
+}
+function renderPlan(plan){
+  const cont=document.getElementById('plan-detail');if(!cont)return;
+  const isDraft=plan.approvalStatus==='DRAFT';
+  const lines=plan.lines??[];
+  cont.innerHTML=`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <strong style="font-size:15px">Kế hoạch ${plan.planDate}</strong>
+        <span style="margin-left:8px">${badge(plan.approvalStatus)}</span>
+        <span style="margin-left:8px;font-size:12px;color:#64748b">${plan.dayType}</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        ${isDraft?`<button class="btn btn-success" onclick="approvePlan('${plan.id}')">✅ Approve</button>
+          <button class="btn btn-danger" onclick="rejectPlanPrompt('${plan.id}')">❌ Reject</button>`:''}
+      </div>
+    </div>
+    <table><thead><tr>
+      <th>Sản phẩm</th><th>Loại</th><th>Tồn</th><th>Gợi ý</th>
+      <th>Điều chỉnh</th><th>Ghi chú rule</th>
+    </tr></thead>
+    <tbody>${lines.map(l=>`<tr>
+      <td>${l.item?.name??l.item?.key??'?'}</td>
+      <td><span style="font-size:11px;color:#64748b">${l.planType}</span></td>
+      <td>${fmt(l.qtyRemaining)}</td>
+      <td><strong>${l.suggestedQty??'—'}</strong></td>
+      <td>${isDraft?`<input type="number" style="width:70px;border:1px solid #d1d5db;border-radius:4px;padding:3px 6px;font-size:13px"
+        value="${l.adjustedQty??''}" onchange="updatePlanLine('${plan.id}','${l.id}',this.value)" placeholder="—">`
+        :(l.adjustedQty??l.suggestedQty??'—')}</td>
+      <td style="font-size:12px;color:#64748b">${l.ruleNote??'—'}</td>
+    </tr>`).join('')}</tbody></table>
+  </div>`;
+}
+async function updatePlanLine(planId,lineId,val){
+  if(val==='')return;
+  await api('PUT',`/api/v1/production/plans/${planId}/adjust`,{lines:[{lineId,adjustedQty:+val}]});
+}
+async function approvePlan(id){
+  await api('POST',`/api/v1/production/plans/${id}/approve`);toast('Đã approve kế hoạch');loadPlanList();
+  const plan=await api('GET',`/api/v1/production/plans/${id}`);renderPlan(plan);
+}
+async function rejectPlanPrompt(id){
+  const reason=prompt('Lý do reject:');
+  if(reason===null)return;
+  await api('POST',`/api/v1/production/plans/${id}/reject?reason=${encodeURIComponent(reason)}`);
+  toast('Đã reject');loadPlanList();
+  const plan=await api('GET',`/api/v1/production/plans/${id}`);renderPlan(plan);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRODUCTION REQUESTS
+// ══════════════════════════════════════════════════════════════════════════════
+let prLines=[];
+async function pageProdRequests(){
+  await loadAllItems();
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('content').innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1.8fr;gap:14px;align-items:start">
+    <div class="card">
+      <div class="card-title">Tạo phiếu SX</div>
+      <div class="form-grid">
+        <div class="field form-full"><label>Loại *</label>
+          <select id="pr-type">
+            <option value="DAILY">DAILY</option>
+            <option value="EXTRA">EXTRA</option>
+          </select></div>
+        <div class="field"><label>Ngày SX *</label><input type="date" id="pr-date" value="${today}"></div>
+        <div class="field form-full"><label>Ghi chú</label><textarea id="pr-note" rows="2"></textarea></div>
+      </div>
+      <hr class="divider">
+      <div class="card-title" style="margin-bottom:6px">Dòng sản phẩm</div>
+      <div style="display:grid;grid-template-columns:1fr 80px 50px 32px;gap:5px;margin-bottom:4px">
+        <small style="font-weight:600;color:#64748b">Sản phẩm</small>
+        <small style="font-weight:600;color:#64748b">Kế hoạch</small>
+        <small style="font-weight:600;color:#64748b">Sort</small><div></div>
+      </div>
+      <div id="pr-lines"></div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="addPRLine()">+ Thêm dòng</button>
+      <div class="action-row"><button class="btn btn-primary" onclick="savePR()">Tạo phiếu</button></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Danh sách phiếu SX</div>
+      <div id="pr-list"><div class="empty">Đang tải...</div></div>
+    </div>
+  </div>`;
+  prLines=[];renderPRLines();loadPRs();
+}
+function renderPRLines(){
+  const el=document.getElementById('pr-lines');if(!el)return;
+  el.innerHTML=prLines.map((l,i)=>`
+    <div style="display:grid;grid-template-columns:1fr 80px 50px 32px;gap:5px;margin-bottom:5px;align-items:center">
+      <select onchange="prLines[${i}].itemId=this.value">
+        <option value="">-- Chọn SP --</option>${itemOpts(x=>x.itemType==='PRODUCT')}
+      </select>
+      <input type="number" step="0.5" value="${l.qty??''}" onchange="prLines[${i}].qty=+this.value" placeholder="Qty">
+      <input type="number" value="${l.sort||i+1}" onchange="prLines[${i}].sort=+this.value">
+      <button class="btn btn-danger btn-sm" onclick="prLines.splice(${i},1);renderPRLines()">✕</button>
+    </div>`).join('');
+}
+function addPRLine(){prLines.push({itemId:'',qty:'',sort:prLines.length+1});renderPRLines();}
+async function savePR(){
+  const lines=prLines.filter(l=>l.itemId).map(l=>({productId:l.itemId,plannedQty:+l.qty,sortOrder:l.sort??0}));
+  if(!lines.length){toast('Cần ít nhất 1 dòng','err');return;}
+  const body={productionType:document.getElementById('pr-type').value,
+    productionDate:document.getElementById('pr-date').value,
+    note:document.getElementById('pr-note').value||null,lines};
+  await api('POST','/api/v1/production-requests',body);
+  toast('Đã tạo phiếu SX');prLines=[];renderPRLines();loadPRs();
+}
+async function loadPRs(){
+  const data=await api('GET','/api/v1/production-requests?size=50');
+  const items=data?.content??[];
+  const el=document.getElementById('pr-list');if(!el)return;
+  if(!items.length){el.innerHTML='<div class="empty">Chưa có phiếu</div>';return;}
+  el.innerHTML=`<table><thead><tr><th>Code</th><th>Ngày</th><th>Loại</th><th>Status</th><th></th></tr></thead>
+  <tbody>${items.map(r=>`
+    <tr style="cursor:pointer" onclick="togglePR('${r.id}')">
+      <td><strong>${r.code??'—'}</strong></td><td>${r.productionDate}</td>
+      <td>${r.productionType}</td><td>${badge(r.approvalStatus)}</td>
+      <td style="white-space:nowrap" onclick="event.stopPropagation()">
+        ${r.approvalStatus==='DRAFT'||r.approvalStatus==='PENDING_APPROVAL'
+          ?`<button class="btn btn-success btn-sm" onclick="approvePR('${r.id}')">Approve</button>`:''}
+        <button class="btn btn-ghost btn-sm" onclick="togglePR('${r.id}')">Chi tiết</button>
+      </td>
+    </tr>
+    <tr id="prd-${r.id}" class="detail-expand" style="display:none">
+      <td colspan="5"><div class="detail-inner">${renderPRDetail(r)}</div></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+function renderPRDetail(r){
+  const lines=r.lines??[];
+  return`<table style="width:100%;font-size:13px;border-collapse:collapse">
+    <thead><tr>
+      <th style="padding:4px 8px;background:#f1f5f9">Sản phẩm</th>
+      <th style="padding:4px 8px;background:#f1f5f9;text-align:right">Kế hoạch</th>
+      <th style="padding:4px 8px;background:#f1f5f9;text-align:right">Thực tế</th>
+      <th style="padding:4px 8px;background:#f1f5f9">Trạng thái</th>
+      <th style="padding:4px 8px;background:#f1f5f9"></th>
+    </tr></thead>
+    <tbody>${lines.map(l=>`<tr>
+      <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">${l.product?.name??l.product?.key??'?'}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">${fmt(l.plannedQty)}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">${fmt(l.deliveryRecord?.qtyProduced)??'—'}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">${badge(l.lineStatus)}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">
+        ${l.lineStatus==='PENDING'||l.lineStatus==='IN_PROGRESS'
+          ?`<button class="btn btn-success btn-sm" onclick="completeLinePrompt('${r.id}','${l.id}',${l.plannedQty})">✓ Hoàn thành</button>`:''}
+      </td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+function togglePR(id){
+  const row=document.getElementById(`prd-${id}`);if(!row)return;
+  const open=row.style.display!=='none';
+  document.querySelectorAll('[id^="prd-"]').forEach(r=>r.style.display='none');
+  if(!open)row.style.display='';
+}
+async function approvePR(id){await api('POST',`/api/v1/production-requests/${id}/approve`);toast('Đã approve');loadPRs();}
+async function completeLinePrompt(prId,lineId,planned){
+  const qty=prompt(`Số lượng thực tế (kế hoạch: ${planned}):`);
+  if(qty===null)return;
+  const actual=+qty;
+  let adjType=null,reason=null;
+  if(actual!=planned){
+    adjType=prompt('Loại điều chỉnh (INGREDIENT_VARIANCE / PRODUCTION_WASTAGE):','PRODUCTION_WASTAGE');
+    if(!adjType)return;
+    reason=prompt('Lý do:');
+    if(!reason)return;
+  }
+  await api('POST',`/api/v1/production-requests/${prId}/lines/complete-batch`,
+    {lines:[{lineId,qtyProduced:actual,adjustmentType:adjType,reason,note:null}]});
+  toast('Đã ghi nhận hoàn thành');loadPRs();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRODUCTION ADJUSTMENTS
+// ══════════════════════════════════════════════════════════════════════════════
+async function pageProdAdjustments(){
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div class="card-title">Điều chỉnh SX đang chờ duyệt</div>
+    <div id="adj-list"><div class="empty">Đang tải...</div></div>
+  </div>`;
+  loadAdjs();
+}
+async function loadAdjs(){
+  const data=await api('GET','/api/v1/production-adjustments/pending');
+  const el=document.getElementById('adj-list');if(!el)return;
+  if(!data?.length){el.innerHTML='<div class="empty">Không có điều chỉnh đang chờ</div>';return;}
+  el.innerHTML=`<table><thead><tr>
+    <th>Sản phẩm</th><th>Loại</th><th>Kế hoạch</th><th>Thực tế</th><th>Chênh lệch</th><th>Lý do</th><th></th>
+  </tr></thead>
+  <tbody>${data.map(a=>`<tr>
+    <td>${a.product?.name??'?'}</td>
+    <td><span style="font-size:11px">${a.adjustmentType??'—'}</span></td>
+    <td>${fmt(a.plannedQty)}</td><td>${fmt(a.actualQty)}</td>
+    <td style="color:${a.varianceQty>0?'#16a34a':a.varianceQty<0?'#dc2626':'#374151'}">${fmt(a.varianceQty)}</td>
+    <td style="font-size:12px">${a.reason??'—'}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-success btn-sm" onclick="approveAdj('${a.id}')">✓ Approve</button>
+      <button class="btn btn-danger btn-sm" onclick="rejectAdjPrompt('${a.id}')">✕ Reject</button>
+    </td>
+  </tr>`).join('')}</tbody></table>`;
+}
+async function approveAdj(id){await api('POST',`/api/v1/production-adjustments/${id}/approve`);toast('Đã approve');loadAdjs();}
+async function rejectAdjPrompt(id){
+  const r=prompt('Lý do reject:');if(r===null)return;
+  await api('POST',`/api/v1/production-adjustments/${id}/reject`,{reason:r});toast('Đã reject');loadAdjs();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STOCK SUMMARY
+// ══════════════════════════════════════════════════════════════════════════════
+async function pageStockSummary(){
+  await loadAllWarehouses();
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div class="filter-bar">
+      <select id="st-wh" onchange="loadStock()">
+        <option value="">Tất cả kho</option>
+        ${allWarehouses.map(w=>`<option value="${w.code??w.id}">${w.name??w.code}</option>`).join('')}
+      </select>
+      <input id="st-q" placeholder="Tìm tên / code NL..." oninput="loadStock()" style="width:220px">
+      <button class="btn btn-ghost" onclick="loadStock()">🔍 Tải</button>
+    </div>
+    <div id="stock-wrap"><div class="empty">Đang tải...</div></div>
+  </div>`;
+  loadStock();
+}
+async function loadStock(){
+  const wh=document.getElementById('st-wh')?.value||'';
+  const q=(document.getElementById('st-q')?.value||'').toLowerCase();
+  let path='/api/v1/stock-lots/summary';
+  if(wh)path+=`?warehouseCode=${wh}`;
+  const data=await api('GET',path);
+  const el=document.getElementById('stock-wrap');if(!el)return;
+  const rows=(data??[]).filter(r=>!q||r.item?.name?.toLowerCase().includes(q)||r.item?.key?.toLowerCase().includes(q));
+  if(!rows.length){el.innerHTML='<div class="empty">Không có dữ liệu tồn kho</div>';return;}
+  el.innerHTML=`<table><thead><tr>
+    <th>Nguyên liệu / SP</th><th>Kho</th><th style="text-align:right">Tổng tồn</th>
+  </tr></thead>
+  <tbody>${rows.map(r=>`<tr>
+    <td>${r.item?.name??r.item?.key??'?'}</td>
+    <td><span class="badge b-draft">${r.warehouse?.key??r.warehouse?.name??'?'}</span></td>
+    <td style="text-align:right;font-weight:600">${fmt(r.totalQtyRemaining)}</td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INVENTORY REQUESTS
+// ══════════════════════════════════════════════════════════════════════════════
+let irLines=[];
+async function pageInventoryRequests(){
+  await Promise.all([loadAllItems(),loadAllWarehouses(),loadAllSuppliers()]);
+  document.getElementById('content').innerHTML=`
+  <div class="tabs">
+    <div class="tab active" onclick="switchIRTab('list',this)">📋 Danh sách</div>
+    <div class="tab" onclick="switchIRTab('create',this)">➕ Tạo phiếu</div>
+  </div>
+  <div id="ir-list-tab">
+    <div class="card">
+      <div class="filter-bar">
+        <select id="ir-wh" onchange="loadIRs()">
+          <option value="">Tất cả kho</option>
+          ${allWarehouses.map(w=>`<option value="${w.code??w.id}">${w.name??w.code}</option>`).join('')}
+        </select>
+        <select id="ir-status" onchange="loadIRs()">
+          <option value="PENDING_APPROVAL">Chờ duyệt</option>
+          <option value="APPROVED">Đã duyệt</option>
+          <option value="DRAFT">Draft</option>
+          <option value="REJECTED">Rejected</option>
+        </select>
+        <button class="btn btn-ghost" onclick="loadIRs()">🔍 Tải</button>
+      </div>
+      <div id="ir-list"><div class="empty">Đang tải...</div></div>
+    </div>
+  </div>
+  <div id="ir-create-tab" style="display:none">
+    <div class="card">
+      <div class="card-title">Tạo phiếu kho</div>
+      <div class="form-grid">
+        <div class="field"><label>Loại *</label>
+          <select id="ir-type" onchange="onIRType()">
+            <option value="PURCHASE">PURCHASE (Nhập kho)</option>
+            <option value="TRANSFER">TRANSFER (Điều chuyển)</option>
+          </select></div>
+        <div class="field"><label>Ngày *</label><input type="date" id="ir-date" value="${new Date().toISOString().slice(0,10)}"></div>
+        <div class="field" id="ir-sup-wrap"><label>Nhà cung cấp</label>
+          <select id="ir-sup"><option value="">-- Chọn NCC --</option>${supOpts()}</select></div>
+        <div class="field" id="ir-src-wrap" style="display:none"><label>Kho xuất</label>
+          <select id="ir-src"><option value="">-- Chọn kho --</option>${whOpts()}</select></div>
+        <div class="field"><label>Kho nhận *</label>
+          <select id="ir-tgt"><option value="">-- Chọn kho --</option>${whOpts()}</select></div>
+        <div class="field form-full"><label>Ghi chú</label><textarea id="ir-note" rows="2"></textarea></div>
+      </div>
+      <hr class="divider">
+      <div class="card-title" style="margin-bottom:6px">Dòng hàng hóa</div>
+      <div style="display:grid;grid-template-columns:1fr 80px 70px 90px 50px 32px;gap:5px;margin-bottom:4px">
+        <small style="font-weight:600;color:#64748b">Nguyên liệu</small>
+        <small style="font-weight:600;color:#64748b">Số lượng</small>
+        <small style="font-weight:600;color:#64748b">Đơn vị</small>
+        <small style="font-weight:600;color:#64748b" id="ir-cost-hdr">Đơn giá</small>
+        <small style="font-weight:600;color:#64748b">Sort</small><div></div>
+      </div>
+      <div id="ir-lines"></div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="addIRLine()">+ Thêm dòng</button>
+      <div class="action-row"><button class="btn btn-primary" onclick="saveIR()">Tạo phiếu</button></div>
+    </div>
+  </div>`;
+  irLines=[];renderIRLines();loadIRs();
+}
+function switchIRTab(tab,el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('ir-list-tab').style.display=tab==='list'?'':'none';
+  document.getElementById('ir-create-tab').style.display=tab==='create'?'':'none';
+}
+function onIRType(){
+  const t=document.getElementById('ir-type').value;
+  document.getElementById('ir-sup-wrap').style.display=t==='PURCHASE'?'':'none';
+  document.getElementById('ir-src-wrap').style.display=t==='TRANSFER'?'':'none';
+  document.getElementById('ir-cost-hdr').style.display=t==='PURCHASE'?'':'none';
+  renderIRLines();
+}
+function renderIRLines(){
+  const isPurchase=document.getElementById('ir-type')?.value==='PURCHASE';
+  const el=document.getElementById('ir-lines');if(!el)return;
+  el.innerHTML=irLines.map((l,i)=>`
+    <div style="display:grid;grid-template-columns:1fr 80px 70px ${isPurchase?'90px':''} 50px 32px;gap:5px;margin-bottom:5px;align-items:center">
+      <select onchange="irLines[${i}].itemId=this.value">
+        <option value="">-- Chọn NL/SP --</option>${itemOpts()}
+      </select>
+      <input type="number" step="0.001" value="${l.qty??''}" onchange="irLines[${i}].qty=this.value" placeholder="Qty">
+      <input value="${l.unit??''}" onchange="irLines[${i}].unit=this.value" placeholder="kg, cái...">
+      ${isPurchase?`<input type="number" step="0.01" value="${l.cost??''}" onchange="irLines[${i}].cost=this.value" placeholder="Đơn giá">`:''}
+      <input type="number" value="${l.sort||i+1}" onchange="irLines[${i}].sort=+this.value">
+      <button class="btn btn-danger btn-sm" onclick="irLines.splice(${i},1);renderIRLines()">✕</button>
+    </div>`).join('');
+}
+function addIRLine(){irLines.push({itemId:'',qty:'',unit:'',cost:'',sort:irLines.length+1});renderIRLines();}
+async function saveIR(){
+  const type=document.getElementById('ir-type').value;
+  const lines=irLines.filter(l=>l.itemId).map(l=>({itemId:l.itemId,quantity:+l.qty,unit:l.unit,
+    unitCost:l.cost?+l.cost:null,sortOrder:l.sort??0}));
+  if(!lines.length){toast('Cần ít nhất 1 dòng','err');return;}
+  const body={requestType:type,requestDate:document.getElementById('ir-date').value,
+    supplierId:document.getElementById('ir-sup')?.value||null,
+    sourceWarehouseId:document.getElementById('ir-src')?.value||null,
+    targetWarehouseId:document.getElementById('ir-tgt').value||null,
+    note:document.getElementById('ir-note').value||null,lines};
+  if(!body.targetWarehouseId){toast('Chọn kho nhận','err');return;}
+  await api('POST','/api/v1/inventory-requests',body);
+  toast('Đã tạo phiếu kho');irLines=[];renderIRLines();loadIRs();
+}
+async function loadIRs(){
+  const wh=document.getElementById('ir-wh')?.value||'';
+  const status=document.getElementById('ir-status')?.value||'PENDING_APPROVAL';
+  let path=wh?`/api/v1/inventory-requests/by-warehouse?warehouseCode=${wh}&approvalStatus=${status}`
+    :`/api/v1/inventory-requests?size=50`;
+  const data=await api('GET',path);
+  const items=data?.content??data??[];
+  const el=document.getElementById('ir-list');if(!el)return;
+  if(!items.length){el.innerHTML='<div class="empty">Không có phiếu</div>';return;}
+  el.innerHTML=`<table><thead><tr>
+    <th>Code</th><th>Loại</th><th>Ngày</th><th>Kho xuất→nhận</th><th>NCC</th><th>Status</th><th></th>
+  </tr></thead>
+  <tbody>${items.map(r=>`
+    <tr style="cursor:pointer" onclick="toggleIR('${r.id}')">
+      <td><strong>${r.code??'—'}</strong></td>
+      <td>${badge(r.requestType)}</td>
+      <td>${r.requestDate??'—'}</td>
+      <td>${r.sourceWarehouse?r.sourceWarehouse.key+' → ':''}<strong>${r.targetWarehouse?.key??'?'}</strong></td>
+      <td>${r.supplier?.name??'—'}</td>
+      <td>${badge(r.approvalStatus)}</td>
+      <td style="white-space:nowrap" onclick="event.stopPropagation()">
+        ${r.approvalStatus==='DRAFT'||r.approvalStatus==='PENDING_APPROVAL'
+          ?`<button class="btn btn-success btn-sm" onclick="approveIR('${r.id}')">Approve</button>
+             <button class="btn btn-danger btn-sm" onclick="rejectIRPrompt('${r.id}')">Reject</button>`:''}
+      </td>
+    </tr>
+    <tr id="ird-${r.id}" class="detail-expand" style="display:none">
+      <td colspan="7"><div class="detail-inner">${renderIRDetail(r)}</div></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+function renderIRDetail(r){
+  const lines=r.lines??[];
+  return lines.length?`<table style="width:100%;font-size:13px;border-collapse:collapse">
+    <thead><tr>
+      <th style="padding:4px 8px;background:#f1f5f9">Hàng hóa</th>
+      <th style="padding:4px 8px;background:#f1f5f9;text-align:right">Số lượng</th>
+      <th style="padding:4px 8px;background:#f1f5f9">Đơn vị</th>
+      <th style="padding:4px 8px;background:#f1f5f9;text-align:right">Đơn giá</th>
+    </tr></thead>
+    <tbody>${lines.map(l=>`<tr>
+      <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">${l.item?.name??l.item?.key??'?'}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">${fmt(l.quantity)}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">${l.unit??'—'}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">${l.unitCost?fmt(l.unitCost)+'đ':'—'}</td>
+    </tr>`).join('')}</tbody>
+  </table>`:'<div style="color:#94a3b8;font-size:12px">Không có dòng</div>';
+}
+function toggleIR(id){
+  const row=document.getElementById(`ird-${id}`);if(!row)return;
+  const open=row.style.display!=='none';
+  document.querySelectorAll('[id^="ird-"]').forEach(r=>r.style.display='none');
+  if(!open)row.style.display='';
+}
+async function approveIR(id){await api('POST',`/api/v1/inventory-requests/${id}/approve`);toast('Đã approve');loadIRs();}
+async function rejectIRPrompt(id){
+  const r=prompt('Lý do reject:');if(r===null)return;
+  await api('POST',`/api/v1/inventory-requests/${id}/reject`,{rejectedReason:r});toast('Đã reject');loadIRs();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DAILY REPORT
+// ══════════════════════════════════════════════════════════════════════════════
+async function pageDailyReport(){
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div style="display:flex;gap:10px;align-items:flex-end">
+      <div class="field"><label>Ngày báo cáo</label>
+        <input type="date" id="dr-date" value="${today}"></div>
+      <button class="btn btn-primary" onclick="initDR()">📋 Tải / Tạo báo cáo</button>
+    </div>
+  </div>
+  <div id="dr-detail"></div>`;
+}
+async function initDR(){
+  const date=document.getElementById('dr-date').value;
+  if(!date){toast('Chọn ngày','err');return;}
+  const report=await api('POST','/api/v1/daily-reports/init',{date});
+  renderDR(report);
+}
+function renderDR(r){
+  const cont=document.getElementById('dr-detail');if(!cont)return;
+  const isDraft=r.status==='DRAFT';
+  cont.innerHTML=`
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div>
+        <strong style="font-size:15px">Báo cáo ngày ${r.reportDate}</strong>
+        <span style="margin-left:8px">${badge(r.status)}</span>
+      </div>
+      ${isDraft?`<button class="btn btn-success" onclick="finalizeDR('${r.id}')">✅ Finalize</button>`:''}
+    </div>
+    <div class="stat-row" style="margin-bottom:16px">
+      <div class="stat"><div class="stat-label">Ngày</div><div class="stat-value">${r.reportDate}</div></div>
+      <div class="stat"><div class="stat-label">Trạng thái</div><div class="stat-value" style="font-size:16px">${r.status}</div></div>
+      ${r.finalizedBy?`<div class="stat"><div class="stat-label">Finalized by</div><div class="stat-value" style="font-size:14px">${r.finalizedBy}</div></div>`:''}
+    </div>
+    <div id="dr-lines-wrap"><div class="empty">Đang tải dòng...</div></div>
+    ${isDraft?`<div style="margin-top:12px">
+      <div class="card-title">Nhập tồn cuối ngày</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="min-width:200px"><label>Sản phẩm</label>
+          <select id="dr-item">${itemOpts(x=>x.itemType==='PRODUCT')}</select></div>
+        <div class="field"><label>Qty tồn</label><input type="number" id="dr-qty" step="0.5" placeholder="0"></div>
+        <div class="field"><label>Ghi chú</label><input id="dr-note-line" placeholder="tùy chọn"></div>
+        <button class="btn btn-primary" onclick="updateDRRemaining('${r.id}')">Cập nhật</button>
+      </div>
+    </div>`:''}
+  </div>`;
+  loadDRLines(r.id);
+}
+async function loadDRLines(reportId){
+  const data=await api('GET',`/api/v1/daily-reports/${reportId}/lines`);
+  const el=document.getElementById('dr-lines-wrap');if(!el)return;
+  if(!data?.length){el.innerHTML='<div class="empty">Chưa có dòng báo cáo — hệ thống tự tổng hợp khi finalize</div>';return;}
+  el.innerHTML=`<table><thead><tr>
+    <th>Sản phẩm</th><th style="text-align:right">Sản xuất</th><th style="text-align:right">Nhận cửa hàng</th>
+    <th style="text-align:right">Bán POS</th><th style="text-align:right">Tồn cuối</th>
+    <th style="text-align:right">Bán thực</th><th style="text-align:right">Lệch kho</th>
+  </tr></thead>
+  <tbody>${data.map(l=>`<tr>
+    <td>${l.item?.name??l.item?.key??'?'}</td>
+    <td style="text-align:right">${fmt(l.qtyProduced)}</td>
+    <td style="text-align:right">${fmt(l.qtyReceived)}</td>
+    <td style="text-align:right">${fmt(l.qtySoldPos)}</td>
+    <td style="text-align:right">${fmt(l.qtyRemainingActual)}</td>
+    <td style="text-align:right">${fmt(l.qtySoldImplied)}</td>
+    <td style="text-align:right;color:${Math.abs(l.discrepancyPos??0)>0?'#dc2626':'#374151'}">${fmt(l.discrepancyPos)}</td>
+  </tr>`).join('')}</tbody></table>`;
+}
+async function updateDRRemaining(reportId){
+  const itemId=document.getElementById('dr-item').value;
+  const qty=document.getElementById('dr-qty').value;
+  const note=document.getElementById('dr-note-line').value;
+  if(!itemId){toast('Chọn sản phẩm','err');return;}
+  await api('POST',`/api/v1/daily-reports/${reportId}/remaining`,{itemId,qtyRemainingActual:+qty,note:note||null});
+  toast('Đã cập nhật');loadDRLines(reportId);
+}
+async function finalizeDR(id){
+  if(!confirm('Finalize báo cáo này? Sẽ tự động tạo kế hoạch SX ngày mai.'))return;
+  const r=await api('POST',`/api/v1/daily-reports/${id}/finalize`);
+  toast('Đã finalize báo cáo!');renderDR(r);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// POS SALES
+// ══════════════════════════════════════════════════════════════════════════════
+async function pagePosSales(){
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('content').innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px;align-items:start">
+    <div class="card">
+      <div class="card-title">Upload file POS Excel</div>
+      <div class="field" style="margin-bottom:10px"><label>File Excel (.xlsx)</label>
+        <input type="file" id="pos-file" accept=".xlsx,.xls"></div>
+      <div class="field" style="margin-bottom:10px"><label>Ngày bán</label>
+        <input type="date" id="pos-date" value="${today}"></div>
+      <button class="btn btn-primary" onclick="uploadPOS()">📤 Upload</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Doanh số POS đã nhập</div>
+      <div class="filter-bar">
+        <input type="date" id="pos-filter-date" value="${today}" onchange="loadPOS()">
+        <button class="btn btn-ghost" onclick="loadPOS()">🔍 Tải</button>
+      </div>
+      <div id="pos-list"><div class="empty">Đang tải...</div></div>
+    </div>
+  </div>`;
+  loadPOS();
+}
+async function uploadPOS(){
+  const file=document.getElementById('pos-file').files[0];
+  const date=document.getElementById('pos-date').value;
+  if(!file){toast('Chọn file Excel','err');return;}
+  if(!date){toast('Chọn ngày bán','err');return;}
+  const fd=new FormData();fd.append('file',file);fd.append('saleDate',date);
+  const result=await apiForm('/api/v1/pos-sales/upload',fd);
+  toast(`Upload thành công: ${result?.imported??0} dòng`);loadPOS();
+}
+async function loadPOS(){
+  const date=document.getElementById('pos-filter-date')?.value||new Date().toISOString().slice(0,10);
+  const data=await api('GET',`/api/v1/pos-sales?saleDate=${date}`);
+  const el=document.getElementById('pos-list');if(!el)return;
+  if(!data?.length){el.innerHTML='<div class="empty">Không có dữ liệu POS cho ngày này</div>';return;}
+  const total=data.reduce((s,r)=>s+(r.qtySold??0),0);
+  el.innerHTML=`<div style="margin-bottom:10px;font-size:13px;color:#64748b">
+    Tổng: <strong>${data.length}</strong> dòng — Tổng qty: <strong>${fmt(total)}</strong>
+  </div>
+  <table><thead><tr><th>EX_CODE</th><th>Tên SP (POS)</th><th style="text-align:right">Qty bán</th><th>Ghi chú</th></tr></thead>
+  <tbody>${data.map(r=>`<tr>
+    <td><code>${r.exCode??'?'}</code></td>
+    <td>${r.productName??'—'}</td>
+    <td style="text-align:right;font-weight:600">${fmt(r.qtySold)}</td>
+    <td style="font-size:12px;color:#64748b">${r.note??'—'}</td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+nav('items-list');
+</script>
+</body>
+</html>
