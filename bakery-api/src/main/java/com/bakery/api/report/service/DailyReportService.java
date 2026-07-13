@@ -16,6 +16,7 @@ import com.bakery.api.pricing.entity.ProductPrice;
 import com.bakery.api.pricing.repository.ProductPriceRepository;
 import com.bakery.api.production.entity.DeliveryRecord;
 import com.bakery.api.production.repository.DeliveryRecordRepository;
+import com.bakery.api.production.service.ProductionPlannerService;
 import com.bakery.api.report.entity.DailyReport;
 import com.bakery.api.report.entity.DailyReportLine;
 import com.bakery.api.report.entity.PosDailySale;
@@ -27,6 +28,7 @@ import com.bakery.framework.entity.DeliveryStatus;
 import com.bakery.framework.exception.ResourceNotFoundException;
 import com.bakery.framework.security.BakeryActorResolver;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,7 +39,9 @@ import org.springframework.transaction.annotation.Transactional;
  * 1. getOrCreateDraft(date) → tạo DRAFT nếu chưa có
  * 2. updateRemainingQty(reportId, itemId, qty) → nhân viên nhập tay qty_remaining_actual
  * 3. finalize(reportId) → Admin chốt: tổng hợp toàn bộ số liệu + snapshot giá
+ *    → Tự động trigger ProductionPlannerService.generateDraft() cho ngày hôm sau
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DailyReportService {
@@ -50,6 +54,7 @@ public class DailyReportService {
     private final ProductPriceRepository productPriceRepository;
     private final ItemLookupRepository itemRepository;
     private final BakeryActorResolver actorResolver;
+    private final ProductionPlannerService productionPlannerService;
 
     // ── Get / Create ─────────────────────────────────────────────
 
@@ -210,7 +215,18 @@ public class DailyReportService {
         report.setFinalizedAt(Instant.now());
         report.setFinalizedBy(actorResolver.currentUserId());
         report.setUpdatedAt(Instant.now());
-        return reportRepository.save(report);
+        DailyReport saved = reportRepository.save(report);
+
+        // ── Bước 5: Tự động tạo kế hoạch SX ngày mai ────────────
+        try {
+            productionPlannerService.generateDraft(saved);
+            log.info("Đã tạo kế hoạch SX cho ngày {}", saved.getReportDate().plusDays(1));
+        } catch (Exception ex) {
+            // Không để lỗi planner rollback finalize — log và tiếp tục
+            log.error("Lỗi tạo kế hoạch SX sau finalize báo cáo {}: {}", saved.getId(), ex.getMessage(), ex);
+        }
+
+        return saved;
     }
 
     // ── Private ──────────────────────────────────────────────────
