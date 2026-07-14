@@ -30,10 +30,17 @@ public record ItemRequest(
         String ingredientType,
         UUID defaultSupplierId,
 
+        // ── Splittable (Ingredient + Product) ────────────────
+        /** true (default) = có thể xuất lẻ. false = phải xuất theo bội số unitSize. */
+        boolean splittable,
+        /** Kích thước đơn vị tối thiểu không thể tách. Ví dụ: bơ 5kg/cục → 5.0 */
+        BigDecimal unitSize,
+
         // ── Product only ─────────────────────────────────────
         /** Code value key: PRODUCT_TYPE */
         String productType,
-        BigDecimal sellingPrice,
+        /** Hạn sử dụng (ngày). 0 = bánh tươi trong ngày. null = không set. */
+        Integer shelfDays,
 
         // ── Recipe (Product + SemiProduct) ───────────────────
         String recipeNote,

@@ -17,6 +17,8 @@ public record ProductionGroupRequest(
         // FREE_GROUP
         Integer targetWeekday,
         Integer targetWeekend,
+        /** Ngưỡng % tồn kho — chỉ SX khi tổng tồn < thresholdPercent% × target. NULL = luôn SX. */
+        Integer thresholdPercent,
         // BATCH_FORMULA
         Integer batchWeightGrams,
         String note,

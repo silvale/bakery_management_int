@@ -13,6 +13,7 @@ import com.bakery.api.production.entity.ProductionGroupItem;
 import com.bakery.api.production.repository.ItemGroupRepository;
 import com.bakery.api.production.repository.ProductionGroupRepository;
 import com.bakery.framework.exception.ResourceNotFoundException;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,7 @@ public class ProductionGroupService {
     private final ProductionGroupRepository repository;
     private final ItemGroupRepository itemGroupRepository;
     private final ItemLookupRepository itemRepository;
+    private final EntityManager em;
 
     @Transactional(readOnly = true)
     public List<ProductionGroupResponse> findAll() {
@@ -55,6 +57,9 @@ public class ProductionGroupService {
     public ProductionGroupResponse update(UUID id, ProductionGroupRequest req) {
         ProductionGroup e = getById(id);
         e.getItems().clear();
+        // Flush ngay để Hibernate DELETE items cũ trước khi INSERT mới
+        // Tránh lỗi duplicate key do batch INSERT trước DELETE
+        em.flush();
         apply(e, req);
         return ProductionGroupResponse.from(repository.save(e));
     }
@@ -74,6 +79,7 @@ public class ProductionGroupService {
         e.setGroupType(req.groupType());
         e.setTargetWeekday(req.targetWeekday());
         e.setTargetWeekend(req.targetWeekend());
+        e.setThresholdPercent(req.thresholdPercent());
         e.setBatchWeightGrams(req.batchWeightGrams());
         e.setNote(req.note());
 

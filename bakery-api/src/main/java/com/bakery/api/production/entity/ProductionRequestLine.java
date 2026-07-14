@@ -51,6 +51,10 @@ public class ProductionRequestLine extends BaseEntity {
     @Column(name = "sort_order", nullable = false)
     private Integer sortOrder = 0;
 
+    /** Số lượng bếp thực sản xuất — được set khi bấm Complete. */
+    @Column(name = "qty_produced", precision = 15, scale = 4)
+    private BigDecimal qtyProduced;
+
     @Column(name = "note", length = 500)
     private String note;
 

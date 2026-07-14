@@ -52,6 +52,14 @@ public class ProductionGroup extends BaseEntity {
     @Column(name = "target_weekend")
     private Integer targetWeekend;
 
+    /**
+     * Ngưỡng kích hoạt sản xuất (%) — chỉ dùng cho FREE_GROUP.
+     * Nếu set (ví dụ 50), nhóm chỉ sản xuất khi tổng tồn &lt; thresholdPercent% × target.
+     * NULL = luôn sản xuất đủ target (hành vi mặc định).
+     */
+    @Column(name = "threshold_percent")
+    private Integer thresholdPercent;
+
     // ── BATCH_FORMULA fields ──────────────────────────────────────────────────
 
     /** Trọng lượng 1 cối (gram). Ví dụ: 10000 = 10kg. */

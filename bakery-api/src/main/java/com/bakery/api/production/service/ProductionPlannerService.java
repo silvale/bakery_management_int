@@ -21,6 +21,7 @@ import com.bakery.api.production.entity.ProductionPlan;
 import com.bakery.api.production.entity.ProductionPlanLine;
 import com.bakery.api.production.entity.ProductionThresholdRule;
 import com.bakery.api.production.repository.ProductionGroupRepository;
+import com.bakery.api.production.repository.ProductionPlanLineRepository;
 import com.bakery.api.production.repository.ProductionPlanRepository;
 import com.bakery.api.production.repository.ProductionThresholdRuleRepository;
 import com.bakery.api.report.entity.DailyReport;
@@ -28,6 +29,7 @@ import com.bakery.api.report.entity.DailyReportLine;
 import com.bakery.api.report.repository.DailyReportLineRepository;
 import com.bakery.framework.entity.ApprovalStatus;
 import com.bakery.framework.entity.DayType;
+import com.bakery.framework.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -51,10 +53,69 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProductionPlannerService {
 
     private final ProductionPlanRepository planRepository;
+    private final ProductionPlanLineRepository lineRepository;
     private final ProductionThresholdRuleRepository ruleRepository;
     private final ProductionGroupRepository groupRepository;
     private final DailyReportLineRepository reportLineRepository;
     private final ItemLookupRepository itemRepository;
+
+    /**
+     * Tạo kế hoạch thủ công cho ngày bất kỳ (không cần DailyReport).
+     * Tồn kho = 0 cho tất cả sản phẩm — manager tự điều chỉnh sau.
+     * Idempotent: nếu đã có plan cho ngày đó → trả về plan hiện tại.
+     */
+    @Transactional
+    public ProductionPlan generateForDate(LocalDate planDate) {
+        if (planRepository.existsByPlanDate(planDate)) {
+            log.info("Plan cho ngày {} đã tồn tại, trả về plan hiện tại.", planDate);
+            ProductionPlan existing = planRepository.findByPlanDate(planDate).orElseThrow();
+            initPlanLines(existing);
+            return existing;
+        }
+
+        DayType dayType = resolveDayType(planDate);
+        Map<UUID, BigDecimal> emptyRemaining = Map.of();
+
+        ProductionPlan plan = new ProductionPlan();
+        plan.setPlanDate(planDate);
+        plan.setDayType(dayType);
+        plan.setApprovalStatus(ApprovalStatus.DRAFT);
+
+        List<ProductionPlanLine> lines = new ArrayList<>();
+        Set<UUID> groupedItemIds = new HashSet<>();
+        List<ProductionGroup> activeGroups = groupRepository.findByActiveTrue();
+        for (ProductionGroup group : activeGroups) {
+            group.getItems().forEach(gi -> groupedItemIds.add(gi.getItem().getId()));
+        }
+
+        int sortOrder = 0;
+        for (ProductionGroup group : activeGroups) {
+            if ("FREE_GROUP".equals(group.getGroupType())) {
+                lines.addAll(buildFreeGroupLines(plan, group, dayType, emptyRemaining, sortOrder));
+            } else if ("BATCH_FORMULA".equals(group.getGroupType())) {
+                lines.addAll(buildBatchFormulaLines(plan, group, emptyRemaining, sortOrder));
+            }
+            sortOrder += group.getItems().size() + 1;
+        }
+
+        List<Item> allProducts = itemRepository.findAll().stream()
+                .filter(i -> i instanceof Product)
+                .filter(i -> !groupedItemIds.contains(i.getId()))
+                .toList();
+
+        for (Item item : allProducts) {
+            List<ProductionThresholdRule> rules = ruleRepository
+                    .findByItemIdAndDayTypeOrderBySortOrderAsc(item.getId(), dayType);
+            if (rules.isEmpty()) continue;
+            ProductionPlanLine line = buildSimpleLine(plan, item, BigDecimal.ZERO, rules, sortOrder++);
+            if (line != null) lines.add(line);
+        }
+
+        plan.getLines().addAll(lines);
+        ProductionPlan saved = planRepository.save(plan);
+        initPlanLines(saved);
+        return saved;
+    }
 
     /**
      * Tạo kế hoạch sản xuất DRAFT cho ngày {@code planDate}.
@@ -132,7 +193,9 @@ public class ProductionPlannerService {
         }
 
         plan.getLines().addAll(lines);
-        return planRepository.save(plan);
+        ProductionPlan savedDraft = planRepository.save(plan);
+        initPlanLines(savedDraft);
+        return savedDraft;
     }
 
     // ── Pattern 1: SIMPLE ────────────────────────────────────────────────────
@@ -142,28 +205,64 @@ public class ProductionPlannerService {
             List<ProductionThresholdRule> rules, int sortOrder) {
 
         for (ProductionThresholdRule rule : rules) {
-            if (matchesRule(remaining, rule)) {
+            if (matchesCondition(remaining, rule)) {
+                int suggestedQty = calcSuggestedQty(remaining, rule);
+                if (suggestedQty <= 0) continue;
+
                 ProductionPlanLine line = new ProductionPlanLine();
                 line.setPlan(plan);
                 line.setItem(item);
                 line.setPlanType("SIMPLE");
                 line.setQtyRemaining(remaining);
-                line.setSuggestedQty(rule.getProduceQty());
-                line.setRuleNote(String.format(
-                        "Còn %s, ngưỡng %s %s → làm thêm %d",
-                        remaining.toPlainString(),
-                        rule.getConditionType(),
-                        rule.getConditionValue().toPlainString(),
-                        rule.getProduceQty()));
+                line.setSuggestedQty(suggestedQty);
+                line.setRuleNote(buildRuleNote(remaining, rule, suggestedQty));
                 line.setSortOrder(sortOrder);
                 return line;
             }
         }
-        return null; // không khớp rule nào → không cần sản xuất
+        return null;
     }
 
-    private boolean matchesRule(BigDecimal remaining, ProductionThresholdRule rule) {
-        return remaining.compareTo(rule.getConditionValue()) < 0;
+    /**
+     * Kiểm tra ngưỡng kích hoạt:
+     * COUNT   — remaining < conditionValue
+     * PERCENT — remaining < conditionValue% × actionValue
+     */
+    private boolean matchesCondition(BigDecimal remaining, ProductionThresholdRule rule) {
+        BigDecimal threshold = "PERCENT".equals(rule.getConditionType())
+                ? rule.getConditionValue()
+                        .multiply(BigDecimal.valueOf(rule.getActionValue()))
+                        .divide(BigDecimal.valueOf(100))
+                : rule.getConditionValue();
+        return remaining.compareTo(threshold) < 0;
+    }
+
+    /**
+     * Tính số lượng cần sản xuất:
+     * PRODUCE_MORE   — luôn là actionValue
+     * FILL_TO_TARGET — max(0, actionValue − remaining)
+     */
+    private int calcSuggestedQty(BigDecimal remaining, ProductionThresholdRule rule) {
+        if ("FILL_TO_TARGET".equals(rule.getActionType())) {
+            int needed = rule.getActionValue() - remaining.intValue();
+            return Math.max(0, needed);
+        }
+        return rule.getActionValue(); // PRODUCE_MORE
+    }
+
+    private String buildRuleNote(BigDecimal remaining, ProductionThresholdRule rule, int suggestedQty) {
+        String condDesc = "PERCENT".equals(rule.getConditionType())
+                ? String.format("%s%% × %d = %.1f",
+                        rule.getConditionValue().toPlainString(),
+                        rule.getActionValue(),
+                        rule.getConditionValue().multiply(BigDecimal.valueOf(rule.getActionValue()))
+                                .divide(BigDecimal.valueOf(100)).doubleValue())
+                : rule.getConditionValue().toPlainString();
+        String actionDesc = "FILL_TO_TARGET".equals(rule.getActionType())
+                ? String.format("bù đủ %d", rule.getActionValue())
+                : String.format("làm thêm %d", rule.getActionValue());
+        return String.format("Còn %s < %s → %s = %d",
+                remaining.toPlainString(), condDesc, actionDesc, suggestedQty);
     }
 
     // ── Pattern 2: FREE_GROUP ────────────────────────────────────────────────
@@ -180,7 +279,22 @@ public class ProductionPlannerService {
                 .map(gi -> remainingByItem.getOrDefault(gi.getItem().getId(), BigDecimal.ZERO))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        // Kiểm tra thresholdPercent: nếu set, chỉ sản xuất khi tổng tồn < threshold% × target
+        if (group.getThresholdPercent() != null && target > 0) {
+            BigDecimal thresholdQty = BigDecimal.valueOf(group.getThresholdPercent())
+                    .multiply(BigDecimal.valueOf(target))
+                    .divide(BigDecimal.valueOf(100));
+            if (totalRemaining.compareTo(thresholdQty) >= 0) {
+                log.info("Nhóm {} bỏ qua: tổng tồn {} >= {}% × {} = {}",
+                        group.getCode(), totalRemaining, group.getThresholdPercent(), target, thresholdQty);
+                return List.of();
+            }
+        }
+
         int totalNeeded = Math.max(0, target - totalRemaining.intValue());
+        String thresholdNote = group.getThresholdPercent() != null
+                ? String.format(" [ngưỡng %d%%]", group.getThresholdPercent())
+                : "";
 
         List<ProductionPlanLine> lines = new ArrayList<>();
         int i = 0;
@@ -197,8 +311,8 @@ public class ProductionPlannerService {
             // suggestedQty = null cho FREE_GROUP — nhân viên tự phân bổ
             line.setSuggestedQty(null);
             line.setRuleNote(String.format(
-                    "Nhóm %s: tổng còn %s, target %d → cần thêm %d (nhân viên phân bổ)",
-                    group.getName(), totalRemaining.toPlainString(), target, totalNeeded));
+                    "Nhóm %s%s: tổng còn %s, target %d → cần thêm %d (nhân viên phân bổ)",
+                    group.getName(), thresholdNote, totalRemaining.toPlainString(), target, totalNeeded));
             line.setSortOrder(startSortOrder + i++);
             lines.add(line);
         }
@@ -261,7 +375,83 @@ public class ProductionPlannerService {
         return lines;
     }
 
+    // ── Regenerate (kế hoạch bị REJECTED) ────────────────────────────────────
+
+    /**
+     * Xóa các line cũ của plan REJECTED, tạo lại DRAFT với tồn kho = 0.
+     * Dùng khi manager reject nhầm hoặc muốn tạo lại kế hoạch mới cho ngày đó.
+     */
+    @Transactional
+    public ProductionPlan regenerateRejected(UUID planId) {
+        ProductionPlan plan = planRepository.findById(planId)
+                .orElseThrow(() -> new ResourceNotFoundException("ProductionPlan", planId));
+        if (plan.getApprovalStatus() != ApprovalStatus.REJECTED) {
+            throw new IllegalStateException(
+                    "Chỉ có thể tạo lại kế hoạch ở trạng thái REJECTED. Hiện tại: "
+                            + plan.getApprovalStatus());
+        }
+
+        // Xóa lines cũ ngay xuống DB — dùng @Modifying JPQL để flush trước khi INSERT mới
+        // (plan.getLines().clear() không flush ngay, gây duplicate key khi insert batch)
+        lineRepository.deleteAllByPlanId(plan.getId());
+        plan.getLines().clear(); // sync in-memory collection
+
+        LocalDate planDate = plan.getPlanDate();
+        DayType dayType = resolveDayType(planDate);
+        plan.setDayType(dayType);
+        plan.setApprovalStatus(ApprovalStatus.DRAFT);
+        plan.setRejectedReason(null);
+
+        // Tạo lại lines với tồn kho = 0 (giống generateForDate)
+        Map<UUID, BigDecimal> emptyRemaining = Map.of();
+        List<ProductionPlanLine> lines = new ArrayList<>();
+        Set<UUID> groupedItemIds = new HashSet<>();
+        List<ProductionGroup> activeGroups = groupRepository.findByActiveTrue();
+        for (ProductionGroup group : activeGroups) {
+            group.getItems().forEach(gi -> groupedItemIds.add(gi.getItem().getId()));
+        }
+
+        int sortOrder = 0;
+        for (ProductionGroup group : activeGroups) {
+            if ("FREE_GROUP".equals(group.getGroupType())) {
+                lines.addAll(buildFreeGroupLines(plan, group, dayType, emptyRemaining, sortOrder));
+            } else if ("BATCH_FORMULA".equals(group.getGroupType())) {
+                lines.addAll(buildBatchFormulaLines(plan, group, emptyRemaining, sortOrder));
+            }
+            sortOrder += group.getItems().size() + 1;
+        }
+
+        List<Item> allProducts = itemRepository.findAll().stream()
+                .filter(i -> i instanceof Product)
+                .filter(i -> !groupedItemIds.contains(i.getId()))
+                .toList();
+
+        for (Item item : allProducts) {
+            List<ProductionThresholdRule> rules =
+                    ruleRepository.findByItemIdAndDayTypeOrderBySortOrderAsc(item.getId(), dayType);
+            if (rules.isEmpty()) continue;
+            ProductionPlanLine line = buildSimpleLine(plan, item, BigDecimal.ZERO, rules, sortOrder++);
+            if (line != null) lines.add(line);
+        }
+
+        plan.getLines().addAll(lines);
+        ProductionPlan saved = planRepository.save(plan);
+        initPlanLines(saved);
+        return saved;
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Force-initialize tất cả lazy proxies bên trong plan.lines trong khi còn trong transaction.
+     * Gọi trước khi return khỏi @Transactional để controller có thể gọi DTO.from() an toàn.
+     */
+    private void initPlanLines(ProductionPlan plan) {
+        plan.getLines().forEach(l -> {
+            if (l.getItem() != null) l.getItem().getCode();   // init Item proxy
+            if (l.getGroup() != null) l.getGroup().getCode(); // init ProductionGroup proxy
+        });
+    }
 
     private DayType resolveDayType(LocalDate date) {
         DayOfWeek dow = date.getDayOfWeek();

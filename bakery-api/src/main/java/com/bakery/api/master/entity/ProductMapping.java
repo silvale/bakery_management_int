@@ -1,5 +1,7 @@
 package com.bakery.api.master.entity;
 
+import java.math.BigDecimal;
+
 import com.bakery.framework.entity.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -13,6 +15,9 @@ import lombok.Setter;
 /**
  * Map EX_CODE từ POS → item nội bộ.
  * 1 item (PRODUCT hoặc phụ kiện) có thể có nhiều EX_CODE.
+ *
+ * <p>Giá bán lưu tại đây (không phải trên item) vì cùng 1 sản phẩm
+ * có thể có nhiều mức giá khác nhau tùy EX_CODE (trang trí theo ngày).
  */
 @Getter
 @Setter
@@ -28,13 +33,9 @@ public class ProductMapping extends BaseEntity {
     @Column(name = "ex_code", nullable = false, unique = true, length = 50)
     private String exCode;
 
-    /**
-     * Ngày SX cố định của SKU này.
-     * 0=mỗi ngày, 2=T2, 3=T3, 4=T4, 5=T5, 6=T6, 7=T7, 8=CN, null=không ràng buộc.
-     * Dùng trong ExCodeDecoderService khi dayChar không đủ để xác định ngày SX.
-     */
-    @Column(name = "production_day")
-    private Integer productionDay;
+    /** Giá bán theo EX_CODE — có thể khác nhau tùy mức trang trí/ngày */
+    @Column(name = "selling_price", precision = 15, scale = 2)
+    private BigDecimal sellingPrice;
 
     @Column(name = "note", length = 200)
     private String note;

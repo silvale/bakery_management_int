@@ -35,7 +35,7 @@ public class ProductMappingService
         e.setItem(itemRepository.findById(req.itemId())
                 .orElseThrow(() -> new ResourceNotFoundException("Item", req.itemId())));
         e.setExCode(req.exCode());
-        e.setProductionDay(req.productionDay());
+        e.setSellingPrice(req.sellingPrice());
         e.setNote(req.note());
         return e;
     }
@@ -47,7 +47,7 @@ public class ProductMappingService
                     .orElseThrow(() -> new ResourceNotFoundException("Item", req.itemId())));
         }
         e.setExCode(req.exCode());
-        e.setProductionDay(req.productionDay());
+        e.setSellingPrice(req.sellingPrice());
         e.setNote(req.note());
     }
 
@@ -56,7 +56,7 @@ public class ProductMappingService
         ProductMappingResponse r = new ProductMappingResponse();
         r.applyFrom(e);
         r.setExCode(e.getExCode());
-        r.setProductionDay(e.getProductionDay());
+        r.setSellingPrice(e.getSellingPrice());
         r.setNote(e.getNote());
         if (e.getItem() != null) {
             r.setItem(new ReferenceValue(e.getItem().getCode(), e.getItem().getName()));

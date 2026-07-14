@@ -16,6 +16,7 @@ import com.bakery.framework.entity.ApprovalStatus;
 import com.bakery.framework.exception.ResourceNotFoundException;
 import com.bakery.framework.security.BakeryActorResolver;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>Bếp chỉ được xem plan có status = APPROVED.
  * Manager thấy cả DRAFT và APPROVED.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProductionPlanService {
@@ -32,8 +34,10 @@ public class ProductionPlanService {
     private final ProductionPlanRepository planRepository;
     private final ProductionPlanLineRepository lineRepository;
     private final BakeryActorResolver actorResolver;
+    private final ProductionRequestService productionRequestService;
 
     /** Manager xem kế hoạch theo ngày (DRAFT hoặc APPROVED). */
+    @Transactional(readOnly = true)
     public ProductionPlanResponse findByDate(LocalDate date) {
         ProductionPlan plan = planRepository.findByPlanDate(date)
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionPlan for date " + date));
@@ -41,12 +45,14 @@ public class ProductionPlanService {
     }
 
     /** Bếp xem danh sách kế hoạch đã APPROVED. */
+    @Transactional(readOnly = true)
     public List<ProductionPlanResponse> findApproved() {
         return planRepository.findByApprovalStatusOrderByPlanDateDesc(ApprovalStatus.APPROVED).stream()
                 .map(ProductionPlanResponse::from)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public ProductionPlanResponse findById(UUID id) {
         return ProductionPlanResponse.from(getById(id));
     }
@@ -84,9 +90,36 @@ public class ProductionPlanService {
         ProductionPlan plan = getById(planId);
         assertDraft(plan);
 
+        // Force-init lines trong cùng transaction TRƯỚC khi save
+        // Tránh trường hợp saved entity có lines chưa được load → generateFromPlan bỏ qua
+        plan.getLines().size();
+
         plan.setApprovalStatus(ApprovalStatus.APPROVED);
         plan.setApprovedBy(actorResolver.currentUserId());
-        return ProductionPlanResponse.from(planRepository.save(plan));
+        ProductionPlan saved = planRepository.save(plan);
+
+        // Tự động tạo phiếu SX DAILY theo từng ItemGroup
+        int requestCount = productionRequestService.generateFromPlan(saved).size();
+        log.info("Approve plan {} → tạo {} phiếu SX DAILY", saved.getPlanDate(), requestCount);
+
+        return ProductionPlanResponse.from(saved);
+    }
+
+    /**
+     * Tạo lại phiếu SX từ plan đã APPROVED (dùng khi approve xong nhưng PRs chưa được tạo).
+     * Idempotent: không tạo PR mới nếu đã tồn tại PR cho cùng ngày + itemGroup.
+     */
+    @Transactional
+    public int generateRequestsFromApprovedPlan(UUID planId) {
+        ProductionPlan plan = getById(planId);
+        if (plan.getApprovalStatus() != ApprovalStatus.APPROVED) {
+            throw new IllegalStateException(
+                    "Chỉ có thể generate PRs từ plan APPROVED. Hiện tại: " + plan.getApprovalStatus());
+        }
+        plan.getLines().size(); // force-init
+        int count = productionRequestService.generateFromPlan(plan).size();
+        log.info("generateRequestsFromApprovedPlan: plan {} → tạo {} phiếu SX", plan.getPlanDate(), count);
+        return count;
     }
 
     /**

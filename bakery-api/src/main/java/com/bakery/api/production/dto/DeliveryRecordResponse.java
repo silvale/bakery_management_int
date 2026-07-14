@@ -13,6 +13,10 @@ import lombok.Setter;
 @NoArgsConstructor
 public class DeliveryRecordResponse {
     private UUID id;
+    /** Tên sản phẩm — để hiển thị trên màn hình giao nhận */
+    private String productName;
+    private String productCode;
+    private BigDecimal plannedQty;
     private BigDecimal qtyProduced;
     private BigDecimal qtyReceived;
     private BigDecimal discrepancy;

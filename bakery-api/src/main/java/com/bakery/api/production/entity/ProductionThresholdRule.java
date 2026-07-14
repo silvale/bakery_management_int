@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import com.bakery.api.master.entity.Item;
 import com.bakery.framework.entity.BaseEntity;
 import com.bakery.framework.entity.DayType;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -33,6 +34,7 @@ import lombok.Setter;
         uniqueConstraints = @UniqueConstraint(columnNames = {"item_id", "day_type", "sort_order"}))
 public class ProductionThresholdRule extends BaseEntity {
 
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_id", nullable = false)
     private Item item;
@@ -44,15 +46,31 @@ public class ProductionThresholdRule extends BaseEntity {
     @Column(name = "sort_order", nullable = false)
     private int sortOrder = 1;
 
-    /** COUNT (số tuyệt đối) hoặc PERCENT (% so với target ngày). */
+    /**
+     * Cách đo ngưỡng kích hoạt:
+     * COUNT   — tồn < conditionValue (số tuyệt đối)
+     * PERCENT — tồn < conditionValue% × actionValue
+     */
     @Column(name = "condition_type", nullable = false, length = 10)
     private String conditionType;
 
-    /** Giá trị ngưỡng — nếu tồn kho còn lại < conditionValue thì rule được kích hoạt. */
+    /** Giá trị ngưỡng. COUNT: số tuyệt đối. PERCENT: phần trăm (0–100). */
     @Column(name = "condition_value", nullable = false, precision = 10, scale = 2)
     private BigDecimal conditionValue;
 
-    /** Số lượng cần sản xuất thêm khi rule khớp. */
-    @Column(name = "produce_qty", nullable = false)
-    private int produceQty;
+    /**
+     * Hành động khi rule khớp:
+     * PRODUCE_MORE   — làm thêm đúng actionValue cái
+     * FILL_TO_TARGET — làm thêm max(0, actionValue − tồn) cái
+     */
+    @Column(name = "action_type", nullable = false, length = 20)
+    private String actionType = "PRODUCE_MORE";
+
+    /**
+     * Giá trị hành động — ý nghĩa tuỳ actionType:
+     * PRODUCE_MORE   → số lượng cố định làm thêm
+     * FILL_TO_TARGET → target cần đạt (làm đủ lên con số này)
+     */
+    @Column(name = "action_value", nullable = false)
+    private int actionValue;
 }

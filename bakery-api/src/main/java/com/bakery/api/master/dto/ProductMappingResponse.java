@@ -1,5 +1,7 @@
 package com.bakery.api.master.dto;
 
+import java.math.BigDecimal;
+
 import com.bakery.framework.dto.BaseResponse;
 import com.bakery.framework.metadata.ReferenceValue;
 import lombok.Getter;
@@ -13,6 +15,6 @@ public class ProductMappingResponse extends BaseResponse {
 
     private ReferenceValue item;
     private String exCode;
-    private Integer productionDay;
+    private BigDecimal sellingPrice;
     private String note;
 }

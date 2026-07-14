@@ -21,5 +21,6 @@ public record ThresholdRuleRequest(
             int sortOrder,
             @NotBlank String conditionType,    // COUNT | PERCENT
             @NotNull BigDecimal conditionValue,
-            @Positive int produceQty) {}
+            @NotBlank String actionType,       // PRODUCE_MORE | FILL_TO_TARGET
+            @Positive int actionValue) {}
 }

@@ -40,10 +40,16 @@ public class ItemResponse extends BaseResponse {
     private BigDecimal lastPrice;
     private LocalDate lastPriceDate;
 
+    // ── Splittable (common) ──────────────────────────────────────
+    /** true = có thể xuất lẻ; false = phải xuất theo bội số unitSize */
+    private boolean splittable = true;
+    private BigDecimal unitSize;
+
     // ── Product only ──────────────────────────────────────────
     /** Code value key: PRODUCT_TYPE */
     private String productType;
-    private BigDecimal sellingPrice;
+    /** Hạn sử dụng (ngày kể từ ngày SX). 0 = trong ngày. null = chưa cấu hình. */
+    private Integer shelfDays;
 
     // ── Recipe (Product + SemiProduct) ────────────────────────
     /** Công thức active; nếu chưa active thì là phiên bản mới nhất */

@@ -22,6 +22,7 @@ public class ProductionGroupResponse extends BaseResponse {
     private ReferenceValue itemGroup;
     private Integer targetWeekday;
     private Integer targetWeekend;
+    private Integer thresholdPercent;
     private Integer batchWeightGrams;
     private String note;
     private boolean active;
@@ -58,6 +59,7 @@ public class ProductionGroupResponse extends BaseResponse {
         r.setGroupType(e.getGroupType());
         r.setTargetWeekday(e.getTargetWeekday());
         r.setTargetWeekend(e.getTargetWeekend());
+        r.setThresholdPercent(e.getThresholdPercent());
         r.setBatchWeightGrams(e.getBatchWeightGrams());
         r.setNote(e.getNote());
         r.setActive(e.isActive());

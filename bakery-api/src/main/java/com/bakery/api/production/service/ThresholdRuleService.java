@@ -21,11 +21,14 @@ public class ThresholdRuleService {
     private final ProductionThresholdRuleRepository ruleRepository;
     private final ItemLookupRepository itemRepository;
 
-    /** Lấy tất cả rules của 1 item (tất cả dayType). */
+    /** Lấy tất cả rules của 1 item (cả WEEKDAY + WEEKEND). */
+    @Transactional(readOnly = true)
     public List<ProductionThresholdRule> findByItem(UUID itemId) {
-        return ruleRepository.findByItemIdAndDayTypeOrderBySortOrderAsc(itemId, DayType.WEEKDAY)
-                .stream()
-                .toList();
+        List<ProductionThresholdRule> weekday =
+                ruleRepository.findByItemIdAndDayTypeOrderBySortOrderAsc(itemId, DayType.WEEKDAY);
+        List<ProductionThresholdRule> weekend =
+                ruleRepository.findByItemIdAndDayTypeOrderBySortOrderAsc(itemId, DayType.WEEKEND);
+        return java.util.stream.Stream.concat(weekday.stream(), weekend.stream()).toList();
     }
 
     /**
@@ -47,7 +50,8 @@ public class ThresholdRuleService {
                     rule.setSortOrder(r.sortOrder());
                     rule.setConditionType(r.conditionType().toUpperCase());
                     rule.setConditionValue(r.conditionValue());
-                    rule.setProduceQty(r.produceQty());
+                    rule.setActionType(r.actionType().toUpperCase());
+                    rule.setActionValue(r.actionValue());
                     return rule;
                 })
                 .toList();

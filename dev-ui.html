@@ -89,6 +89,7 @@ tr:hover td{background:#f8fafc}
   </div>
   <div class="nav-group">
     <div class="nav-label">Kế hoạch SX</div>
+    <div class="nav-item" onclick="nav('sx-config')">📋 Cấu hình SX</div>
     <div class="nav-item" onclick="nav('prod-groups')">🔧 Prod Groups</div>
     <div class="nav-item" onclick="nav('threshold-rules')">📏 Threshold Rules</div>
     <div class="nav-item" onclick="nav('prod-plans')">📅 Kế hoạch ngày</div>
@@ -96,6 +97,7 @@ tr:hover td{background:#f8fafc}
   <div class="nav-group">
     <div class="nav-label">Sản xuất</div>
     <div class="nav-item" onclick="nav('prod-requests')">📝 Phiếu SX</div>
+    <div class="nav-item" onclick="nav('delivery-records')">🚚 Giao nhận</div>
     <div class="nav-item" onclick="nav('prod-adjustments')">⚠️ Điều chỉnh SX</div>
   </div>
   <div class="nav-group">
@@ -118,8 +120,8 @@ tr:hover td{background:#f8fafc}
 
 <script>
 const BASE='http://localhost:8080';
-let allItems=[],allWarehouses=[],allSuppliers=[];
-let itemsPage=0; const PAGE_SIZE=20;
+let allItems=[],allWarehouses=[],allSuppliers=[],allItemGroups=[];
+const PAGE_SIZE=20;
 
 // ── API ───────────────────────────────────────────────────────────────────────
 async function api(method,path,body){
@@ -138,13 +140,22 @@ async function apiForm(path,formData){
   }catch(e){toast(e.message,'err');throw e}
 }
 async function loadAllItems(){
-  try{const d=await api('GET','/api/v1/items?size=500');allItems=d?.content??d??[];}catch(_){allItems=[]}
+  try{
+    // Lấy trang đầu để biết tổng số, sau đó lấy hết 1 lần
+    const first=await api('GET','/api/v1/items?size=1&page=0');
+    const total=first?.totalElements??first?.total??1000;
+    const d=await api('GET',`/api/v1/items?size=${total+50}&page=0`);
+    allItems=d?.content??d??[];
+  }catch(_){allItems=[]}
 }
 async function loadAllWarehouses(){
   try{const d=await api('GET','/api/v1/warehouses/all');allWarehouses=d??[];}catch(_){allWarehouses=[]}
 }
 async function loadAllSuppliers(){
   try{const d=await api('GET','/api/v1/suppliers/all');allSuppliers=d??[];}catch(_){allSuppliers=[]}
+}
+async function loadAllItemGroups(){
+  try{const d=await api('GET','/api/v1/item-groups');allItemGroups=d??[];}catch(_){allItemGroups=[]}
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -159,14 +170,15 @@ function toast(msg,type='ok'){
 // ── Nav ───────────────────────────────────────────────────────────────────────
 const PAGE_TITLES={'items-list':'Danh sách sản phẩm','item-form':'Tạo / Sửa sản phẩm',
   'suppliers':'Nhà cung cấp','product-mapping':'Product Mapping','item-groups':'Item Groups',
-  'prod-groups':'Production Groups','threshold-rules':'Threshold Rules','prod-plans':'Kế hoạch sản xuất',
-  'prod-requests':'Phiếu sản xuất','prod-adjustments':'Điều chỉnh SX',
+  'sx-config':'Cấu hình sản xuất','prod-groups':'Production Groups','threshold-rules':'Threshold Rules','prod-plans':'Kế hoạch sản xuất',
+  'prod-requests':'Phiếu sản xuất','delivery-records':'Giao nhận bếp → shop','prod-adjustments':'Điều chỉnh SX',
   'stock-summary':'Tồn kho','inventory-requests':'Phiếu kho',
   'daily-report':'Báo cáo ngày','pos-sales':'POS Sales'};
 const PAGE_FNS={'items-list':pageItemsList,'item-form':pageItemForm,'suppliers':pageSuppliers,
-  'product-mapping':pageProductMapping,'item-groups':pageItemGroups,'prod-groups':pageProdGroups,
+  'product-mapping':pageProductMapping,'item-groups':pageItemGroups,
+  'sx-config':pageSxConfig,'prod-groups':pageProdGroups,
   'threshold-rules':pageThresholdRules,'prod-plans':pageProdPlans,'prod-requests':pageProdRequests,
-  'prod-adjustments':pageProdAdjustments,'stock-summary':pageStockSummary,
+  'delivery-records':pageDeliveryRecords,'prod-adjustments':pageProdAdjustments,'stock-summary':pageStockSummary,
   'inventory-requests':pageInventoryRequests,'daily-report':pageDailyReport,'pos-sales':pagePosSales};
 
 function nav(page,data){
@@ -199,45 +211,109 @@ function whOpts(){return allWarehouses.map(w=>`<option value="${w.id}">${w.code}
 function supOpts(){return allSuppliers.map(s=>`<option value="${s.id}">${s.code} — ${s.name}</option>`).join('')}
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ITEMS
+// ITEMS — 3 tab chính: Sản Phẩm | Bán Thành Phẩm | Nguyên Liệu
+// Tab "Sản Phẩm" chia sub-tabs theo item_group
 // ══════════════════════════════════════════════════════════════════════════════
+let itemsActiveType='PRODUCT'; // tab loại hiện tại
+let itemsActiveGroup=null;     // groupCode đang chọn trong Sản Phẩm (null = Tất cả)
+let itemsPage=0;
+
 async function pageItemsList(){
   itemsPage=0;
+  await Promise.all([loadAllItems(), loadAllItemGroups()]);
   document.getElementById('content').innerHTML=`
   <div class="card">
+    <div class="tabs" id="items-type-tabs">
+      <div class="tab ${itemsActiveType==='PRODUCT'?'active':''}" onclick="switchItemType('PRODUCT')">🍰 Sản Phẩm</div>
+      <div class="tab ${itemsActiveType==='SEMI_PRODUCT'?'active':''}" onclick="switchItemType('SEMI_PRODUCT')">🧁 Bán Thành Phẩm</div>
+      <div class="tab ${itemsActiveType==='INGREDIENT'?'active':''}" onclick="switchItemType('INGREDIENT')">🥛 Nguyên Liệu</div>
+    </div>
+    <div id="items-group-tabs" style="margin-bottom:12px"></div>
     <div class="filter-bar">
-      <select id="ft" onchange="itemsPage=0;loadItems()">
-        <option value="">Tất cả loại</option>
-        <option value="INGREDIENT">Nguyên liệu</option>
-        <option value="SEMI_PRODUCT">Bán thành phẩm</option>
-        <option value="PRODUCT">Sản phẩm</option>
-      </select>
       <input id="fn" placeholder="Tìm tên / code..." oninput="itemsPage=0;loadItems()" style="width:200px">
       <button class="btn btn-primary" onclick="nav('item-form',{})">+ Tạo mới</button>
     </div>
     <div id="items-wrap"><div class="empty">Đang tải...</div></div>
     <div id="items-pag" style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:10px"></div>
   </div>`;
-  await loadAllItems(); loadItems();
+  renderGroupTabs();
+  loadItems();
 }
+
+function switchItemType(type){
+  itemsActiveType=type;
+  itemsActiveGroup=null;
+  itemsPage=0;
+  // update tab active class
+  document.querySelectorAll('#items-type-tabs .tab').forEach((el,i)=>{
+    const types=['PRODUCT','SEMI_PRODUCT','INGREDIENT'];
+    el.classList.toggle('active',types[i]===type);
+  });
+  renderGroupTabs();
+  loadItems();
+}
+
+function renderGroupTabs(){
+  const el=document.getElementById('items-group-tabs');
+  if(!el)return;
+  if(itemsActiveType!=='PRODUCT'){el.innerHTML='';return;}
+  const tabs=[{code:null,name:'Tất cả'},...allItemGroups]
+    .map(g=>`<span class="tab ${itemsActiveGroup===g.code?'active':''}"
+      style="font-size:12px;padding:5px 12px"
+      onclick="switchItemGroup(${g.code?`'${g.code}'`:'null'})">${g.name??'Tất cả'}</span>`).join('');
+  el.innerHTML=`<div class="tabs" style="border-bottom:1px solid #e2e8f0;margin-bottom:0">${tabs}</div>`;
+}
+
+function switchItemGroup(code){
+  itemsActiveGroup=code;
+  itemsPage=0;
+  renderGroupTabs();
+  loadItems();
+}
+
 async function loadItems(){
-  const type=document.getElementById('ft')?.value||'';
   const name=document.getElementById('fn')?.value||'';
-  let path=`/api/v1/items?size=${PAGE_SIZE}&page=${itemsPage}`;
-  if(type)path+=`&itemType=${type}`;
-  if(name)path+=`&name=${encodeURIComponent(name)}`;
-  const data=await api('GET',path);
-  const items=data?.content??[];
-  const total=data?.totalElements??0, totalPages=data?.totalPages??1;
   const wrap=document.getElementById('items-wrap'),pag=document.getElementById('items-pag');
   if(!wrap)return;
-  if(!items.length){wrap.innerHTML='<div class="empty">Không có dữ liệu</div>';if(pag)pag.innerHTML='';return;}
+
+  let items=[], total=0, totalPages=1;
+
+  if(itemsActiveGroup!==null){
+    // Group tab đang chọn: load hết toàn bộ type rồi filter client-side
+    // (API chưa hỗ trợ filter theo itemGroup)
+    try{
+      const first=await api('GET',`/api/v1/items?size=1&page=0&itemType=${itemsActiveType}`);
+      const tot=first?.totalElements??500;
+      const data=await api('GET',`/api/v1/items?size=${tot+50}&page=0&itemType=${itemsActiveType}`);
+      const all=data?.content??[];
+      items=all.filter(i=>i.itemGroup?.key===itemsActiveGroup);
+      if(name)items=items.filter(i=>i.name?.toLowerCase().includes(name.toLowerCase())||i.code?.toLowerCase().includes(name.toLowerCase()));
+    }catch(_){items=[];}
+    if(pag)pag.innerHTML='';
+  }else{
+    // Không chọn group: phân trang bình thường
+    let path=`/api/v1/items?size=${PAGE_SIZE}&page=${itemsPage}&itemType=${itemsActiveType}`;
+    if(name)path+=`&name=${encodeURIComponent(name)}`;
+    const data=await api('GET',path);
+    items=data?.content??[];
+    total=data?.totalElements??0; totalPages=data?.totalPages??1;
+    if(pag){
+      const from=itemsPage*PAGE_SIZE+1,to=Math.min((itemsPage+1)*PAGE_SIZE,total);
+      pag.innerHTML=`<span style="font-size:12px;color:#64748b">${from}–${to} / ${total}</span>
+        <button class="btn btn-ghost btn-sm" onclick="itemsPage--;loadItems()" ${itemsPage===0?'disabled':''}>‹</button>
+        <span style="font-size:13px">Trang ${itemsPage+1}/${totalPages}</span>
+        <button class="btn btn-ghost btn-sm" onclick="itemsPage++;loadItems()" ${itemsPage>=totalPages-1?'disabled':''}>›</button>`;
+    }
+  }
+
+  if(!items.length){wrap.innerHTML='<div class="empty">Không có dữ liệu</div>';return;}
+  const showGroup=itemsActiveType==='PRODUCT'&&itemsActiveGroup===null;
   wrap.innerHTML=`<table><thead><tr>
-    <th>Loại</th><th>Code</th><th>Tên</th><th>Đơn vị</th><th>Giá bán</th><th>Status</th><th></th>
+    ${showGroup?'<th>Nhóm</th>':''}<th>Code</th><th>Tên</th><th>Đơn vị</th><th>Status</th><th></th>
   </tr></thead><tbody>
   ${items.map(i=>`<tr>
-    <td>${badge(i.itemType)}</td><td><code>${i.code}</code></td><td>${i.name}</td><td>${i.unit}</td>
-    <td>${i.sellingPrice!=null?fmt(i.sellingPrice)+'đ':'—'}</td>
+    ${showGroup?`<td>${i.itemGroup?.value??i.itemGroup?.name??'<span style="color:#cbd5e1">—</span>'}</td>`:''}
+    <td><code>${i.code}</code></td><td>${i.name}</td><td>${i.unit}</td>
     <td>${badge(i.approvalStatus)}</td>
     <td style="white-space:nowrap">
       <button class="btn btn-ghost btn-sm" onclick='nav("item-form",${JSON.stringify(i)})'>Sửa</button>
@@ -245,13 +321,6 @@ async function loadItems(){
         ?`<button class="btn btn-success btn-sm" onclick="approveItem('${i.id}')">Approve</button>`:''}
     </td>
   </tr>`).join('')}</tbody></table>`;
-  if(pag){
-    const from=itemsPage*PAGE_SIZE+1,to=Math.min((itemsPage+1)*PAGE_SIZE,total);
-    pag.innerHTML=`<span style="font-size:12px;color:#64748b">${from}–${to} / ${total}</span>
-      <button class="btn btn-ghost btn-sm" onclick="itemsPage--;loadItems()" ${itemsPage===0?'disabled':''}>‹</button>
-      <span style="font-size:13px">Trang ${itemsPage+1}/${totalPages}</span>
-      <button class="btn btn-ghost btn-sm" onclick="itemsPage++;loadItems()" ${itemsPage>=totalPages-1?'disabled':''}>›</button>`;
-  }
 }
 async function approveItem(id){await api('POST',`/api/v1/items/${id}/approve`);toast('Đã approve');loadItems();}
 
@@ -260,7 +329,12 @@ let recipeLines=[];
 async function pageItemForm(item={}){
   await loadAllItems();
   const isEdit=!!item.id;
-  recipeLines=(item.recipe?.lines??[]).map(l=>({itemId:l.item?.id??'',qty:l.quantity??'',unit:l.unit??'',sort:l.sortOrder??1}));
+  // l.item là ReferenceValue {key: itemCode, value: itemName} — không có id
+  // Phải lookup ngược qua allItems bằng code
+  recipeLines=(item.recipe?.lines??[]).map(l=>{
+    const found=allItems.find(x=>x.code===(l.item?.key??''));
+    return {itemId:found?.id??'', qty:l.quantity??'', unit:l.unit??'', sort:l.sortOrder??1};
+  });
   let groups=[];try{groups=await api('GET','/api/v1/item-groups');}catch(_){}
   document.getElementById('content').innerHTML=`
   <div class="card">
@@ -281,10 +355,18 @@ async function pageItemForm(item={}){
       <div class="field"><label>Code *</label><input id="f-code" value="${item.code??''}"></div>
       <div class="field"><label>Tên *</label><input id="f-name" value="${item.name??''}"></div>
       <div class="field"><label>Đơn vị *</label><input id="f-unit" value="${item.unit??''}" placeholder="cái, kg..."></div>
-      <div class="field" id="f-price-wrap" style="${item.itemType==='PRODUCT'?'':'display:none'}">
-        <label>Giá bán</label><input id="f-price" type="number" value="${item.sellingPrice??''}"></div>
+      <div class="field" id="f-shelf-wrap" style="${item.itemType==='PRODUCT'?'':'display:none'}">
+        <label>Hạn sử dụng (ngày) <small style="color:#94a3b8">0 = trong ngày</small></label>
+        <input id="f-shelf" type="number" min="0" value="${item.shelfDays??''}" placeholder="1"></div>
       <div class="field" id="f-ingtype-wrap" style="${item.itemType==='INGREDIENT'?'':'display:none'}">
         <label>Ingredient Type</label><input id="f-ingtype" value="${item.ingredientType??''}" placeholder="DRY, WET..."></div>
+      <div class="field" style="display:flex;align-items:center;gap:12px">
+        <label style="margin:0"><input type="checkbox" id="f-splittable" ${item.splittable===false?'':'checked'} style="margin-right:6px">Có thể xuất lẻ</label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="margin:0;white-space:nowrap;font-size:13px">Unit size</label>
+          <input id="f-unitsize" type="number" step="0.001" value="${item.unitSize??''}" placeholder="5.0" style="width:80px">
+        </div>
+      </div>
     </div>
     <div id="recipe-section" style="${item.itemType==='PRODUCT'||item.itemType==='SEMI_PRODUCT'?'':'display:none'}">
       <hr class="divider">
@@ -307,22 +389,27 @@ async function pageItemForm(item={}){
 }
 function onItemTypeChange(){
   const t=document.getElementById('f-type').value;
-  document.getElementById('f-price-wrap').style.display=t==='PRODUCT'?'':'none';
+  document.getElementById('f-shelf-wrap').style.display=t==='PRODUCT'?'':'none';
   document.getElementById('f-ingtype-wrap').style.display=t==='INGREDIENT'?'':'none';
   document.getElementById('recipe-section').style.display=(t==='PRODUCT'||t==='SEMI_PRODUCT')?'':'none';
 }
 function renderRL(){
   const tb=document.getElementById('recipe-tbody');if(!tb)return;
   tb.innerHTML=recipeLines.map((l,i)=>`<tr>
-    <td><select onchange="recipeLines[${i}].itemId=this.value">
+    <td><select id="rl-item-${i}" onchange="recipeLines[${i}].itemId=this.value">
       <option value="">-- Chọn --</option>
-      ${allItems.filter(x=>x.itemType!=='PRODUCT').map(x=>`<option value="${x.id}" ${x.id===l.itemId?'selected':''}>[${x.itemType?.[0]}] ${x.code} — ${x.name}</option>`).join('')}
+      ${allItems.filter(x=>x.itemType!=='PRODUCT').map(x=>`<option value="${x.id}">[${x.itemType?.[0]}] ${x.code} — ${x.name}</option>`).join('')}
     </select></td>
     <td><input type="number" step="0.001" value="${l.qty}" onchange="recipeLines[${i}].qty=+this.value"></td>
     <td><input value="${l.unit}" onchange="recipeLines[${i}].unit=this.value" placeholder="kg,g..."></td>
     <td><input type="number" value="${l.sort||i+1}" onchange="recipeLines[${i}].sort=+this.value" style="width:50px"></td>
     <td><button class="btn btn-danger btn-sm" onclick="recipeLines.splice(${i},1);renderRL()">✕</button></td>
   </tr>`).join('');
+  // Ép value sau khi DOM đã render (tránh browser ignore selected attr)
+  recipeLines.forEach((l,i)=>{
+    const sel=document.getElementById(`rl-item-${i}`);
+    if(sel&&l.itemId)sel.value=l.itemId;
+  });
 }
 function addRL(){recipeLines.push({itemId:'',qty:'',unit:'',sort:recipeLines.length+1});renderRL();}
 async function saveItem(id){
@@ -332,8 +419,10 @@ async function saveItem(id){
   const body={itemType,code:document.getElementById('f-code').value.trim(),
     name:document.getElementById('f-name').value.trim(),unit:document.getElementById('f-unit').value.trim(),
     itemGroupId:igVal||null,
+    splittable:document.getElementById('f-splittable')?.checked??true,
+    unitSize:document.getElementById('f-unitsize')?.value?+document.getElementById('f-unitsize').value:null,
     ingredientType:document.getElementById('f-ingtype')?.value.trim()||null,
-    sellingPrice:document.getElementById('f-price')?.value?+document.getElementById('f-price').value:null,
+    shelfDays:document.getElementById('f-shelf')?.value!==''&&document.getElementById('f-shelf')?.value!=null?+document.getElementById('f-shelf').value:null,
     recipeNote:document.getElementById('f-rnote')?.value||null,
     recipeLines:recipeLines.filter(l=>l.itemId).map(l=>({itemId:l.itemId,quantity:+l.qty,unit:l.unit,sortOrder:l.sort}))};
   if(!body.code||!body.name||!body.unit){toast('Code, Tên, Đơn vị là bắt buộc','err');return;}
@@ -414,10 +503,13 @@ async function saveSup(){
 async function approveSup(id){await api('POST',`/api/v1/suppliers/${id}/approve`);toast('Đã approve');loadSuppliers();}
 
 // ══════════════════════════════════════════════════════════════════════════════
-// PRODUCT MAPPING
+// PRODUCT MAPPING — chia theo item_group
 // ══════════════════════════════════════════════════════════════════════════════
+let pmActiveGroup=null; // null = Tất cả
+let pmAllMappings=[];
+
 async function pageProductMapping(){
-  await loadAllItems();
+  await Promise.all([loadAllItems(), loadAllItemGroups()]);
   const products=allItems.filter(i=>i.itemType==='PRODUCT');
   document.getElementById('content').innerHTML=`
   <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:14px">
@@ -429,44 +521,103 @@ async function pageProductMapping(){
             <option value="">-- Chọn SP --</option>
             ${products.map(p=>`<option value="${p.id}">${p.code} — ${p.name}</option>`).join('')}
           </select></div>
-        <div class="field"><label>EX_CODE (POS) *</label><input id="pm-ex" placeholder="VD: TIRA-12"></div>
-        <div class="field"><label>Production Day</label><input id="pm-day" type="number" placeholder="0=hôm nay,1=ngày mai..."></div>
+        <div class="field"><label>EX_CODE (POS) *</label><input id="pm-ex" placeholder="VD: BK253145683"></div>
+        <div class="field"><label>Giá bán (đ)</label><input id="pm-price" type="number" placeholder="280000"></div>
         <div class="field form-full"><label>Ghi chú</label><input id="pm-note"></div>
       </div>
       <div class="action-row"><button class="btn btn-primary" onclick="savePM()">Thêm mapping</button></div>
     </div>
     <div class="card">
       <div class="card-title">Danh sách mappings</div>
+      <div class="tabs" id="pm-group-tabs" style="margin-bottom:12px"></div>
       <div id="pm-list"><div class="empty">Đang tải...</div></div>
     </div>
   </div>`;
   loadPM();
 }
+
+function getItemGroupKey(mapping){
+  // m.item = ReferenceValue {key: itemCode, value: itemName}
+  // allItems[].itemGroup = ReferenceValue {key: groupCode, value: groupName}
+  const item=allItems.find(i=>i.code===mapping.item?.key);
+  return item?.itemGroup?.key??null;
+}
+
+function renderPMGroupTabs(){
+  const el=document.getElementById('pm-group-tabs');if(!el)return;
+  const groupsInData=new Set(pmAllMappings.map(m=>getItemGroupKey(m)));
+  const tabs=[{code:null,name:'Tất cả'},...allItemGroups.filter(g=>groupsInData.has(g.code))]
+    .map(g=>`<span class="tab ${pmActiveGroup===g.code?'active':''}"
+      style="font-size:12px;padding:5px 12px"
+      onclick="switchPMGroup(${g.code?`'${g.code}'`:'null'})">${g.name??'Tất cả'}</span>`).join('');
+  el.innerHTML=tabs;
+}
+
+function switchPMGroup(code){
+  pmActiveGroup=code;
+  renderPMGroupTabs();
+  renderPMList();
+}
+
 async function loadPM(){
-  const data=await api('GET','/api/v1/product-mappings/all');
+  pmAllMappings=await api('GET','/api/v1/product-mappings/all')??[];
+  renderPMGroupTabs();
+  renderPMList();
+}
+
+function renderPMList(){
   const el=document.getElementById('pm-list');if(!el)return;
-  if(!data?.length){el.innerHTML='<div class="empty">Chưa có mapping</div>';return;}
-  el.innerHTML=`<table><thead><tr><th>SP (IN_CODE)</th><th>EX_CODE</th><th>Prod Day</th><th>Ghi chú</th><th></th></tr></thead>
+  let data=pmAllMappings;
+  if(pmActiveGroup!==null){
+    data=data.filter(m=>getItemGroupKey(m)===pmActiveGroup);
+  }
+  if(!data.length){el.innerHTML='<div class="empty">Chưa có mapping</div>';return;}
+  el.innerHTML=`<table><thead><tr><th>SP (IN_CODE)</th><th>EX_CODE</th><th>Giá bán</th><th>Ghi chú</th><th></th></tr></thead>
   <tbody>${data.map(m=>`<tr>
     <td>${m.item?.name??m.item?.key??'?'}</td>
     <td><code>${m.exCode}</code></td>
-    <td>${m.productionDay??0}</td>
+    <td>${m.sellingPrice!=null?fmt(m.sellingPrice)+'đ':'—'}</td>
     <td>${m.note??'—'}</td>
-    <td><button class="btn btn-danger btn-sm" onclick="deletePM('${m.id}')">Xóa</button></td>
+    <td><button class="btn btn-danger btn-sm" onclick="deletePM('${m.id}')">Xóa</button>
+        <button class="btn btn-ghost btn-sm" onclick="editPM('${m.id}')">Sửa</button></td>
   </tr>`).join('')}</tbody></table>`;
 }
+
 async function savePM(){
+  const id=document.getElementById('pm-edit-id')?.value||'';
   const itemId=document.getElementById('pm-item').value;
   const exCode=document.getElementById('pm-ex').value.trim();
   if(!itemId||!exCode){toast('Cần chọn SP và nhập EX_CODE','err');return;}
-  await api('POST','/api/v1/product-mappings',{itemId,exCode,
-    productionDay:document.getElementById('pm-day').value?+document.getElementById('pm-day').value:null,
-    note:document.getElementById('pm-note').value||null});
-  toast('Đã thêm mapping');
+  const body={itemId,exCode,
+    sellingPrice:document.getElementById('pm-price').value?+document.getElementById('pm-price').value:null,
+    note:document.getElementById('pm-note').value||null};
+  id?await api('PUT',`/api/v1/product-mappings/${id}`,body):await api('POST','/api/v1/product-mappings',body);
+  toast(id?'Đã cập nhật':'Đã thêm mapping');
   document.getElementById('pm-item').value='';
   document.getElementById('pm-ex').value='';
+  document.getElementById('pm-price').value='';
+  document.getElementById('pm-note').value='';
+  if(document.getElementById('pm-edit-id'))document.getElementById('pm-edit-id').value='';
+  document.querySelector('#content .card .card-title').textContent='Thêm mapping';
   loadPM();
 }
+
+function editPM(id){
+  const m=pmAllMappings.find(x=>x.id===id);if(!m)return;
+  const item=allItems.find(i=>i.code===m.item?.key||i.id===m.item?.id);
+  document.getElementById('pm-item').value=item?.id??'';
+  document.getElementById('pm-ex').value=m.exCode??'';
+  document.getElementById('pm-price').value=m.sellingPrice??'';
+  document.getElementById('pm-note').value=m.note??'';
+  // thêm hidden field để biết đang edit
+  let hid=document.getElementById('pm-edit-id');
+  if(!hid){hid=document.createElement('input');hid.type='hidden';hid.id='pm-edit-id';
+    document.getElementById('pm-item').closest('.form-grid').appendChild(hid);}
+  hid.value=id;
+  document.querySelector('#content .card .card-title').textContent='Sửa mapping';
+  document.getElementById('pm-item').closest('.card').scrollIntoView({behavior:'smooth'});
+}
+
 async function deletePM(id){
   if(!confirm('Xóa mapping này?'))return;
   await api('DELETE',`/api/v1/product-mappings/${id}`);
@@ -517,12 +668,160 @@ async function deleteIG(id){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// CẤU HÌNH SX — Unified view: SIMPLE rules + FREE_GROUP + BATCH_FORMULA
+// ══════════════════════════════════════════════════════════════════════════════
+async function pageSxConfig(){
+  await loadAllItems();
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div class="card-title">Cấu hình số lượng sản xuất</div>
+    <p style="color:#64748b;font-size:13px;margin:0 0 12px">Tổng hợp toàn bộ cấu hình SX theo 3 pattern. Click vào từng mục để chỉnh sửa.</p>
+    <div id="sxc-body"><div class="empty">Đang tải...</div></div>
+  </div>`;
+  loadSxConfig();
+}
+async function loadSxConfig(){
+  const el=document.getElementById('sxc-body');if(!el)return;
+  try{
+    const [groups,products]=await Promise.all([
+      api('GET','/api/v1/production-groups').catch(()=>[]),
+      Promise.resolve(allItems.filter(i=>i.itemType==='PRODUCT'))
+    ]);
+    // items thuộc group
+    const groupedIds=new Set(groups.flatMap(g=>(g.items??[]).map(gi=>gi.itemId)));
+    // lấy rules cho tất cả sản phẩm không trong group
+    const simpleProducts=products.filter(p=>!groupedIds.has(p.id));
+    const ruleResults=await Promise.all(simpleProducts.map(async p=>{
+      try{const r=await api('GET',`/api/v1/items/${p.id}/threshold-rules`);return{p,rules:r??[]};}
+      catch(_){return{p,rules:[]};}
+    }));
+    const withRules=ruleResults.filter(r=>r.rules.length>0);
+    const noConfig=simpleProducts.filter(p=>!withRules.find(r=>r.p.id===p.id));
+
+    let html='';
+
+    // ── FREE_GROUP ────────────────────────────────────────────────────────────
+    const freeGroups=groups.filter(g=>g.groupType==='FREE_GROUP');
+    if(freeGroups.length){
+      html+=`<div style="margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
+          🔢 FREE GROUP — nhân viên phân bổ nội bộ</div>
+        <table><thead><tr>
+          <th>Nhóm</th><th>Sản phẩm</th>
+          <th style="text-align:center">Target WD</th><th style="text-align:center">Target WE</th>
+          <th style="text-align:center">Ngưỡng %</th><th></th>
+        </tr></thead><tbody>
+        ${freeGroups.map(g=>{
+          const items=g.items??[];
+          return items.map((gi,idx)=>`<tr>
+            ${idx===0?`<td rowspan="${items.length||1}" style="background:#f8fafc;font-weight:600;vertical-align:top;padding-top:10px">
+              ${g.name}<br><span style="font-size:11px;color:#94a3b8">${g.code}</span></td>`:''}
+            <td>${gi.item?.name??gi.item?.key??'?'}</td>
+            ${idx===0?`<td style="text-align:center" rowspan="${items.length||1}"><strong>${g.targetWeekday??'—'}</strong></td>
+              <td style="text-align:center" rowspan="${items.length||1}"><strong>${g.targetWeekend??'—'}</strong></td>
+              <td style="text-align:center" rowspan="${items.length||1}">${g.thresholdPercent!=null?
+                `<span style="background:#fef9c3;color:#854d0e;padding:1px 6px;border-radius:10px;font-size:11px">&lt;${g.thresholdPercent}%</span>`:
+                '<span style="color:#94a3b8;font-size:12px">luôn SX</span>'}
+              </td>
+              <td rowspan="${items.length||1}" onclick="nav('prod-groups')">
+                <button class="btn btn-ghost btn-sm">Sửa</button></td>`:''}
+          </tr>`).join('');
+        }).join('')}
+        </tbody></table></div>`;
+    }
+
+    // ── BATCH_FORMULA ─────────────────────────────────────────────────────────
+    const batchGroups=groups.filter(g=>g.groupType==='BATCH_FORMULA');
+    if(batchGroups.length){
+      html+=`<div style="margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
+          🧪 BATCH FORMULA — theo cối</div>
+        <table><thead><tr>
+          <th>Nhóm</th><th>Sản phẩm</th>
+          <th style="text-align:right">Gram/cái</th>
+          <th style="text-align:right">Cối (kg)</th><th></th>
+        </tr></thead><tbody>
+        ${batchGroups.map(g=>{
+          const items=g.items??[];
+          const bwKg=g.batchWeightGrams?(g.batchWeightGrams/1000).toFixed(1)+'kg':'—';
+          return items.map((gi,idx)=>`<tr>
+            ${idx===0?`<td rowspan="${items.length||1}" style="background:#f8fafc;font-weight:600;vertical-align:top;padding-top:10px">
+              ${g.name}<br><span style="font-size:11px;color:#94a3b8">${g.code}</span></td>`:''}
+            <td>${gi.item?.name??gi.item?.key??'?'}</td>
+            <td style="text-align:right">${gi.gramsPerUnit?gi.gramsPerUnit+'g':'—'}</td>
+            ${idx===0?`<td style="text-align:right" rowspan="${items.length||1}"><strong>${bwKg}</strong></td>
+              <td rowspan="${items.length||1}" onclick="nav('prod-groups')">
+                <button class="btn btn-ghost btn-sm">Sửa</button></td>`:''}
+          </tr>`).join('');
+        }).join('')}
+        </tbody></table></div>`;
+    }
+
+    // ── SIMPLE threshold rules ────────────────────────────────────────────────
+    if(withRules.length){
+      html+=`<div style="margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
+          📏 SIMPLE RULES — ngưỡng theo từng sản phẩm</div>
+        <table><thead><tr>
+          <th>Sản phẩm</th>
+          <th style="text-align:center">WD rules</th>
+          <th style="text-align:center">WE rules</th>
+          <th>Rule đầu tiên (WD)</th><th></th>
+        </tr></thead><tbody>
+        ${withRules.map(({p,rules})=>{
+          const wd=rules.filter(r=>r.dayType==='WEEKDAY');
+          const we=rules.filter(r=>r.dayType==='WEEKEND');
+          const first=wd[0];
+          const firstDesc=first
+            ?`${first.conditionType==='COUNT'?'tồn &lt;'+first.conditionValue:'tồn &lt;'+first.conditionValue+'% × '+first.actionValue}
+               → ${first.actionType==='PRODUCE_MORE'?'làm thêm '+first.actionValue:'bù đủ '+first.actionValue}`
+            :'—';
+          return`<tr>
+            <td><code>${p.code}</code> ${p.name}</td>
+            <td style="text-align:center">${wd.length?`<span style="background:#dbeafe;color:#1e40af;padding:1px 8px;border-radius:10px;font-size:12px">${wd.length}</span>`:'<span style="color:#e5e7eb">0</span>'}</td>
+            <td style="text-align:center">${we.length?`<span style="background:#f3e8ff;color:#7e22ce;padding:1px 8px;border-radius:10px;font-size:12px">${we.length}</span>`:'<span style="color:#e5e7eb">0</span>'}</td>
+            <td style="font-size:12px;color:#475569">${firstDesc}</td>
+            <td><button class="btn btn-ghost btn-sm" onclick="jumpToRuleItem('${p.id}')">Sửa</button></td>
+          </tr>`;
+        }).join('')}
+        </tbody></table></div>`;
+    }
+
+    // ── Chưa cấu hình ─────────────────────────────────────────────────────────
+    if(noConfig.length){
+      html+=`<div>
+        <div style="font-size:11px;font-weight:700;color:#e97316;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
+          ⚠️ Chưa cấu hình (${noConfig.length} sản phẩm)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${noConfig.map(p=>`<span style="background:#fff7ed;color:#c2410c;padding:2px 10px;border-radius:12px;font-size:12px;cursor:pointer"
+            onclick="jumpToRuleItem('${p.id}')">${p.code}</span>`).join('')}
+        </div>
+      </div>`;
+    }
+
+    if(!html) html='<div class="empty">Chưa có cấu hình nào</div>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML=`<div class="empty" style="color:#ef4444">${e.message}</div>`;}
+}
+function jumpToRuleItem(itemId){
+  nav('threshold-rules');
+  // đợi DOM render xong rồi select
+  setTimeout(()=>{
+    const sg=document.getElementById('tr-single');
+    if(!sg)return;
+    for(const opt of sg.options){if(opt.value===itemId){opt.selected=true;break;}}
+    onTrSingle(itemId);
+    window.scrollTo({top:0,behavior:'smooth'});
+  },300);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // PRODUCTION GROUPS
 // ══════════════════════════════════════════════════════════════════════════════
 let pgItems=[];
 async function pageProdGroups(){
-  await loadAllItems();
-  let groups=[];try{groups=await api('GET','/api/v1/item-groups');}catch(_){}
+  await Promise.all([loadAllItems(), loadAllItemGroups()]);
+  const groups=allItemGroups;
   pgItems=[];
   document.getElementById('content').innerHTML=`
   <div class="card">
@@ -543,6 +842,8 @@ async function pageProdGroups(){
         <div class="form-grid cols3">
           <div class="field"><label>Target Weekday</label><input id="pg-tw" type="number" placeholder="40"></div>
           <div class="field"><label>Target Weekend</label><input id="pg-twe" type="number" placeholder="50"></div>
+          <div class="field"><label>Ngưỡng tồn % <small style="color:#94a3b8">(tuỳ chọn)</small></label>
+            <input id="pg-thresh" type="number" min="1" max="100" placeholder="50 = chỉ SX khi còn &lt;50% target"></div>
         </div>
       </div>
       <div id="pg-batch" class="form-full" style="display:none">
@@ -559,7 +860,11 @@ async function pageProdGroups(){
     </div>
     <div id="pg-items-rows"></div>
     <button class="btn btn-ghost btn-sm" onclick="addPgItem()">+ Thêm item</button>
-    <div class="action-row"><button class="btn btn-primary" onclick="savePG()">Tạo group</button></div>
+    <input type="hidden" id="pg-edit-id">
+    <div class="action-row">
+      <button class="btn btn-ghost" id="pg-cancel-btn" style="display:none" onclick="clearPgForm()">Huỷ</button>
+      <button class="btn btn-primary" id="pg-save-btn" onclick="savePG()">Tạo group</button>
+    </div>
   </div>
   <div class="card">
     <div class="card-title">Danh sách Production Groups</div>
@@ -578,30 +883,73 @@ function renderPgItems(){
   const el=document.getElementById('pg-items-rows');if(!el)return;
   el.innerHTML=pgItems.map((it,i)=>`
     <div class="group-item-row">
-      <select onchange="pgItems[${i}].itemId=this.value">
+      <select id="pgi-sel-${i}" onchange="pgItems[${i}].itemId=this.value">
         <option value="">-- Chọn SP --</option>${itemOpts(x=>x.itemType==='PRODUCT')}
       </select>
       ${isBatch?`<input type="number" step="0.01" placeholder="gram/cái" value="${it.g??''}" onchange="pgItems[${i}].g=+this.value">`:'<div></div>'}
       <input type="number" value="${it.s||i+1}" onchange="pgItems[${i}].s=+this.value">
       <button class="btn btn-danger btn-sm" onclick="pgItems.splice(${i},1);renderPgItems()">✕</button>
     </div>`).join('');
+  // Ép select.value sau khi DOM render (tránh ReferenceValue lookup issue)
+  pgItems.forEach((it,i)=>{const s=document.getElementById(`pgi-sel-${i}`);if(s&&it.itemId)s.value=it.itemId;});
 }
 function addPgItem(){pgItems.push({itemId:'',g:null,s:pgItems.length+1});renderPgItems();}
+
+function editPG(id){
+  const g=pgData.find(x=>x.id===id);if(!g)return;
+  document.getElementById('pg-edit-id').value=g.id;
+  document.getElementById('pg-code').value=g.code??'';
+  document.getElementById('pg-name').value=g.name??'';
+  document.getElementById('pg-type').value=g.groupType??'FREE_GROUP';
+  // itemGroup là ReferenceValue — cần lookup id từ allItemGroups
+  const igMatch=allItemGroups.find(x=>x.code===g.itemGroup?.key);
+  document.getElementById('pg-ig').value=igMatch?.id??'';
+  document.getElementById('pg-tw').value=g.targetWeekday??'';
+  document.getElementById('pg-twe').value=g.targetWeekend??'';
+  document.getElementById('pg-thresh').value=g.thresholdPercent??'';
+  document.getElementById('pg-bw').value=g.batchWeightGrams??'';
+  document.getElementById('pg-note').value=g.note??'';
+  pgItems=(g.items??[]).map(gi=>{
+    const found=allItems.find(x=>x.code===(gi.item?.key??''));
+    return {itemId:found?.id??'', g:gi.gramsPerUnit??null, s:gi.sortOrder??0};
+  });
+  onPgType();
+  document.getElementById('pg-save-btn').textContent='Lưu thay đổi';
+  document.getElementById('pg-cancel-btn').style.display='';
+  document.querySelector('.card .card-title').textContent='Sửa Production Group: '+g.name;
+  document.querySelector('.card').scrollIntoView({behavior:'smooth'});
+}
+
+function clearPgForm(){
+  document.getElementById('pg-edit-id').value='';
+  ['pg-code','pg-name','pg-tw','pg-twe','pg-thresh','pg-bw','pg-note'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('pg-type').value='FREE_GROUP';
+  document.getElementById('pg-ig').value='';
+  pgItems=[];renderPgItems();onPgType();
+  document.getElementById('pg-save-btn').textContent='Tạo group';
+  document.getElementById('pg-cancel-btn').style.display='none';
+  document.querySelector('.card .card-title').textContent='Tạo Production Group';
+}
+
 async function savePG(){
+  const id=document.getElementById('pg-edit-id').value;
   const body={code:document.getElementById('pg-code').value.trim(),name:document.getElementById('pg-name').value.trim(),
     groupType:document.getElementById('pg-type').value,itemGroupId:document.getElementById('pg-ig').value||null,
     targetWeekday:document.getElementById('pg-tw')?.value?+document.getElementById('pg-tw').value:null,
     targetWeekend:document.getElementById('pg-twe')?.value?+document.getElementById('pg-twe').value:null,
+    thresholdPercent:document.getElementById('pg-thresh')?.value?+document.getElementById('pg-thresh').value:null,
     batchWeightGrams:document.getElementById('pg-bw')?.value?+document.getElementById('pg-bw').value:null,
     note:document.getElementById('pg-note').value||null,
     items:pgItems.filter(i=>i.itemId).map(i=>({itemId:i.itemId,gramsPerUnit:i.g??null,sortOrder:i.s??0}))};
   if(!body.code||!body.name){toast('Code và Tên là bắt buộc','err');return;}
-  await api('POST','/api/v1/production-groups',body);
-  toast('Đã tạo production group');pgItems=[];loadPGs();
+  id?await api('PUT',`/api/v1/production-groups/${id}`,body):await api('POST','/api/v1/production-groups',body);
+  toast(id?'Đã cập nhật group':'Đã tạo production group');
+  clearPgForm();loadPGs();
 }
-let pgExpandId=null;
+let pgExpandId=null, pgData=[];
 async function loadPGs(){
   const data=await api('GET','/api/v1/production-groups');
+  pgData=data??[];
   const el=document.getElementById('pg-list');if(!el)return;
   if(!data?.length){el.innerHTML='<div class="empty">Chưa có production group</div>';return;}
   el.innerHTML=`<table><thead><tr><th>Code</th><th>Tên</th><th>Loại</th><th>Item Group</th><th>Target W/WE</th><th>Cối(g)</th><th></th></tr></thead>
@@ -613,6 +961,7 @@ async function loadPGs(){
       <td>${g.batchWeightGrams?fmt(g.batchWeightGrams)+'g':'—'}</td>
       <td style="white-space:nowrap" onclick="event.stopPropagation()">
         <button class="btn btn-ghost btn-sm" onclick="togglePG('${g.id}')">Chi tiết</button>
+        <button class="btn btn-ghost btn-sm" onclick="editPG('${g.id}')">Sửa</button>
         <button class="btn btn-danger btn-sm" onclick="deletePG('${g.id}')">Xóa</button>
       </td>
     </tr>
@@ -629,7 +978,8 @@ function renderPGDetail(g){
         <tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Item Group</td><td>${g.itemGroup?g.itemGroup.key+' — '+g.itemGroup.name:'—'}</td></tr>
         ${isBatch?`<tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Trọng lượng cối</td><td><strong>${(g.batchWeightGrams/1000).toFixed(1)}kg</strong></td></tr>`
           :`<tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Target WD</td><td><strong>${g.targetWeekday??'—'}</strong></td></tr>
-           <tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Target WE</td><td><strong>${g.targetWeekend??'—'}</strong></td></tr>`}
+           <tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Target WE</td><td><strong>${g.targetWeekend??'—'}</strong></td></tr>
+           <tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Ngưỡng tồn</td><td>${g.thresholdPercent!=null?`<span style="background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:12px;font-size:12px">SX khi còn &lt;${g.thresholdPercent}% target</span>`:'<span style="color:#94a3b8">Luôn SX đủ target</span>'}</td></tr>`}
         ${g.note?`<tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Ghi chú</td><td>${g.note}</td></tr>`:''}
       </table></div>
     <div style="flex:1;min-width:260px">
@@ -684,7 +1034,52 @@ async function pageThresholdRules(){
         </select></div>
     </div>
   </div>
-  <div id="tr-editor" style="display:none"></div>`;
+  <div id="tr-editor" style="display:none"></div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-title">Sản phẩm đã có rule</div>
+    <div id="tr-summary"><div class="empty">Đang tải...</div></div>
+  </div>`;
+  loadTrSummary();
+}
+async function loadTrSummary(){
+  const el=document.getElementById('tr-summary');if(!el)return;
+  try{
+    const products=allItems.filter(i=>i.itemType==='PRODUCT');
+    // gọi song song endpoint đã có — không cần API mới
+    const results=await Promise.all(products.map(async p=>{
+      try{const rules=await api('GET',`/api/v1/items/${p.id}/threshold-rules`);return{p,rules:rules??[]};}
+      catch(_){return{p,rules:[]};}
+    }));
+    const withRules=results.filter(r=>r.rules.length>0);
+    if(!withRules.length){el.innerHTML='<div class="empty">Chưa có sản phẩm nào được cấu hình rule</div>';return;}
+    el.innerHTML=`<table><thead><tr>
+      <th>Code</th><th>Tên sản phẩm</th>
+      <th style="text-align:center">Weekday</th>
+      <th style="text-align:center">Weekend</th>
+      <th></th>
+    </tr></thead><tbody>
+    ${withRules.map(({p,rules})=>{
+      const wd=rules.filter(r=>r.dayType==='WEEKDAY').length;
+      const we=rules.filter(r=>r.dayType==='WEEKEND').length;
+      return`<tr>
+        <td><code>${p.code}</code></td>
+        <td>${p.name}</td>
+        <td style="text-align:center">${wd?`<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:12px;font-size:12px">${wd} rule</span>`:'<span style="color:#94a3b8">—</span>'}</td>
+        <td style="text-align:center">${we?`<span style="background:#f3e8ff;color:#7e22ce;padding:2px 8px;border-radius:12px;font-size:12px">${we} rule</span>`:'<span style="color:#94a3b8">—</span>'}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="jumpToItem('${p.id}')">Sửa</button></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+  }catch(e){el.innerHTML=`<div class="empty" style="color:#ef4444">${e.message}</div>`;}
+}
+function jumpToItem(itemId){
+  const sg=document.getElementById('tr-single');
+  const gg=document.getElementById('tr-group');
+  if(!sg)return;
+  for(const opt of sg.options){if(opt.value===itemId){opt.selected=true;break;}}
+  if(gg){gg.value='';gg.disabled=true;}
+  onTrSingle(itemId);
+  window.scrollTo({top:0,behavior:'smooth'});
 }
 async function onTrGroup(groupId){
   const sg=document.getElementById('tr-single');if(sg){sg.value='';sg.disabled=!!groupId;}
@@ -727,12 +1122,13 @@ function renderTrAll(group){
           <button class="btn btn-primary btn-sm" onclick="saveTrFor('${itemId}')">💾 Lưu</button>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:110px 60px 100px 110px 90px 36px;gap:6px;margin-bottom:4px;padding:0 2px">
+      <div style="display:grid;grid-template-columns:90px 45px 90px 80px 120px 80px 36px;gap:6px;margin-bottom:4px;padding:0 2px">
         <small style="font-weight:600;color:#64748b">Day Type</small>
         <small style="font-weight:600;color:#64748b">Sort</small>
-        <small style="font-weight:600;color:#64748b">Cond. Type</small>
-        <small style="font-weight:600;color:#64748b">Cond. Value</small>
-        <small style="font-weight:600;color:#64748b">Làm thêm</small><div></div>
+        <small style="font-weight:600;color:#64748b">Ngưỡng</small>
+        <small style="font-weight:600;color:#64748b">Giá trị</small>
+        <small style="font-weight:600;color:#64748b">Hành động</small>
+        <small style="font-weight:600;color:#64748b">actionValue</small><div></div>
       </div>
       <div id="tr-rows-${itemId}"></div>
     </div>`;
@@ -743,30 +1139,39 @@ function renderTrRows(itemId){
   const el=document.getElementById(`tr-rows-${itemId}`);if(!el)return;
   const rules=trRulesMap[itemId]??[];
   if(!rules.length){el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:4px">Chưa có rule — bấm "+ Rule"</div>';return;}
-  el.innerHTML=rules.map((r,i)=>`<div class="rule-row">
-    <select onchange="trRulesMap['${itemId}'][${i}].dayType=this.value">
-      <option value="WEEKDAY" ${r.dayType==='WEEKDAY'?'selected':''}>WEEKDAY</option>
-      <option value="WEEKEND" ${r.dayType==='WEEKEND'?'selected':''}>WEEKEND</option>
+  el.innerHTML=rules.map((r,i)=>`<div style="display:grid;grid-template-columns:90px 45px 90px 80px 120px 80px 36px;gap:6px;align-items:center;margin-bottom:5px">
+    <select onchange="trRulesMap['${itemId}'][${i}].dayType=this.value" style="border:1px solid #d1d5db;border-radius:5px;padding:5px 7px;font-size:13px">
+      <option value="WEEKDAY" ${r.dayType==='WEEKDAY'?'selected':''}>Weekday</option>
+      <option value="WEEKEND" ${r.dayType==='WEEKEND'?'selected':''}>Weekend</option>
     </select>
-    <input type="number" value="${r.sortOrder??i+1}" onchange="trRulesMap['${itemId}'][${i}].sortOrder=+this.value">
-    <select onchange="trRulesMap['${itemId}'][${i}].conditionType=this.value">
-      <option value="COUNT" ${r.conditionType==='COUNT'?'selected':''}>COUNT</option>
-      <option value="PERCENT" ${r.conditionType==='PERCENT'?'selected':''}>PERCENT</option>
+    <input type="number" value="${r.sortOrder??i+1}" onchange="trRulesMap['${itemId}'][${i}].sortOrder=+this.value" style="border:1px solid #d1d5db;border-radius:5px;padding:5px 7px;font-size:13px;width:100%">
+    <select onchange="trRulesMap['${itemId}'][${i}].conditionType=this.value" style="border:1px solid #d1d5db;border-radius:5px;padding:5px 7px;font-size:13px">
+      <option value="COUNT" ${r.conditionType==='COUNT'?'selected':''}>< N cái</option>
+      <option value="PERCENT" ${r.conditionType==='PERCENT'?'selected':''}>< N%</option>
     </select>
-    <input type="number" step="0.01" value="${r.conditionValue??''}" onchange="trRulesMap['${itemId}'][${i}].conditionValue=+this.value" placeholder="12">
-    <input type="number" value="${r.produceQty??''}" onchange="trRulesMap['${itemId}'][${i}].produceQty=+this.value" placeholder="24">
+    <input type="number" step="0.01" value="${r.conditionValue??''}" onchange="trRulesMap['${itemId}'][${i}].conditionValue=+this.value" placeholder="5" style="border:1px solid #d1d5db;border-radius:5px;padding:5px 7px;font-size:13px;width:100%">
+    <select onchange="trRulesMap['${itemId}'][${i}].actionType=this.value" style="border:1px solid #d1d5db;border-radius:5px;padding:5px 7px;font-size:13px">
+      <option value="PRODUCE_MORE" ${(r.actionType??'PRODUCE_MORE')==='PRODUCE_MORE'?'selected':''}>Làm thêm N</option>
+      <option value="FILL_TO_TARGET" ${r.actionType==='FILL_TO_TARGET'?'selected':''}>Bù đủ N</option>
+    </select>
+    <input type="number" value="${r.actionValue??''}" onchange="trRulesMap['${itemId}'][${i}].actionValue=+this.value" placeholder="24" style="border:1px solid #d1d5db;border-radius:5px;padding:5px 7px;font-size:13px;width:100%">
     <button class="btn btn-danger btn-sm" onclick="trRulesMap['${itemId}'].splice(${i},1);renderTrRows('${itemId}')">✕</button>
   </div>`).join('');
 }
 function addTrRule(itemId){
   if(!trRulesMap[itemId])trRulesMap[itemId]=[];
-  trRulesMap[itemId].push({dayType:'WEEKDAY',sortOrder:trRulesMap[itemId].length+1,conditionType:'COUNT',conditionValue:'',produceQty:''});
+  trRulesMap[itemId].push({dayType:'WEEKDAY',sortOrder:trRulesMap[itemId].length+1,
+    conditionType:'COUNT',conditionValue:'',actionType:'PRODUCE_MORE',actionValue:''});
   renderTrRows(itemId);
 }
 async function saveTrFor(itemId){
-  const rules=(trRulesMap[itemId]??[]).map(r=>({dayType:r.dayType,sortOrder:r.sortOrder,conditionType:r.conditionType,conditionValue:r.conditionValue,produceQty:r.produceQty}));
+  const rules=(trRulesMap[itemId]??[]).map(r=>({
+    dayType:r.dayType,sortOrder:r.sortOrder,
+    conditionType:r.conditionType,conditionValue:r.conditionValue,
+    actionType:r.actionType??'PRODUCE_MORE',actionValue:r.actionValue}));
   await api('PUT',`/api/v1/items/${itemId}/threshold-rules`,{rules});
   toast('Đã lưu rules');
+  loadTrSummary(); // refresh danh sách
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -806,7 +1211,21 @@ async function loadPlanByDate(date){
   if(!date)return;
   const cont=document.getElementById('plan-detail');
   try{const plan=await api('GET',`/api/v1/production/plans/by-date?date=${date}`);renderPlan(plan);}
-  catch(_){if(cont)cont.innerHTML=`<div class="card"><div class="empty">Không có kế hoạch cho ngày ${date}</div></div>`;}
+  catch(_){
+    if(cont)cont.innerHTML=`<div class="card">
+      <div class="empty" style="padding:24px">
+        Chưa có kế hoạch cho ngày <strong>${date}</strong>
+        <div style="margin-top:12px">
+          <button class="btn btn-primary" onclick="generatePlan('${date}')">⚡ Tạo kế hoạch ngay</button>
+        </div>
+      </div>
+    </div>`;
+  }
+}
+async function generatePlan(date){
+  const plan=await api('POST',`/api/v1/production/plans/generate?date=${date}`);
+  toast('Đã tạo kế hoạch DRAFT');
+  renderPlan(plan);
 }
 async function loadPlanById(id){
   const plan=await api('GET',`/api/v1/production/plans/${id}`);renderPlan(plan);
@@ -815,6 +1234,73 @@ function renderPlan(plan){
   const cont=document.getElementById('plan-detail');if(!cont)return;
   const isDraft=plan.approvalStatus==='DRAFT';
   const lines=plan.lines??[];
+
+  // Tách lines có group và không có group
+  const grouped=new Map(); // groupKey -> {group, lines[]}
+  const standalone=[];
+  for(const l of lines){
+    if(l.group){
+      const k=l.group.key;
+      if(!grouped.has(k))grouped.set(k,{group:l.group,lines:[]});
+      grouped.get(k).lines.push(l);
+    } else {
+      standalone.push(l);
+    }
+  }
+
+  function adjustCell(l){
+    const val=l.adjustedQty??l.suggestedQty??'';
+    return isDraft
+      ?`<input type="number" style="width:70px;border:1px solid #d1d5db;border-radius:4px;padding:3px 6px;font-size:13px"
+          value="${val}" onchange="updatePlanLine('${plan.id}','${l.id}',this.value)">`
+      :(l.adjustedQty??l.suggestedQty??'—');
+  }
+
+  function lineRow(l,indent){
+    return `<tr>
+      <td style="${indent?'padding-left:28px':''}">
+        ${indent?'<span style="color:#94a3b8;margin-right:4px">↳</span>':''}
+        <span style="${indent?'':'font-weight:500'}">${l.item?.name??l.item?.key??'?'}</span>
+      </td>
+      <td><span style="font-size:11px;color:#94a3b8">${l.planType}</span></td>
+      <td>${fmt(l.qtyRemaining)}</td>
+      <td><strong>${l.suggestedQty??'—'}</strong></td>
+      <td>${adjustCell(l)}</td>
+      <td style="font-size:12px;color:#64748b">${l.ruleNote??'—'}</td>
+    </tr>`;
+  }
+
+  function groupRows(g){
+    const sumRem=g.lines.reduce((s,l)=>s+(+(l.qtyRemaining??0)),0);
+    // FREE_GROUP: suggestedQty=null per line, lấy "cần thêm N" từ ruleNote của line đầu
+    const isFree=g.lines[0]?.planType==='FREE_GROUP';
+    let sumSug,sumAdj;
+    if(isFree){
+      const m=(g.lines[0]?.ruleNote??'').match(/cần thêm (\d+)/);
+      sumSug=m?+m[1]:'—';
+      // Tổng adjustedQty nếu nhân viên đã nhập, không thì bằng sumSug
+      const adjTotal=g.lines.reduce((s,l)=>s+(l.adjustedQty??0),0);
+      sumAdj=adjTotal>0?adjTotal:sumSug;
+    } else {
+      sumSug=g.lines.reduce((s,l)=>s+(l.suggestedQty??0),0);
+      sumAdj=g.lines.reduce((s,l)=>s+(l.adjustedQty??l.suggestedQty??0),0);
+    }
+    return `<tr style="background:#f1f5f9;border-top:2px solid #cbd5e1">
+      <td colspan="2"><strong>📦 ${g.group.name??g.group.key}</strong>
+        ${isFree?'<span style="font-size:11px;color:#94a3b8;margin-left:6px">nhân viên phân bổ</span>':''}</td>
+      <td><strong>${sumRem.toFixed(2).replace(/\.00$/,'')}</strong></td>
+      <td><strong>${sumSug}</strong></td>
+      <td><strong>${typeof sumAdj==='number'?sumAdj:sumAdj}</strong></td>
+      <td></td>
+    </tr>
+    ${g.lines.map(l=>lineRow(l,true)).join('')}`;
+  }
+
+  const rows=[
+    ...standalone.map(l=>lineRow(l,false)),
+    ...[...grouped.values()].map(g=>groupRows(g))
+  ].join('');
+
   cont.innerHTML=`<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div>
@@ -825,22 +1311,15 @@ function renderPlan(plan){
       <div style="display:flex;gap:8px">
         ${isDraft?`<button class="btn btn-success" onclick="approvePlan('${plan.id}')">✅ Approve</button>
           <button class="btn btn-danger" onclick="rejectPlanPrompt('${plan.id}')">❌ Reject</button>`:''}
+        ${plan.approvalStatus==='REJECTED'?`<button class="btn btn-ghost" onclick="regeneratePlan('${plan.id}')">🔄 Tạo lại</button>`:''}
+        ${plan.approvalStatus==='APPROVED'?`<button class="btn btn-ghost" onclick="generatePRFromPlan('${plan.id}')">📋 Tạo phiếu SX</button>`:''}
       </div>
     </div>
     <table><thead><tr>
       <th>Sản phẩm</th><th>Loại</th><th>Tồn</th><th>Gợi ý</th>
       <th>Điều chỉnh</th><th>Ghi chú rule</th>
     </tr></thead>
-    <tbody>${lines.map(l=>`<tr>
-      <td>${l.item?.name??l.item?.key??'?'}</td>
-      <td><span style="font-size:11px;color:#64748b">${l.planType}</span></td>
-      <td>${fmt(l.qtyRemaining)}</td>
-      <td><strong>${l.suggestedQty??'—'}</strong></td>
-      <td>${isDraft?`<input type="number" style="width:70px;border:1px solid #d1d5db;border-radius:4px;padding:3px 6px;font-size:13px"
-        value="${l.adjustedQty??''}" onchange="updatePlanLine('${plan.id}','${l.id}',this.value)" placeholder="—">`
-        :(l.adjustedQty??l.suggestedQty??'—')}</td>
-      <td style="font-size:12px;color:#64748b">${l.ruleNote??'—'}</td>
-    </tr>`).join('')}</tbody></table>
+    <tbody>${rows}</tbody></table>
   </div>`;
 }
 async function updatePlanLine(planId,lineId,val){
@@ -850,6 +1329,19 @@ async function updatePlanLine(planId,lineId,val){
 async function approvePlan(id){
   await api('POST',`/api/v1/production/plans/${id}/approve`);toast('Đã approve kế hoạch');loadPlanList();
   const plan=await api('GET',`/api/v1/production/plans/${id}`);renderPlan(plan);
+}
+async function regeneratePlan(id){
+  if(!confirm('Xóa kế hoạch đã REJECTED và tạo lại DRAFT mới?'))return;
+  const plan=await api('POST',`/api/v1/production/plans/${id}/regenerate`);
+  toast('Đã tạo lại kế hoạch DRAFT');loadPlanList();renderPlan(plan);
+}
+async function generatePRFromPlan(id){
+  const res=await api('POST',`/api/v1/production/plans/${id}/generate-requests`);
+  if(res?.requestsCreated===0){
+    toast('Không tạo được phiếu SX — kiểm tra items đã có item_group chưa?','err');
+  } else {
+    toast(`Đã tạo ${res.requestsCreated} phiếu SX → vào màn hình Phiếu SX để approve`);
+  }
 }
 async function rejectPlanPrompt(id){
   const reason=prompt('Lý do reject:');
@@ -980,11 +1472,83 @@ async function completeLinePrompt(prId,lineId,planned){
     if(!reason)return;
   }
   await api('POST',`/api/v1/production-requests/${prId}/lines/complete-batch`,
-    {lines:[{lineId,qtyProduced:actual,adjustmentType:adjType,reason,note:null}]});
+    [{lineId,qtyProduced:actual,adjustmentType:adjType,reason,note:null}]);
   toast('Đã ghi nhận hoàn thành');loadPRs();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+// DELIVERY RECORDS — Giao nhận bếp → shop
+// ══════════════════════════════════════════════════════════════════════════════
+async function pageDeliveryRecords(){
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="card-title" style="margin:0">Giao nhận bếp → shop</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="date" id="dr-date" value="${today}" onchange="loadDeliveryRecords()">
+        <button class="btn btn-ghost btn-sm" onclick="loadDeliveryRecords()">🔄 Tải lại</button>
+      </div>
+    </div>
+    <div id="dr-list"><div class="empty">Đang tải...</div></div>
+  </div>`;
+  loadDeliveryRecords();
+}
+
+async function loadDeliveryRecords(){
+  const date=document.getElementById('dr-date')?.value??new Date().toISOString().slice(0,10);
+  const data=await api('GET',`/api/v1/delivery-records?date=${date}`);
+  const el=document.getElementById('dr-list');if(!el)return;
+  if(!data?.length){el.innerHTML='<div class="empty">Không có dữ liệu giao nhận cho ngày này</div>';return;}
+
+  const ready=data.filter(r=>r.deliveryStatus==='READY');
+  const confirmed=data.filter(r=>r.deliveryStatus==='CONFIRMED');
+
+  el.innerHTML=`
+    ${ready.length?`
+    <div style="font-weight:600;color:#b45309;margin-bottom:8px">⏳ Chờ shop xác nhận (${ready.length})</div>
+    <table style="margin-bottom:20px"><thead><tr>
+      <th>Sản phẩm</th><th>Mã</th><th style="text-align:right">Kế hoạch</th>
+      <th style="text-align:right">Bếp làm</th><th></th>
+    </tr></thead><tbody>
+    ${ready.map(r=>`<tr>
+      <td>${r.productName??'—'}</td>
+      <td style="font-size:12px;color:#64748b">${r.productCode??''}</td>
+      <td style="text-align:right">${fmt(r.plannedQty)}</td>
+      <td style="text-align:right"><strong>${fmt(r.qtyProduced)}</strong></td>
+      <td><button class="btn btn-success btn-sm" onclick="confirmDelivery('${r.id}',${r.qtyProduced})">✓ Shop xác nhận</button></td>
+    </tr>`).join('')}
+    </tbody></table>`:''}
+
+    ${confirmed.length?`
+    <div style="font-weight:600;color:#059669;margin-bottom:8px">✅ Đã xác nhận (${confirmed.length})</div>
+    <table><thead><tr>
+      <th>Sản phẩm</th><th style="text-align:right">Bếp làm</th>
+      <th style="text-align:right">Shop nhận</th><th style="text-align:right">Chênh lệch</th>
+      <th>Xác nhận lúc</th>
+    </tr></thead><tbody>
+    ${confirmed.map(r=>`<tr>
+      <td>${r.productName??'—'}</td>
+      <td style="text-align:right">${fmt(r.qtyProduced)}</td>
+      <td style="text-align:right">${fmt(r.qtyReceived)}</td>
+      <td style="text-align:right;color:${r.discrepancy>0?'#dc2626':r.discrepancy<0?'#d97706':'#059669'}">${fmt(r.discrepancy)??'0'}</td>
+      <td style="font-size:12px;color:#64748b">${r.confirmedAt?new Date(r.confirmedAt).toLocaleTimeString('vi-VN'):'—'}</td>
+    </tr>`).join('')}
+    </tbody></table>`:''}`;
+}
+
+async function confirmDelivery(id,defaultQty){
+  const qty=prompt(`Shop nhận được bao nhiêu? (Bếp làm: ${defaultQty}):`,defaultQty);
+  if(qty===null)return;
+  const note=prompt('Ghi chú (để trống nếu không có):');
+  let url=`/api/v1/delivery-records/${id}/confirm?qtyReceived=${qty}`;
+  if(note)url+=`&note=${encodeURIComponent(note)}`;
+  await api('POST',url);
+  toast('Đã xác nhận nhận hàng');
+  loadDeliveryRecords();
+}
+
 // PRODUCTION ADJUSTMENTS
 // ══════════════════════════════════════════════════════════════════════════════
 async function pageProdAdjustments(){

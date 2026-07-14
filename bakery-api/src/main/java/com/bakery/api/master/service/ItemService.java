@@ -4,18 +4,35 @@
 package com.bakery.api.master.service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
+
+import java.io.IOException;
+import java.io.InputStream;
 
 import com.bakery.api.master.dto.ItemRequest;
 import com.bakery.api.master.dto.ItemResponse;
 import com.bakery.api.master.entity.Ingredient;
 import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.entity.Product;
+import com.bakery.api.master.entity.ProductExpiryConfig;
+import com.bakery.api.master.entity.ProductMapping;
 import com.bakery.api.master.entity.SemiProduct;
 import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.repository.ItemLookupRepository;
+import com.bakery.api.master.repository.ProductExpiryConfigRepository;
+import com.bakery.api.master.repository.ProductMappingRepository;
 import com.bakery.api.master.repository.SupplierRepository;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.web.multipart.MultipartFile;
+import com.bakery.api.pricing.entity.IngredientPrice;
 import com.bakery.api.pricing.repository.IngredientPriceRepository;
 import com.bakery.api.production.entity.ItemGroup;
 import com.bakery.api.production.repository.ItemGroupRepository;
@@ -58,9 +75,11 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     private final ItemLookupRepository repository;
     private final SupplierRepository supplierRepository;
     private final IngredientPriceRepository ingredientPriceRepository;
+    private final ProductMappingRepository productMappingRepository;
     private final RecipeRepository recipeRepository;
     private final RecipeService recipeService;
     private final ItemGroupRepository itemGroupRepository;
+    private final ProductExpiryConfigRepository expiryConfigRepository;
     private final BakeryActorResolver actorResolver;
     private final CommandRequestRepository commandRequestRepository;
 
@@ -69,6 +88,12 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
      * Luôn được clear trong finally để tránh memory leak.
      */
     private final ThreadLocal<ItemRequest> currentRequest = new ThreadLocal<>();
+
+    /**
+     * ThreadLocal giữ price map khi list items — tránh N+1 query ingredient_price.
+     * Set trước khi map toResponse(), clear trong finally.
+     */
+    private final ThreadLocal<Map<UUID, IngredientPrice>> priceMapLocal = new ThreadLocal<>();
 
     // ── Framework wiring ──────────────────────────────────────────────────────
 
@@ -98,7 +123,26 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             spec = spec.and((root, query, cb) -> cb.equal(root.type(), typeClass));
         }
 
-        return repository.findAll(spec, pageable).map(this::toResponse);
+        Page<Item> page = repository.findAll(spec, pageable);
+
+        // Batch-fetch latest price cho tất cả ingredients trong page — tránh N+1
+        List<UUID> ingredientIds = page.getContent().stream()
+                .filter(i -> i instanceof Ingredient)
+                .map(Item::getId)
+                .toList();
+        if (!ingredientIds.isEmpty()) {
+            Map<UUID, IngredientPrice> priceMap = ingredientPriceRepository
+                    .findLatestByItemIds(ingredientIds)
+                    .stream()
+                    .collect(Collectors.toMap(p -> p.getItem().getId(), p -> p));
+            priceMapLocal.set(priceMap);
+        }
+
+        try {
+            return page.map(this::toResponse);
+        } finally {
+            priceMapLocal.remove();
+        }
     }
 
     // ── Override create/update — inject ThreadLocal ───────────────────────────
@@ -175,6 +219,8 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         r.setCode(item.getCode());
         r.setName(item.getName());
         r.setUnit(item.getUnit());
+        r.setSplittable(item.isSplittable());
+        r.setUnitSize(item.getUnitSize());
         if (item.getItemGroup() != null) {
             r.setItemGroup(new ReferenceValue(
                     item.getItemGroup().getCode(), item.getItemGroup().getName()));
@@ -188,10 +234,13 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                         ing.getDefaultSupplier().getCode(),
                         ing.getDefaultSupplier().getName()));
             }
-            ingredientPriceRepository
-                    .findByItemIdOrderByEffectiveDateDesc(ing.getId())
-                    .stream().findFirst()
-                    .ifPresent(p -> {
+            // Dùng pre-fetched price map nếu có (list view), không thì query riêng (detail view)
+            Map<UUID, IngredientPrice> priceMap = priceMapLocal.get();
+            Optional<IngredientPrice> latestPrice = priceMap != null
+                    ? Optional.ofNullable(priceMap.get(ing.getId()))
+                    : ingredientPriceRepository.findByItemIdOrderByEffectiveDateDesc(ing.getId())
+                            .stream().findFirst();
+            latestPrice.ifPresent(p -> {
                         r.setLastPrice(p.getPrice());
                         r.setLastPriceDate(p.getEffectiveDate());
                     });
@@ -205,7 +254,8 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         } else if (item instanceof Product prod) {
             r.setItemType("PRODUCT");
             r.setProductType(prod.getProductType());
-            r.setSellingPrice(prod.getSellingPrice());
+            expiryConfigRepository.findByItemId(item.getId())
+                    .ifPresent(cfg -> r.setShelfDays(cfg.getShelfDays()));
             recipeRepository.findByProductIdAndActiveTrue(item.getId())
                     .or(() -> recipeRepository.findFirstByProductIdOrderByVersionDesc(item.getId()))
                     .ifPresent(recipe -> r.setRecipe(recipeService.mapToResponse(recipe)));
@@ -216,11 +266,18 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
     // ── Lifecycle hooks — Recipe bundling ─────────────────────────────────────
 
-    /** Tạo Recipe (nếu có lines) cùng lúc với Item. Recipe inherits approvalStatus của Item. */
+    /** Tạo Recipe (nếu có lines) cùng lúc với Item. Recipe inherits approvalStatus của Item.
+     * Đồng thời upsert ProductExpiryConfig nếu shelfDays được set. */
     @Override
     protected void afterCreate(Item item) {
         ItemRequest req = currentRequest.get();
-        if (req == null || !hasRecipeLines(req)) return;
+        if (req == null) return;
+
+        if (item instanceof Product prod && req.shelfDays() != null) {
+            upsertExpiryConfig(prod, req.shelfDays());
+        }
+
+        if (!hasRecipeLines(req)) return;
 
         if (item instanceof Product prod) {
             int version = recipeRepository.maxVersionByProduct(prod.getId()) + 1;
@@ -239,11 +296,18 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
      * Upsert Recipe khi Item được cập nhật:
      * - Có bản PENDING_APPROVAL → replace lines
      * - Không có → tạo version mới PENDING_APPROVAL
+     * Đồng thời upsert ProductExpiryConfig nếu shelfDays được set.
      */
     @Override
     protected void afterUpdate(Item item) {
         ItemRequest req = currentRequest.get();
-        if (req == null || !hasRecipeLines(req)) return;
+        if (req == null) return;
+
+        if (item instanceof Product prod && req.shelfDays() != null) {
+            upsertExpiryConfig(prod, req.shelfDays());
+        }
+
+        if (!hasRecipeLines(req)) return;
 
         if (item instanceof Product prod) {
             recipeRepository
@@ -314,6 +378,8 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         e.setCode(req.code());
         e.setName(req.name());
         e.setUnit(req.unit());
+        e.setSplittable(req.splittable());
+        e.setUnitSize(req.unitSize());
         if (req.itemGroupId() != null) {
             ItemGroup ig = itemGroupRepository.findById(req.itemGroupId())
                     .orElseThrow(() -> new ResourceNotFoundException("ItemGroup", req.itemGroupId()));
@@ -325,7 +391,6 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
     private void applyProductFields(Product e, ItemRequest req) {
         e.setProductType(req.productType());
-        e.setSellingPrice(req.sellingPrice());
     }
 
     private void applySupplier(Ingredient e, ItemRequest req) {
@@ -386,6 +451,18 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             line.setSortOrder(lr.sortOrder() != null ? lr.sortOrder() : i + 1);
             recipe.getLines().add(line);
         }
+    }
+
+    /** Tạo hoặc cập nhật ProductExpiryConfig cho sản phẩm. */
+    private void upsertExpiryConfig(Product product, int shelfDays) {
+        ProductExpiryConfig cfg = expiryConfigRepository.findByItemId(product.getId())
+                .orElseGet(() -> {
+                    ProductExpiryConfig c = new ProductExpiryConfig();
+                    c.setItem(product);
+                    return c;
+                });
+        cfg.setShelfDays(shelfDays);
+        expiryConfigRepository.save(cfg);
     }
 
     private boolean hasRecipeLines(ItemRequest req) {

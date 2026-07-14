@@ -6,7 +6,9 @@ import java.util.UUID;
 
 import com.bakery.api.production.dto.ProductionPlanAdjustRequest;
 import com.bakery.api.production.dto.ProductionPlanResponse;
+import com.bakery.api.production.entity.ProductionPlan;
 import com.bakery.api.production.service.ProductionPlanService;
+import com.bakery.api.production.service.ProductionPlannerService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -31,11 +33,23 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProductionPlanController {
 
     private final ProductionPlanService service;
+    private final ProductionPlannerService plannerService;
 
     /** Bếp lấy danh sách kế hoạch đã APPROVED. */
     @GetMapping
     public List<ProductionPlanResponse> findApproved() {
         return service.findApproved();
+    }
+
+    /**
+     * Tạo thủ công kế hoạch DRAFT cho ngày bất kỳ (không cần DailyReport).
+     * Idempotent: nếu đã tồn tại → trả về plan hiện tại.
+     */
+    @PostMapping("/generate")
+    public ProductionPlanResponse generate(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        ProductionPlan plan = plannerService.generateForDate(date);
+        return ProductionPlanResponse.from(plan);
     }
 
     /** Manager xem kế hoạch theo ngày (DRAFT hoặc APPROVED). */
@@ -70,5 +84,24 @@ public class ProductionPlanController {
             @PathVariable UUID id,
             @RequestParam(required = false) String reason) {
         return service.reject(id, reason);
+    }
+
+    /**
+     * Tạo lại kế hoạch đã bị REJECTED — xóa lines cũ, generate DRAFT mới với tồn kho = 0.
+     */
+    @PostMapping("/{id}/regenerate")
+    public ProductionPlanResponse regenerate(@PathVariable UUID id) {
+        ProductionPlan plan = plannerService.regenerateRejected(id);
+        return ProductionPlanResponse.from(plan);
+    }
+
+    /**
+     * Tạo lại phiếu SX từ plan đã APPROVED.
+     * Dùng khi approve xong nhưng phiếu SX chưa được tạo (vd: items chưa có item_group).
+     */
+    @PostMapping("/{id}/generate-requests")
+    public java.util.Map<String, Object> generateRequests(@PathVariable UUID id) {
+        int count = service.generateRequestsFromApprovedPlan(id);
+        return java.util.Map.of("planId", id, "requestsCreated", count);
     }
 }

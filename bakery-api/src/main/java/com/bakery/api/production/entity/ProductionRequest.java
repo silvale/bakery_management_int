@@ -21,7 +21,7 @@ import lombok.Setter;
 /**
  * Phiếu yêu cầu sản xuất bánh.
  *
- * <p>DAILY: sinh tự động từ ProductPlanTemplate mỗi sáng.
+ * <p>DAILY: tạo từ ProductionPlan đã APPROVED (hoặc thủ công từ manager).
  * <p>ORDER: tạo thủ công khi có đơn đặt hàng phát sinh trong ngày.
  *
  * <p>Lifecycle: DRAFT → APPROVED (trừ NL kho bếp) → IN_PROGRESS → DONE (tất cả lines COMPLETED)
