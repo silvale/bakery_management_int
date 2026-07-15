@@ -74,8 +74,13 @@ public class DailyReportService {
                 .orElseThrow(() -> new ResourceNotFoundException("DailyReport", id));
     }
 
+    /** Tìm report theo ngày — không tạo mới nếu chưa có. */
+    public Optional<DailyReport> findByDate(LocalDate date) {
+        return reportRepository.findByReportDate(date);
+    }
+
     public List<DailyReportLine> getLines(UUID reportId) {
-        return lineRepository.findByDailyReportId(reportId);
+        return lineRepository.findByDailyReportIdWithItem(reportId);
     }
 
     // ── Nhân viên nhập qty_remaining_actual ─────────────────────

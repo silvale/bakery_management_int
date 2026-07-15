@@ -59,10 +59,6 @@ public class CommandRequest {
     @Column(name = "status", nullable = false, length = 20)
     private CommandStatus status;
 
-    /** Short error detail when status = FAILED */
-    @Column(name = "error_detail", length = 1000)
-    private String errorDetail;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 }

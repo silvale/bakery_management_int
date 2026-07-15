@@ -33,6 +33,7 @@ import com.bakery.framework.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -98,8 +99,7 @@ public class ProductionPlannerService {
             sortOrder += group.getItems().size() + 1;
         }
 
-        List<Item> allProducts = itemRepository.findAll().stream()
-                .filter(i -> i instanceof Product)
+        List<Item> allProducts = itemRepository.findAllProducts().stream()
                 .filter(i -> !groupedItemIds.contains(i.getId()))
                 .toList();
 
@@ -125,7 +125,9 @@ public class ProductionPlannerService {
      * @param dailyReport DailyReport vừa được finalize (nguồn tồn kho)
      * @return plan mới tạo, hoặc plan đã tồn tại
      */
-    @Transactional
+    // REQUIRES_NEW: chạy trong transaction riêng, tách biệt với finalize()
+    // → nếu generateDraft lỗi, finalize vẫn commit thành công (không bị rollback-only)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ProductionPlan generateDraft(DailyReport dailyReport) {
         LocalDate planDate = dailyReport.getReportDate().plusDays(1);
 
@@ -174,8 +176,7 @@ public class ProductionPlannerService {
         }
 
         // ── Pattern 1: SIMPLE — các items không thuộc group nào ────────
-        List<Item> allProducts = itemRepository.findAll().stream()
-                .filter(i -> i instanceof Product)
+        List<Item> allProducts = itemRepository.findAllProducts().stream()
                 .filter(i -> !groupedItemIds.contains(i.getId()))
                 .toList();
 
@@ -184,7 +185,7 @@ public class ProductionPlannerService {
             List<ProductionThresholdRule> rules = ruleRepository
                     .findByItemIdAndDayTypeOrderBySortOrderAsc(item.getId(), dayType);
 
-            if (rules.isEmpty()) continue; // sản phẩm chưa config rule → bỏ qua
+            if (rules.isEmpty()) continue;
 
             ProductionPlanLine line = buildSimpleLine(plan, item, remaining, rules, sortOrder++);
             if (line != null) {
@@ -421,8 +422,7 @@ public class ProductionPlannerService {
             sortOrder += group.getItems().size() + 1;
         }
 
-        List<Item> allProducts = itemRepository.findAll().stream()
-                .filter(i -> i instanceof Product)
+        List<Item> allProducts = itemRepository.findAllProducts().stream()
                 .filter(i -> !groupedItemIds.contains(i.getId()))
                 .toList();
 

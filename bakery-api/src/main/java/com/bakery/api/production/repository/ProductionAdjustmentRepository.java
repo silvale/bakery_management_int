@@ -9,5 +9,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ProductionAdjustmentRepository extends JpaRepository<ProductionAdjustment, UUID> {
     List<ProductionAdjustment> findByDeliveryRecordId(UUID deliveryRecordId);
+    List<ProductionAdjustment> findByApprovalStatus(ApprovalStatus approvalStatus);
     boolean existsByDeliveryRecordIdAndApprovalStatusIn(UUID deliveryRecordId, List<ApprovalStatus> statuses);
 }

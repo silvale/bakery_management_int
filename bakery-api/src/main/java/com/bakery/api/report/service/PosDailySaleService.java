@@ -51,6 +51,25 @@ public class PosDailySaleService {
     }
 
     /**
+     * Như findBySaleDate nhưng resolve exCode → itemId qua product_mapping.
+     * Trả về List<Map> với field "itemId" (UUID) nếu map được.
+     */
+    @Transactional(readOnly = true)
+    public List<java.util.Map<String, Object>> findBySaleDateMapped(LocalDate saleDate) {
+        return repository.findBySaleDate(saleDate).stream().map(ps -> {
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("exCode", ps.getExCode());
+            m.put("itemName", ps.getItemName() != null ? ps.getItemName() : "");
+            m.put("qtySold", ps.getQtySold());
+            m.put("unitPrice", ps.getUnitPrice());
+            m.put("totalAmount", ps.getTotalAmount());
+            productMappingRepository.findItemIdByExCode(ps.getExCode())
+                    .ifPresent(itemId -> m.put("itemId", itemId));
+            return m;
+        }).toList();
+    }
+
+    /**
      * Upload file POS cho ngày cụ thể.
      * Nếu đã có data của ngày đó → xóa và ghi đè.
      *
@@ -65,7 +84,7 @@ public class PosDailySaleService {
         repository.deleteBySaleDate(saleDate);
 
         try (InputStream is = file.getInputStream();
-             Workbook wb = new XSSFWorkbook(is)) {
+             Workbook wb = org.apache.poi.ss.usermodel.WorkbookFactory.create(is)) {
 
             Sheet sheet = wb.getSheetAt(0);
             String actor = actorResolver.currentUserId();
@@ -74,10 +93,10 @@ public class PosDailySaleService {
                 if (row.getRowNum() == 0) continue; // skip header
                 if (isRowEmpty(row)) continue;
 
-                String exCode = getCellString(row, 0);
-                String itemName = getCellString(row, 1);
-                BigDecimal qtySold = getCellDecimal(row, 2);
-                BigDecimal totalAmount = getCellDecimal(row, 3);
+                String exCode = getCellString(row, 1);
+                String itemName = getCellString(row, 2);
+                BigDecimal qtySold = getCellDecimal(row, 5);
+                BigDecimal totalAmount = getCellDecimal(row, 6);
 
                 if (exCode == null || exCode.isBlank() || qtySold == null
                         || qtySold.compareTo(BigDecimal.ZERO) <= 0) {

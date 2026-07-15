@@ -91,6 +91,49 @@ public class ProductionRequestService
     @Override protected CommandRequestRepository getCommandRequestRepository() { return commandRequestRepository; }
     @Override protected String getEntityName() { return "ProductionRequest"; }
 
+    /**
+     * PR sinh từ plan được lưu với DRAFT (default BaseEntity).
+     * Override để chấp nhận cả DRAFT và PENDING_APPROVAL → APPROVED.
+     */
+    @Override
+    @org.springframework.transaction.annotation.Transactional
+    public ProductionRequestResponse approve(java.util.UUID id) {
+        ProductionRequest e = repository.findById(id)
+                .orElseThrow(() -> new com.bakery.framework.exception.ResourceNotFoundException("ProductionRequest", id));
+        if (e.getApprovalStatus() != ApprovalStatus.DRAFT
+                && e.getApprovalStatus() != ApprovalStatus.PENDING_APPROVAL) {
+            throw new IllegalStateException("Phiếu SX không ở trạng thái có thể duyệt (hiện tại: " + e.getApprovalStatus() + ")");
+        }
+        e.setApprovalStatus(ApprovalStatus.APPROVED);
+        e.setApprovedAt(java.time.Instant.now());
+        e.setApprovedBy(actorResolver.currentUserId());
+        return toResponse(repository.save(e));
+    }
+
+    /**
+     * Approve toàn bộ phiếu SX trong ngày một lần.
+     * Chỉ approve phiếu mà TẤT CẢ lines đã COMPLETED (bếp đã điền số thực tế).
+     * Bỏ qua các phiếu đã APPROVED/REJECTED hoặc còn line chưa xong.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public List<ProductionRequestResponse> approveAll(java.time.LocalDate date) {
+        java.time.Instant now = java.time.Instant.now();
+        String actor = actorResolver.currentUserId();
+        return repository.findByProductionDate(date).stream()
+                .filter(e -> e.getApprovalStatus() == ApprovalStatus.DRAFT
+                        || e.getApprovalStatus() == ApprovalStatus.PENDING_APPROVAL)
+                .filter(e -> !e.getLines().isEmpty()
+                        && e.getLines().stream()
+                                .allMatch(l -> l.getLineStatus() == ProductionLineStatus.COMPLETED))
+                .map(e -> {
+                    e.setApprovalStatus(ApprovalStatus.APPROVED);
+                    e.setApprovedAt(now);
+                    e.setApprovedBy(actor);
+                    return toResponse(repository.save(e));
+                })
+                .toList();
+    }
+
     // ── Mapping ──────────────────────────────────────────────────
 
     @Override

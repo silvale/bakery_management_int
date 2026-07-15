@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.bakery.framework.entity.DailyReportStatus;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -65,6 +66,7 @@ public class DailyReport {
     @Column(name = "updated_by", length = 100)
     private String updatedBy;
 
+    @JsonIgnore
     @OneToMany(mappedBy = "dailyReport", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<DailyReportLine> lines = new ArrayList<>();
 }

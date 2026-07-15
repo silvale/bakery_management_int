@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 import com.bakery.api.master.entity.Item;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -34,6 +35,7 @@ public class DailyReportLine {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "daily_report_id", nullable = false)
     private DailyReport dailyReport;

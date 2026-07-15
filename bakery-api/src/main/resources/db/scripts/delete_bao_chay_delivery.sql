@@ -18,14 +18,14 @@ USING production_request_line prl,
       item i
 WHERE dr.production_request_line_id = prl.id
   AND prl.production_request_id = pr.id
-  AND prl.product_id = i.id
+  AND prl.item_id = i.id
   AND i.name ILIKE '%Bánh Bao Chay%'
   AND pr.production_date = CURRENT_DATE;
 
 -- 3. Reset production_request_line về PENDING (để kitchen complete lại)
 UPDATE production_request_line prl
 SET approval_status = 'PENDING',
-    planned_qty    = 0,
+    qty_produced    = 0,
     updated_at      = NOW()
 FROM production_request pr, item i
 WHERE prl.production_request_id = pr.id
@@ -34,6 +34,5 @@ WHERE prl.production_request_id = pr.id
   AND pr.production_date = CURRENT_DATE;
 
 
-select * from production_request_line
 
-select * from item where id = '4e546218-25dd-4b8d-891b-775112a70c92'
+select * product_request 

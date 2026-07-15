@@ -2,8 +2,8 @@ package com.bakery.api.report.controller;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
-import com.bakery.api.report.entity.PosDailySale;
 import com.bakery.api.report.service.PosDailySaleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -28,9 +28,9 @@ public class PosDailySaleController {
     private final PosDailySaleService service;
 
     @GetMapping
-    public List<PosDailySale> getBySaleDate(
+    public List<Map<String, Object>> getBySaleDate(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate saleDate) {
-        return service.findBySaleDate(saleDate);
+        return service.findBySaleDateMapped(saleDate);
     }
 
     @PostMapping("/upload")

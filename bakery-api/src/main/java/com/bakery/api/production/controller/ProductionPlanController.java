@@ -41,6 +41,12 @@ public class ProductionPlanController {
         return service.findApproved();
     }
 
+    /** Manager xem danh sách kế hoạch DRAFT chờ duyệt. */
+    @GetMapping("/drafts")
+    public List<ProductionPlanResponse> findDraft() {
+        return service.findDraft();
+    }
+
     /**
      * Tạo thủ công kế hoạch DRAFT cho ngày bất kỳ (không cần DailyReport).
      * Idempotent: nếu đã tồn tại → trả về plan hiện tại.

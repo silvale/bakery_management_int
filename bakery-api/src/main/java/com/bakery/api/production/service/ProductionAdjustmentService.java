@@ -9,8 +9,10 @@ import com.bakery.api.inventory.entity.StockLot;
 import com.bakery.api.inventory.entity.StockMovement;
 import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.inventory.repository.StockMovementRepository;
+import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.entity.Warehouse;
 import com.bakery.api.master.repository.WarehouseRepository;
+import jakarta.persistence.EntityManager;
 import com.bakery.api.production.entity.DeliveryRecord;
 import com.bakery.api.production.entity.ProductionAdjustment;
 import com.bakery.api.production.entity.ProductionRequestLine;
@@ -53,6 +55,7 @@ public class ProductionAdjustmentService {
     private final StockLotRepository stockLotRepository;
     private final StockMovementRepository stockMovementRepository;
     private final WarehouseRepository warehouseRepository;
+    private final EntityManager entityManager;
     private final BakeryActorResolver actorResolver;
 
     // ── Queries ──────────────────────────────────────────────────
@@ -62,9 +65,7 @@ public class ProductionAdjustmentService {
     }
 
     public List<ProductionAdjustment> findPending() {
-        return adjustmentRepository.findAll().stream()
-                .filter(a -> a.getApprovalStatus() == ApprovalStatus.PENDING_APPROVAL)
-                .toList();
+        return adjustmentRepository.findByApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
     }
 
     // ── Admin tạo correction ─────────────────────────────────────
@@ -219,7 +220,11 @@ public class ProductionAdjustmentService {
         BigDecimal refCost = existing.isEmpty() ? BigDecimal.ZERO
                 : existing.get(existing.size() - 1).getUnitCost();
 
+        Item item = entityManager.find(Item.class, itemId);
+        if (item == null) throw new ResourceNotFoundException("Item", itemId);
+
         StockLot returnLot = new StockLot();
+        returnLot.setItem(item);
         returnLot.setWarehouse(kitchen);
         returnLot.setQtyInitial(qty);
         returnLot.setQtyRemaining(qty);

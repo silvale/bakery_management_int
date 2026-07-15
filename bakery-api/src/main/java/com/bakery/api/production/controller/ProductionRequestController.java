@@ -1,6 +1,7 @@
 package com.bakery.api.production.controller;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -12,6 +13,7 @@ import com.bakery.framework.controller.BakeryAdminResource;
 import com.bakery.framework.entity.AdjustmentType;
 import com.bakery.framework.service.BakeryAdminService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -87,5 +89,18 @@ public class ProductionRequestController
             @PathVariable UUID id,
             @RequestBody List<CompleteLineRequest> items) {
         return service.completeLines(id, items);
+    }
+
+    /**
+     * Approve toàn bộ phiếu SX trong ngày — tiện khi có nhiều phiếu cùng ngày.
+     * Chỉ approve các phiếu đang ở DRAFT hoặc PENDING_APPROVAL.
+     *
+     * @param date ngày sản xuất (mặc định hôm nay)
+     * @return danh sách phiếu đã được approve
+     */
+    @PostMapping("/approve-all")
+    public List<ProductionRequestResponse> approveAll(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return service.approveAll(date != null ? date : LocalDate.now());
     }
 }

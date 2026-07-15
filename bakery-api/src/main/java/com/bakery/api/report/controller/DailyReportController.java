@@ -3,13 +3,14 @@ package com.bakery.api.report.controller;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import com.bakery.api.report.entity.DailyReport;
-import com.bakery.api.report.entity.DailyReportLine;
 import com.bakery.api.report.service.DailyReportService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,19 +44,34 @@ public class DailyReportController {
     private final DailyReportService service;
 
     @PostMapping("/init")
-    public DailyReport initReport(
+    public Map<String, Object> initReport(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportDate) {
-        return service.getOrCreateDraft(reportDate);
-    }
-
-    @GetMapping("/{id}")
-    public DailyReport getById(@PathVariable UUID id) {
-        return service.getById(id);
+        DailyReport r = service.getOrCreateDraft(reportDate);
+        return Map.of("id", r.getId(), "reportDate", r.getReportDate(), "status", r.getStatus());
     }
 
     @GetMapping("/{id}/lines")
-    public List<DailyReportLine> getLines(@PathVariable UUID id) {
-        return service.getLines(id);
+    public List<Map<String, Object>> getLines(@PathVariable UUID id) {
+        return service.getLines(id).stream().map(l -> {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", l.getId());
+            if (l.getItem() != null) {
+                m.put("item", Map.of(
+                        "id", l.getItem().getId(),
+                        "key", l.getItem().getCode() != null ? l.getItem().getCode() : "",
+                        "name", l.getItem().getName() != null ? l.getItem().getName() : ""));
+            }
+            m.put("qtyProduced",         l.getQtyProduced());
+            m.put("qtyReceived",         l.getQtyReceived());
+            m.put("qtyRemainingActual",  l.getQtyRemainingActual());
+            m.put("qtySoldImplied",      l.getQtySoldImplied());
+            m.put("qtySoldPos",          l.getQtySoldPos());
+            m.put("discrepancyKitchen",  l.getDiscrepancyKitchen());
+            m.put("discrepancyPos",      l.getDiscrepancyPos());
+            m.put("sellingPrice",        l.getSellingPrice());
+            m.put("note",                l.getNote() != null ? l.getNote() : "");
+            return m;
+        }).toList();
     }
 
     /**
@@ -65,12 +81,13 @@ public class DailyReportController {
      * @param qtyRemainingActual số bánh còn lại thực tế tại cửa hàng
      */
     @PostMapping("/{id}/remaining")
-    public DailyReportLine updateRemaining(
+    public ResponseEntity<Void> updateRemaining(
             @PathVariable UUID id,
             @RequestParam UUID itemId,
             @RequestParam BigDecimal qtyRemainingActual,
             @RequestParam(required = false) String note) {
-        return service.updateRemainingQty(id, itemId, qtyRemainingActual, note);
+        service.updateRemainingQty(id, itemId, qtyRemainingActual, note);
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -78,7 +95,34 @@ public class DailyReportController {
      * Tổng hợp: DeliveryRecord + POS + snapshot giá → FINALIZED.
      */
     @PostMapping("/{id}/finalize")
-    public DailyReport finalize(@PathVariable UUID id) {
-        return service.finalize(id);
+    public Map<String, Object> finalize(@PathVariable UUID id) {
+        DailyReport r = service.finalize(id);
+        return Map.of("id", r.getId(), "reportDate", r.getReportDate(),
+                "status", r.getStatus(),
+                "finalizedBy", r.getFinalizedBy() != null ? r.getFinalizedBy() : "");
+    }
+
+    @GetMapping("/{id}")
+    public Map<String, Object> getById(@PathVariable UUID id) {
+        DailyReport r = service.getById(id);
+        return Map.of("id", r.getId(), "reportDate", r.getReportDate(),
+                "status", r.getStatus(),
+                "finalizedBy", r.getFinalizedBy() != null ? r.getFinalizedBy() : "");
+    }
+
+    /**
+     * Tìm report theo ngày — trả về null body (204) nếu chưa có.
+     * Khác /init: không tạo mới.
+     */
+    @GetMapping("/by-date")
+    public ResponseEntity<Map<String, Object>> findByDate(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportDate) {
+        return service.findByDate(reportDate)
+                .map(r -> ResponseEntity.ok(Map.<String, Object>of(
+                        "id", r.getId(),
+                        "reportDate", r.getReportDate(),
+                        "status", r.getStatus(),
+                        "finalizedBy", r.getFinalizedBy() != null ? r.getFinalizedBy() : "")))
+                .orElse(ResponseEntity.noContent().build());
     }
 }

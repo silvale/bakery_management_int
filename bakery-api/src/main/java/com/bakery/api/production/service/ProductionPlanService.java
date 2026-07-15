@@ -52,6 +52,14 @@ public class ProductionPlanService {
                 .toList();
     }
 
+    /** Manager xem danh sách kế hoạch DRAFT chờ duyệt. */
+    @Transactional(readOnly = true)
+    public List<ProductionPlanResponse> findDraft() {
+        return planRepository.findByApprovalStatusOrderByPlanDateDesc(ApprovalStatus.DRAFT).stream()
+                .map(ProductionPlanResponse::from)
+                .toList();
+    }
+
     @Transactional(readOnly = true)
     public ProductionPlanResponse findById(UUID id) {
         return ProductionPlanResponse.from(getById(id));

@@ -2,15 +2,24 @@ package com.bakery.api.inventory.controller;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 import com.bakery.api.inventory.dto.StockLotResponse;
 import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.inventory.service.StockLotService;
 import com.bakery.framework.controller.BakeryAdminResource;
+import com.bakery.framework.dto.RejectRequest;
 import com.bakery.framework.metadata.ReferenceValue;
 import com.bakery.framework.service.BakeryAdminService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -37,6 +46,38 @@ public class StockLotController extends BakeryAdminResource<Void, StockLotRespon
     @Override
     protected BakeryAdminService<Void, StockLotResponse> getService() {
         return service;
+    }
+
+    // ── Block inherited mutating endpoints (stock lots are managed internally) ──
+
+    @Override
+    @PostMapping
+    public ResponseEntity<StockLotResponse> create(@RequestBody Void body) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
+    }
+
+    @Override
+    @PutMapping("/{id}")
+    public ResponseEntity<StockLotResponse> update(@PathVariable UUID id, @RequestBody Void body) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
+    }
+
+    @Override
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable UUID id) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
+    }
+
+    @Override
+    @PostMapping("/{id}/approve")
+    public ResponseEntity<StockLotResponse> approve(@PathVariable UUID id) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
+    }
+
+    @Override
+    @PostMapping("/{id}/reject")
+    public ResponseEntity<StockLotResponse> reject(@PathVariable UUID id, @RequestBody RejectRequest request) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     /**
