@@ -51,3 +51,9 @@ batch-error/
 
 # Test reports
 /test-output/
+.claude
+trash/.~lock.API_Migration_Items.xlsx#
+trash/API_Migration_Items.xlsx
+trash/BakeryAPI_Reference_v1.docx
+trash/BakeryFE_FlowDoc.docx
+trash/test_product_recipe.sh
