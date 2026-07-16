@@ -72,6 +72,13 @@ public class DailyReportLine {
     @Column(name = "discrepancy_pos", precision = 10, scale = 3)
     private BigDecimal discrepancyPos;
 
+    /**
+     * Nhân viên nhập — số bánh đã hủy cuối ngày.
+     * Chỉ áp dụng cho sản phẩm có shelf_days = 0 (bánh tươi trong ngày).
+     */
+    @Column(name = "qty_cancelled", precision = 10, scale = 3)
+    private BigDecimal qtyCancelled;
+
     /** Snapshot giá vốn tại thời điểm chốt */
     @Column(name = "unit_cost", precision = 15, scale = 2)
     private BigDecimal unitCost;

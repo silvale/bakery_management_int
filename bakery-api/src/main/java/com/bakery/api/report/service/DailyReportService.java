@@ -9,8 +9,10 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.bakery.api.master.entity.ProductExpiryConfig;
 import com.bakery.api.master.entity.ProductMapping;
 import com.bakery.api.master.repository.ItemLookupRepository;
+import com.bakery.api.master.repository.ProductExpiryConfigRepository;
 import com.bakery.api.master.repository.ProductMappingRepository;
 import com.bakery.api.pricing.entity.ProductPrice;
 import com.bakery.api.pricing.repository.ProductPriceRepository;
@@ -53,6 +55,7 @@ public class DailyReportService {
     private final ProductMappingRepository productMappingRepository;
     private final ProductPriceRepository productPriceRepository;
     private final ItemLookupRepository itemRepository;
+    private final ProductExpiryConfigRepository expiryConfigRepository;
     private final BakeryActorResolver actorResolver;
     private final ProductionPlannerService productionPlannerService;
 
@@ -232,6 +235,152 @@ public class DailyReportService {
         }
 
         return saved;
+    }
+
+    // ── Nhân viên nhập qty_cancelled ────────────────────────────
+
+    /**
+     * Nhân viên nhập số bánh đã hủy cuối ngày.
+     * Tự upsert line nếu chưa có.
+     */
+    @Transactional
+    public DailyReportLine updateCancelledQty(UUID reportId, UUID itemId,
+            BigDecimal qtyCancelled) {
+        DailyReport report = getById(reportId);
+        assertNotFinalized(report);
+
+        DailyReportLine line = lineRepository
+                .findByDailyReportIdAndItemId(reportId, itemId)
+                .orElseGet(() -> {
+                    DailyReportLine l = new DailyReportLine();
+                    l.setDailyReport(report);
+                    l.setItem(itemRepository.getReferenceById(itemId));
+                    return l;
+                });
+
+        line.setQtyCancelled(qtyCancelled);
+        line.setUpdatedAt(Instant.now());
+        return lineRepository.save(line);
+    }
+
+    /**
+     * Danh sách bánh cần hủy cho ngày {@code reportDate}.
+     *
+     * <p>Logic:
+     * <ol>
+     *   <li>Lấy tất cả delivery records trong vòng 14 ngày trước reportDate
+     *       (bao gồm cả hôm nay) — giới hạn bởi max shelf_days thực tế.</li>
+     *   <li>Với mỗi item, lấy các production_date thực tế từ ProductionRequest.</li>
+     *   <li>Lấy shelf_days từ ProductExpiryConfig. Nếu item không có config → bỏ qua.</li>
+     *   <li>Nếu production_date + shelf_days ≤ reportDate → hết hạn, cần hủy.</li>
+     *   <li>Attach qty_remaining_actual + qty_cancelled từ DailyReportLine hôm nay.</li>
+     * </ol>
+     *
+     * <p>Ví dụ: bánh sản xuất thứ 7 (production_date = Sat), shelf_days = 2
+     * → expiry = Mon → xuất hiện trong cancel list thứ 2.
+     */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getCancelList(UUID reportId) {
+        DailyReport report = getById(reportId);
+        LocalDate reportDate = report.getReportDate();
+
+        // Cửa sổ tìm kiếm: 14 ngày (đủ bao trùm mọi shelf_days thực tế)
+        LocalDate lookback = reportDate.minusDays(14);
+
+        // Tất cả delivery records trong 14 ngày → map itemId → set(productionDate)
+        List<DeliveryRecord> deliveries = deliveryRecordRepository
+                .findByProductionRequestLine_ProductionRequest_ProductionDateBetween(lookback, reportDate);
+
+        // group: itemId → set production dates (chỉ lấy records có product)
+        java.util.Map<UUID, java.util.Set<LocalDate>> prodDatesByItem = deliveries.stream()
+                .filter(dr -> dr.getProductionRequestLine() != null
+                        && dr.getProductionRequestLine().getProduct() != null)
+                .collect(Collectors.groupingBy(
+                        dr -> dr.getProductionRequestLine().getProduct().getId(),
+                        Collectors.mapping(
+                                dr -> dr.getProductionRequestLine()
+                                        .getProductionRequest().getProductionDate(),
+                                Collectors.toSet())));
+
+        if (prodDatesByItem.isEmpty()) return List.of();
+
+        // Load expiry configs cho tất cả items một lần
+        java.util.Map<UUID, Integer> shelfDaysByItem = expiryConfigRepository.findAll().stream()
+                .filter(c -> c.getShelfDays() != null && c.getItem() != null)
+                .collect(Collectors.toMap(
+                        c -> c.getItem().getId(),
+                        ProductExpiryConfig::getShelfDays,
+                        (a, b) -> a));
+
+        // Load today's report lines một lần
+        java.util.Map<UUID, DailyReportLine> lineByItem = lineRepository
+                .findByDailyReportIdWithItem(reportId).stream()
+                .filter(l -> l.getItem() != null)
+                .collect(Collectors.toMap(l -> l.getItem().getId(), l -> l, (a, b) -> a));
+
+        List<Map<String, Object>> result = new java.util.ArrayList<>();
+
+        for (java.util.Map.Entry<UUID, java.util.Set<LocalDate>> entry : prodDatesByItem.entrySet()) {
+            UUID itemId = entry.getKey();
+            Integer shelfDays = shelfDaysByItem.get(itemId);
+            if (shelfDays == null) continue; // không có config → không quản lý HSD
+
+            // Kiểm tra xem có production batch nào hết hạn vào/trước reportDate không
+            boolean expiring = entry.getValue().stream()
+                    .anyMatch(pd -> !pd.plusDays(shelfDays).isAfter(reportDate));
+            if (!expiring) continue;
+
+            // Lấy production dates đang hết hạn (để hiển thị thông tin)
+            List<LocalDate> expiringDates = entry.getValue().stream()
+                    .filter(pd -> !pd.plusDays(shelfDays).isAfter(reportDate))
+                    .sorted()
+                    .toList();
+
+            // Lấy item info từ line hoặc repository
+            DailyReportLine line = lineByItem.get(itemId);
+
+            Map<String, Object> row = new java.util.LinkedHashMap<>();
+            row.put("itemId", itemId);
+
+            // Item name/code từ line nếu có, fallback sang getReferenceById
+            if (line != null && line.getItem() != null) {
+                row.put("itemCode", line.getItem().getCode() != null ? line.getItem().getCode() : "");
+                row.put("itemName", line.getItem().getName() != null ? line.getItem().getName() : "");
+            } else {
+                // Lấy từ delivery records (product đã load từ query)
+                deliveries.stream()
+                        .filter(dr -> dr.getProductionRequestLine() != null
+                                && dr.getProductionRequestLine().getProduct() != null
+                                && itemId.equals(dr.getProductionRequestLine().getProduct().getId()))
+                        .findFirst()
+                        .ifPresent(dr -> {
+                            var p = dr.getProductionRequestLine().getProduct();
+                            row.put("itemCode", p.getCode() != null ? p.getCode() : "");
+                            row.put("itemName", p.getName() != null ? p.getName() : "");
+                        });
+            }
+
+            row.put("shelfDays", shelfDays);
+            row.put("expiringProductionDates", expiringDates);
+
+            if (line != null) {
+                row.put("qtyReceived",        line.getQtyReceived());
+                row.put("qtyRemainingActual", line.getQtyRemainingActual());
+                row.put("qtyCancelled",       line.getQtyCancelled());
+            } else {
+                row.put("qtyReceived",        null);
+                row.put("qtyRemainingActual", null);
+                row.put("qtyCancelled",       null);
+            }
+            result.add(row);
+        }
+
+        // Sort: shelf_days tăng dần (bánh tươi trước), rồi theo tên
+        result.sort(java.util.Comparator
+                .<Map<String, Object>, Integer>comparing(r -> (Integer) r.get("shelfDays"))
+                .thenComparing(r -> String.valueOf(r.getOrDefault("itemName", ""))));
+
+        return result;
     }
 
     // ── Private ──────────────────────────────────────────────────

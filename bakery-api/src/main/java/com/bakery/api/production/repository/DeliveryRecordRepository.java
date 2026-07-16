@@ -13,4 +13,8 @@ public interface DeliveryRecordRepository extends BaseRepository<DeliveryRecord>
 
     /** Tất cả DeliveryRecord của ngày sản xuất — dùng khi tổng hợp DailyReport */
     List<DeliveryRecord> findByProductionRequestLine_ProductionRequest_ProductionDate(LocalDate productionDate);
+
+    /** Delivery records trong khoảng ngày — dùng để tính cancel list */
+    List<DeliveryRecord> findByProductionRequestLine_ProductionRequest_ProductionDateBetween(
+            LocalDate from, LocalDate to);
 }

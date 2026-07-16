@@ -108,6 +108,7 @@ tr:hover td{background:#f8fafc}
   <div class="nav-group">
     <div class="nav-label">Báo cáo</div>
     <div class="nav-item" onclick="nav('daily-report')">📊 Báo cáo ngày</div>
+    <div class="nav-item" onclick="nav('huy-banh')">🗑 Hủy bánh</div>
     <div class="nav-item" onclick="nav('pos-sales')">🏪 POS Sales</div>
   </div>
 </nav>
@@ -173,13 +174,13 @@ const PAGE_TITLES={'items-list':'Danh sách sản phẩm','item-form':'Tạo / S
   'sx-config':'Cấu hình sản xuất','prod-groups':'Production Groups','threshold-rules':'Threshold Rules','prod-plans':'Kế hoạch sản xuất',
   'prod-requests':'Phiếu sản xuất','delivery-records':'Giao nhận bếp → shop','prod-adjustments':'Điều chỉnh SX',
   'stock-summary':'Tồn kho','inventory-requests':'Phiếu kho',
-  'daily-report':'Báo cáo ngày','pos-sales':'POS Sales'};
+  'daily-report':'Báo cáo ngày','huy-banh':'Hủy bánh','pos-sales':'POS Sales'};
 const PAGE_FNS={'items-list':pageItemsList,'item-form':pageItemForm,'suppliers':pageSuppliers,
   'product-mapping':pageProductMapping,'item-groups':pageItemGroups,
   'sx-config':pageSxConfig,'prod-groups':pageProdGroups,
   'threshold-rules':pageThresholdRules,'prod-plans':pageProdPlans,'prod-requests':pageProdRequests,
   'delivery-records':pageDeliveryRecords,'prod-adjustments':pageProdAdjustments,'stock-summary':pageStockSummary,
-  'inventory-requests':pageInventoryRequests,'daily-report':pageDailyReport,'pos-sales':pagePosSales};
+  'inventory-requests':pageInventoryRequests,'daily-report':pageDailyReport,'huy-banh':pageHuyBanh,'pos-sales':pagePosSales};
 
 function nav(page,data){
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
@@ -2172,6 +2173,8 @@ async function loadDR(){
     });
 
     renderDR(report,rows);
+    // Load cancel list sau khi render xong
+    loadCancelList(report);
   }catch(e){el.innerHTML=`<div class="empty" style="color:#dc2626">Lỗi: ${e.message}</div>`;}
 }
 
@@ -2247,7 +2250,8 @@ function renderDR(report,rows){
     <div style="margin-top:8px;font-size:12px;color:#64748b">
       💡 "Còn lại" do nhân viên nhập ở màn hình Kho Bếp. Bấm <strong>Chốt báo cáo</strong> để tổng hợp chính thức.
     </div>
-  </div>`;
+  </div>
+  <div id="dr-cancel-section"></div>`;
 }
 
 async function saveDRRemaining(itemId){
@@ -2271,9 +2275,229 @@ async function finalizeDR(id){
   }catch(e){}
 }
 
+async function loadCancelList(report){
+  const el=document.getElementById('dr-cancel-section');
+  if(!el)return;
+  el.innerHTML='<div class="empty" style="padding:8px">Đang tải danh sách hủy...</div>';
+  try{
+    const rows=await api('GET',`/api/v1/daily-reports/${report.id}/cancel-list`);
+    renderCancelList(report,rows??[]);
+  }catch(e){
+    el.innerHTML=`<div class="empty" style="color:#dc2626;padding:8px">Lỗi tải danh sách hủy: ${e.message}</div>`;
+  }
+}
+
+function renderCancelList(report,rows){
+  const el=document.getElementById('dr-cancel-section');
+  if(!el)return;
+  const isDraft=report.status==='DRAFT';
+  const isFinalized=report.status==='FINALIZED';
+
+  if(!rows.length){
+    el.innerHTML=`<div class="card" style="margin-top:12px">
+      <strong style="color:#dc2626">🗑 Hủy bánh hôm nay</strong>
+      <div class="empty" style="margin-top:8px">Không có sản phẩm nào cấu hình shelf_days = 0</div>
+    </div>`;
+    return;
+  }
+
+  const totalCancel=rows.reduce((s,r)=>s+(+(r.qtyCancelled??0)),0);
+
+  el.innerHTML=`<div class="card" style="margin-top:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <strong style="color:#dc2626;font-size:15px">🗑 Hủy bánh hôm nay</strong>
+        <span style="margin-left:10px;font-size:12px;color:#64748b">Bánh tươi trong ngày (shelf_days = 0) — phải hủy cuối ngày</span>
+      </div>
+      ${totalCancel>0?`<span style="font-size:13px;color:#dc2626;font-weight:600">Tổng hủy: ${fmt(totalCancel)}</span>`:''}
+    </div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;font-size:13px">
+      <thead><tr>
+        <th style="min-width:140px">Sản phẩm</th>
+        <th style="text-align:right;color:#2563eb">Nhận trong ngày</th>
+        <th style="text-align:right;color:#7c3aed">Còn lại cuối ngày</th>
+        <th style="text-align:right;color:#dc2626">Số lượng hủy</th>
+        <th style="color:#64748b;font-size:11px">Ghi chú</th>
+      </tr></thead>
+      <tbody>
+      ${rows.map(r=>`<tr>
+        <td><strong>${r.itemName}</strong><br><small style="color:#94a3b8">${r.itemCode}</small></td>
+        <td style="text-align:right;color:#2563eb">${r.qtyReceived!=null?fmt(r.qtyReceived):'—'}</td>
+        <td style="text-align:right;color:#7c3aed">${r.qtyRemainingActual!=null?fmt(r.qtyRemainingActual):'<span style="color:#f59e0b">chưa nhập</span>'}</td>
+        <td style="text-align:right">
+          ${isFinalized
+            ? `<span style="color:#dc2626;font-weight:600">${r.qtyCancelled!=null?fmt(r.qtyCancelled):'—'}</span>`
+            : `<input type="number" id="dr-cancel-${r.itemId}" min="0" step="0.001"
+                value="${r.qtyCancelled!=null?r.qtyCancelled:r.qtyRemainingActual!=null?r.qtyRemainingActual:''}"
+                placeholder="${r.qtyRemainingActual!=null?r.qtyRemainingActual:'0'}"
+                style="width:80px;border:1px solid #fca5a5;border-radius:4px;padding:2px 6px;font-size:13px;text-align:right"
+                onblur="saveDRCancel('${r.itemId}')"
+                onkeydown="if(event.key==='Enter'){this.blur()}">`
+          }
+        </td>
+        <td style="font-size:11px;color:#64748b">${r.qtyCancelled!=null&&r.qtyRemainingActual!=null&&r.qtyCancelled!=r.qtyRemainingActual?'⚠️ Khác tồn':'✓'}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table>
+    </div>
+    ${isDraft?`<div style="margin-top:8px;font-size:12px;color:#64748b">
+      💡 Số hủy mặc định = Còn lại cuối ngày. Nhân viên điều chỉnh nếu thực tế khác.
+    </div>`:''}
+  </div>`;
+}
+
+async function saveDRCancel(itemId){
+  if(!_drReportId)return;
+  const inp=document.getElementById(`dr-cancel-${itemId}`);
+  const val=(inp?.value??'').trim();
+  if(val==='')return;
+  try{
+    await api('POST',`/api/v1/daily-reports/${_drReportId}/cancel?itemId=${itemId}&qtyCancelled=${+val}`);
+    inp.style.borderColor='#059669';
+  }catch(e){}
+}
+
 // Kept for legacy compat
 async function initDR(){loadDR();}
 async function updateDRRemaining(){}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HỦY BÁNH
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _huyReportId=null;
+
+async function pageHuyBanh(){
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('content').innerHTML=`
+  <div class="card">
+    <div style="display:flex;gap:10px;align-items:center">
+      <div class="field" style="margin:0"><label>Ngày</label>
+        <input type="date" id="huy-date" value="${today}" onchange="loadHuyBanh()"></div>
+      <button class="btn btn-ghost btn-sm" onclick="shiftHuyDate(-1)" style="margin-top:18px">◀</button>
+      <button class="btn btn-ghost btn-sm" onclick="shiftHuyDate(1)" style="margin-top:18px">▶</button>
+      <button class="btn btn-ghost btn-sm" onclick="loadHuyBanh()" style="margin-top:18px">🔄</button>
+    </div>
+  </div>
+  <div id="huy-detail"><div class="empty">Chọn ngày để xem danh sách hủy</div></div>`;
+  loadHuyBanh();
+}
+
+function shiftHuyDate(delta){
+  const inp=document.getElementById('huy-date');if(!inp)return;
+  const d=new Date(inp.value);d.setDate(d.getDate()+delta);
+  inp.value=d.toISOString().slice(0,10);
+  loadHuyBanh();
+}
+
+async function loadHuyBanh(){
+  const date=document.getElementById('huy-date')?.value;
+  if(!date)return;
+  const el=document.getElementById('huy-detail');
+  el.innerHTML='<div class="empty">Đang tải...</div>';
+  try{
+    // Lấy report của ngày đó (không tạo mới nếu chưa có)
+    const reportResp=await api('GET',`/api/v1/daily-reports/by-date?reportDate=${date}`).catch(()=>null);
+    if(!reportResp?.id){
+      el.innerHTML=`<div class="card"><div class="empty">Chưa có báo cáo ngày ${date}. Vào <strong>Báo cáo ngày</strong> để tạo trước.</div></div>`;
+      return;
+    }
+    _huyReportId=reportResp.id;
+    const rows=await api('GET',`/api/v1/daily-reports/${reportResp.id}/cancel-list`);
+    renderHuyBanh(reportResp,rows??[]);
+  }catch(e){
+    el.innerHTML=`<div class="empty" style="color:#dc2626">Lỗi: ${e.message}</div>`;
+  }
+}
+
+function renderHuyBanh(report,rows){
+  const el=document.getElementById('huy-detail');if(!el)return;
+  const isDraft=report.status==='DRAFT';
+  const isFinalized=report.status==='FINALIZED';
+
+  const totalCancelled=rows.reduce((s,r)=>s+(+(r.qtyCancelled??0)),0);
+  const pendingInput=rows.filter(r=>r.qtyRemainingActual!=null&&r.qtyCancelled==null).length;
+
+  el.innerHTML=`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div>
+        <strong style="font-size:15px;color:#dc2626">🗑 Hủy bánh — ${report.reportDate}</strong>
+        <span style="margin-left:10px">${badge(report.status)}</span>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center">
+        ${totalCancelled>0?`<span style="font-size:13px;color:#dc2626;font-weight:600">Tổng hủy: ${fmt(totalCancelled)}</span>`:''}
+        ${pendingInput>0&&isDraft?`<span style="font-size:12px;color:#f59e0b">⚠️ ${pendingInput} item chưa nhập hủy</span>`:''}
+      </div>
+    </div>
+
+    ${!rows.length?`<div class="empty">Không có sản phẩm nào cấu hình shelf_days = 0.<br>
+      Vào <strong>Sản phẩm → Cấu hình hạn sử dụng</strong> để thiết lập.</div>`:`
+    <div style="overflow-x:auto">
+    <table style="width:100%;font-size:13px">
+      <thead><tr>
+        <th style="min-width:160px">Sản phẩm</th>
+        <th style="text-align:right;color:#2563eb">Nhận trong ngày</th>
+        <th style="text-align:right;color:#7c3aed">Còn lại cuối ngày</th>
+        <th style="text-align:right;color:#dc2626">Số lượng hủy</th>
+        <th style="text-align:center;color:#64748b">Trạng thái</th>
+      </tr></thead>
+      <tbody>
+      ${rows.map(r=>{
+        const diffRem=r.qtyCancelled!=null&&r.qtyRemainingActual!=null&&+r.qtyCancelled!==+r.qtyRemainingActual;
+        const statusTag=r.qtyCancelled!=null
+          ?(diffRem?`<span style="color:#f59e0b;font-size:11px">⚠️ Khác tồn</span>`:`<span style="color:#059669;font-size:11px">✓ Đã nhập</span>`)
+          :(r.qtyRemainingActual!=null?`<span style="color:#f59e0b;font-size:11px">Chưa nhập hủy</span>`:`<span style="color:#94a3b8;font-size:11px">Chưa có tồn</span>`);
+        const expiryDates=(r.expiringProductionDates??[]).map(d=>{
+          const exp=new Date(d);exp.setDate(exp.getDate()+(r.shelfDays??0));
+          return`SX ${d} + ${r.shelfDays}ngày → HSD ${exp.toISOString().slice(0,10)}`;
+        }).join(', ');
+        return`<tr>
+        <td>
+          <strong>${r.itemName}</strong><br>
+          <small style="color:#94a3b8">${r.itemCode}</small>
+          ${expiryDates?`<br><small style="color:#dc2626;font-size:10px">${expiryDates}</small>`:''}
+        </td>
+        <td style="text-align:right;color:#2563eb">${r.qtyReceived!=null?fmt(r.qtyReceived):'—'}</td>
+        <td style="text-align:right;color:#7c3aed">${r.qtyRemainingActual!=null?`<strong>${fmt(r.qtyRemainingActual)}</strong>`:'<span style="color:#f59e0b">chưa nhập</span>'}</td>
+        <td style="text-align:right">
+          ${isFinalized
+            ?`<span style="color:#dc2626;font-weight:700">${r.qtyCancelled!=null?fmt(r.qtyCancelled):'—'}</span>`
+            :`<input type="number" id="huy-inp-${r.itemId}" min="0" step="0.001"
+                value="${r.qtyCancelled!=null?r.qtyCancelled:r.qtyRemainingActual!=null?r.qtyRemainingActual:''}"
+                placeholder="${r.qtyRemainingActual!=null?r.qtyRemainingActual:'0'}"
+                style="width:90px;border:1px solid #fca5a5;border-radius:4px;padding:3px 8px;font-size:13px;text-align:right"
+                onblur="saveHuyBanh('${r.itemId}')"
+                onkeydown="if(event.key==='Enter'){this.blur()}">`
+          }
+        </td>
+        <td style="text-align:center">${statusTag}</td>
+      </tr>`;}).join('')}
+      </tbody>
+    </table>
+    </div>
+    ${isDraft?`<div style="margin-top:10px;font-size:12px;color:#64748b">
+      💡 Số hủy tự điền = Còn lại cuối ngày. Nhân viên điều chỉnh nếu thực tế khác rồi nhấn Enter hoặc click ra ngoài để lưu.
+    </div>`:''}
+    `}
+  </div>`;
+}
+
+async function saveHuyBanh(itemId){
+  if(!_huyReportId)return;
+  const inp=document.getElementById(`huy-inp-${itemId}`);
+  const val=(inp?.value??'').trim();
+  if(val==='')return;
+  try{
+    await api('POST',`/api/v1/daily-reports/${_huyReportId}/cancel?itemId=${itemId}&qtyCancelled=${+val}`);
+    inp.style.borderColor='#059669';
+    // Refresh tổng hủy
+    const rows=await api('GET',`/api/v1/daily-reports/${_huyReportId}/cancel-list`);
+    const total=rows.reduce((s,r)=>s+(+(r.qtyCancelled??0)),0);
+    const el=document.querySelector('#huy-detail .card strong[style*="dc2626"]:last-of-type');
+    // Just update the input border — full re-render on next load
+  }catch(e){inp.style.borderColor='#dc2626';}
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // POS SALES

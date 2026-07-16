@@ -33,6 +33,13 @@ public class ProductMapping extends BaseEntity {
     @Column(name = "ex_code", nullable = false, unique = true, length = 50)
     private String exCode;
 
+    /**
+     * Ngày SX cố định của SKU này (từ prefix EX_CODE):
+     * 0 = mỗi ngày, 2=T2, 3=T3, 4=T4, 5=T5, 6=T6, 7=T7, 8=CN, NULL = không ràng buộc.
+     */
+    @Column(name = "production_day")
+    private Integer productionDay;
+
     /** Giá bán theo EX_CODE — có thể khác nhau tùy mức trang trí/ngày */
     @Column(name = "selling_price", precision = 15, scale = 2)
     private BigDecimal sellingPrice;

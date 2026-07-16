@@ -68,6 +68,7 @@ public class DailyReportController {
             m.put("qtySoldPos",          l.getQtySoldPos());
             m.put("discrepancyKitchen",  l.getDiscrepancyKitchen());
             m.put("discrepancyPos",      l.getDiscrepancyPos());
+            m.put("qtyCancelled",        l.getQtyCancelled());
             m.put("sellingPrice",        l.getSellingPrice());
             m.put("note",                l.getNote() != null ? l.getNote() : "");
             return m;
@@ -87,6 +88,30 @@ public class DailyReportController {
             @RequestParam BigDecimal qtyRemainingActual,
             @RequestParam(required = false) String note) {
         service.updateRemainingQty(id, itemId, qtyRemainingActual, note);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Danh sách bánh cần hủy hôm nay.
+     * Lọc tất cả sản phẩm có shelf_days = 0 + trạng thái remaining/cancelled hiện tại.
+     */
+    @GetMapping("/{id}/cancel-list")
+    public List<Map<String, Object>> getCancelList(@PathVariable UUID id) {
+        return service.getCancelList(id);
+    }
+
+    /**
+     * Nhân viên nhập số bánh đã hủy cuối ngày.
+     *
+     * @param itemId       ID sản phẩm
+     * @param qtyCancelled số bánh đã hủy
+     */
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<Void> updateCancelled(
+            @PathVariable UUID id,
+            @RequestParam UUID itemId,
+            @RequestParam BigDecimal qtyCancelled) {
+        service.updateCancelledQty(id, itemId, qtyCancelled);
         return ResponseEntity.noContent().build();
     }
 
