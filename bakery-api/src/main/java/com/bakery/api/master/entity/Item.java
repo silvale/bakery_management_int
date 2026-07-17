@@ -62,4 +62,14 @@ public abstract class Item extends BaseEntity {
      */
     @Column(name = "is_splittable", nullable = false)
     private boolean splittable = true;
+
+    /**
+     * Giá vốn per unit (đơn vị tính của item).
+     * <ul>
+     *   <li>INGREDIENT: nhập tay trực tiếp trên form.</li>
+     *   <li>SEMI_PRODUCT / PRODUCT: tính tự động từ công thức khi approve recipe.</li>
+     * </ul>
+     */
+    @Column(name = "unit_cost", precision = 15, scale = 4)
+    private java.math.BigDecimal unitCost;
 }

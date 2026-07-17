@@ -51,6 +51,13 @@ public class ItemResponse extends BaseResponse {
     /** Hạn sử dụng (ngày kể từ ngày SX). 0 = trong ngày. null = chưa cấu hình. */
     private Integer shelfDays;
 
+    // ── Cost ──────────────────────────────────────────────────
+    /**
+     * Giá vốn per unit.
+     * INGREDIENT = nhập tay; SEMI_PRODUCT / PRODUCT = tính từ công thức khi approve.
+     */
+    private BigDecimal unitCost;
+
     // ── Recipe (Product + SemiProduct) ────────────────────────
     /** Công thức active; nếu chưa active thì là phiên bản mới nhất */
     private RecipeResponse recipe;

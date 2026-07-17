@@ -42,6 +42,13 @@ public record ItemRequest(
         /** Hạn sử dụng (ngày). 0 = bánh tươi trong ngày. null = không set. */
         Integer shelfDays,
 
+        // ── Cost ─────────────────────────────────────────────
+        /**
+         * Giá vốn per unit — chỉ nhập trực tiếp cho INGREDIENT.
+         * SEMI_PRODUCT / PRODUCT: tính tự động từ công thức, field này bị bỏ qua.
+         */
+        BigDecimal unitCost,
+
         // ── Recipe (Product + SemiProduct) ───────────────────
         String recipeNote,
         @Valid List<RecipeLineRequest> recipeLines) {}

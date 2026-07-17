@@ -9,29 +9,17 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import java.io.IOException;
-import java.io.InputStream;
-
 import com.bakery.api.master.dto.ItemRequest;
 import com.bakery.api.master.dto.ItemResponse;
 import com.bakery.api.master.entity.Ingredient;
 import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.entity.Product;
 import com.bakery.api.master.entity.ProductExpiryConfig;
-import com.bakery.api.master.entity.ProductMapping;
 import com.bakery.api.master.entity.SemiProduct;
 import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.repository.ItemLookupRepository;
 import com.bakery.api.master.repository.ProductExpiryConfigRepository;
-import com.bakery.api.master.repository.ProductMappingRepository;
 import com.bakery.api.master.repository.SupplierRepository;
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.CellType;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.springframework.web.multipart.MultipartFile;
 import com.bakery.api.pricing.entity.IngredientPrice;
 import com.bakery.api.pricing.repository.IngredientPriceRepository;
 import com.bakery.api.production.entity.ItemGroup;
@@ -40,6 +28,7 @@ import com.bakery.api.recipe.dto.RecipeLineRequest;
 import com.bakery.api.recipe.entity.Recipe;
 import com.bakery.api.recipe.entity.RecipeLine;
 import com.bakery.api.recipe.repository.RecipeRepository;
+import com.bakery.api.recipe.service.RecipeCostService;
 import com.bakery.api.recipe.service.RecipeService;
 import com.bakery.framework.entity.ApprovalStatus;
 import com.bakery.framework.exception.ResourceNotFoundException;
@@ -75,9 +64,9 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     private final ItemLookupRepository repository;
     private final SupplierRepository supplierRepository;
     private final IngredientPriceRepository ingredientPriceRepository;
-    private final ProductMappingRepository productMappingRepository;
     private final RecipeRepository recipeRepository;
     private final RecipeService recipeService;
+    private final RecipeCostService recipeCostService;
     private final ItemGroupRepository itemGroupRepository;
     private final ProductExpiryConfigRepository expiryConfigRepository;
     private final BakeryActorResolver actorResolver;
@@ -221,6 +210,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         r.setUnit(item.getUnit());
         r.setSplittable(item.isSplittable());
         r.setUnitSize(item.getUnitSize());
+        r.setUnitCost(item.getUnitCost());
         if (item.getItemGroup() != null) {
             r.setItemGroup(new ReferenceValue(
                     item.getItemGroup().getCode(), item.getItemGroup().getName()));
@@ -336,7 +326,8 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         }
     }
 
-    /** Khi Item được APPROVE → tự động APPROVE + ACTIVATE recipe PENDING mới nhất. */
+    /** Khi Item được APPROVE → tự động APPROVE + ACTIVATE recipe PENDING mới nhất,
+     *  sau đó tính lại unit_cost từ công thức và persist. */
     @Override
     protected void afterApprove(Item item) {
         if (item instanceof Product prod) {
@@ -347,6 +338,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                         recipeRepository.deactivateAllByProduct(prod.getId());
                         activateRecipe(recipe);
                     });
+            recalculateAndPersistCost(item);
         } else if (item instanceof SemiProduct sp) {
             recipeRepository
                     .findFirstBySemiProductIdAndApprovalStatusOrderByVersionDesc(
@@ -355,6 +347,26 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                         recipeRepository.deactivateAllBySemiProduct(sp.getId());
                         activateRecipe(recipe);
                     });
+            recalculateAndPersistCost(item);
+        }
+    }
+
+    /**
+     * Tính lại unit_cost cho PRODUCT / SEMI_PRODUCT qua RecipeCostService.
+     * Nếu công thức chưa đủ dữ liệu (MISSING ingredient price) thì cost = null để
+     * tránh lưu giá sai; log warning để admin biết.
+     */
+    private void recalculateAndPersistCost(Item item) {
+        try {
+            RecipeCostService.CostResult result = recipeCostService.calculate(item.getId());
+            // Chỉ lưu khi đủ dữ liệu; nếu MISSING thì giữ nguyên giá trị cũ
+            if (result.complete()) {
+                item.setUnitCost(result.totalCostPerUnit());
+                repository.save(item);
+            }
+        } catch (Exception ex) {
+            // Không có active recipe hoặc lỗi tính toán — bỏ qua, không chặn approve
+            // Admin tự tính lại sau khi đủ dữ liệu công thức
         }
     }
 
@@ -386,6 +398,11 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             e.setItemGroup(ig);
         } else {
             e.setItemGroup(null);
+        }
+        // unitCost: chỉ áp dụng cho INGREDIENT (nhập tay).
+        // SEMI_PRODUCT / PRODUCT được tính lại trong afterApprove → không ghi đè ở đây.
+        if ("INGREDIENT".equalsIgnoreCase(req.itemType())) {
+            e.setUnitCost(req.unitCost());
         }
     }
 

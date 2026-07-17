@@ -104,21 +104,7 @@ public class InventoryRequestService
         }
 
         // Build lines (parent ID not yet assigned — set after beforeCreate/save via cascade)
-        if (req.lines() != null) {
-            for (int i = 0; i < req.lines().size(); i++) {
-                InventoryRequestLineRequest lr = req.lines().get(i);
-                InventoryRequestLine line = new InventoryRequestLine();
-                line.setInventoryRequest(e);
-                line.setItem(itemRepository.findById(lr.itemId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Item", lr.itemId())));
-                line.setQuantity(lr.quantity());
-                line.setUnit(lr.unit());
-                line.setUnitCost(lr.unitCost());
-                line.setSortOrder(lr.sortOrder() != null ? lr.sortOrder() : i + 1);
-                line.setNote(lr.note());
-                e.getLines().add(line);
-            }
-        }
+        buildAndAddLines(e, req.lines());
         return e;
     }
 
@@ -143,21 +129,7 @@ public class InventoryRequestService
 
         // Replace all lines (orphanRemoval cleans up removed ones)
         e.getLines().clear();
-        if (req.lines() != null) {
-            for (int i = 0; i < req.lines().size(); i++) {
-                InventoryRequestLineRequest lr = req.lines().get(i);
-                InventoryRequestLine line = new InventoryRequestLine();
-                line.setInventoryRequest(e);
-                line.setItem(itemRepository.findById(lr.itemId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Item", lr.itemId())));
-                line.setQuantity(lr.quantity());
-                line.setUnit(lr.unit());
-                line.setUnitCost(lr.unitCost());
-                line.setSortOrder(lr.sortOrder() != null ? lr.sortOrder() : i + 1);
-                line.setNote(lr.note());
-                e.getLines().add(line);
-            }
-        }
+        buildAndAddLines(e, req.lines());
     }
 
     @Override
@@ -424,10 +396,6 @@ public class InventoryRequestService
     }
 
     /**
-     * Nếu item không tách lẻ (isSplittable=false) và có unitSize → làm tròn lên bội số gần nhất.
-     * Ví dụ: cần 4kg, unitSize=5 → xuất 5kg. Cần 6kg, unitSize=5 → xuất 10kg.
-     */
-    /**
      * Tất cả phiếu liên quan đến 1 kho (source OR target) theo approvalStatus.
      * Dùng cho tab pending/approved của từng kho trên UI.
      */
@@ -435,6 +403,24 @@ public class InventoryRequestService
         return repository.findByWarehouseAndStatus(warehouseCode, approvalStatusStr.toUpperCase()).stream()
                 .map(this::toResponse)
                 .toList();
+    }
+
+    /** Build lines từ request và gắn vào entity — dùng chung trong toEntity() và applyUpdate(). */
+    private void buildAndAddLines(InventoryRequest e, List<InventoryRequestLineRequest> lines) {
+        if (lines == null) return;
+        for (int i = 0; i < lines.size(); i++) {
+            InventoryRequestLineRequest lr = lines.get(i);
+            InventoryRequestLine line = new InventoryRequestLine();
+            line.setInventoryRequest(e);
+            line.setItem(itemRepository.findById(lr.itemId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Item", lr.itemId())));
+            line.setQuantity(lr.quantity());
+            line.setUnit(lr.unit());
+            line.setUnitCost(lr.unitCost());
+            line.setSortOrder(lr.sortOrder() != null ? lr.sortOrder() : i + 1);
+            line.setNote(lr.note());
+            e.getLines().add(line);
+        }
     }
 
     private BigDecimal roundUpToUnitSize(BigDecimal qty, com.bakery.api.master.entity.Item item) {

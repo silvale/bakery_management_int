@@ -310,11 +310,12 @@ async function loadItems(){
   if(!items.length){wrap.innerHTML='<div class="empty">Không có dữ liệu</div>';return;}
   const showGroup=itemsActiveType==='PRODUCT'&&itemsActiveGroup===null;
   wrap.innerHTML=`<table><thead><tr>
-    ${showGroup?'<th>Nhóm</th>':''}<th>Code</th><th>Tên</th><th>Đơn vị</th><th>Status</th><th></th>
+    ${showGroup?'<th>Nhóm</th>':''}<th>Code</th><th>Tên</th><th>Đơn vị</th><th style="text-align:right">Giá vốn</th><th>Status</th><th></th>
   </tr></thead><tbody>
   ${items.map(i=>`<tr>
     ${showGroup?`<td>${i.itemGroup?.value??i.itemGroup?.name??'<span style="color:#cbd5e1">—</span>'}</td>`:''}
     <td><code>${i.code}</code></td><td>${i.name}</td><td>${i.unit}</td>
+    <td style="text-align:right;color:${i.unitCost?'#0f172a':'#cbd5e1'}">${i.unitCost?fmt(i.unitCost)+'đ':'—'}</td>
     <td>${badge(i.approvalStatus)}</td>
     <td style="white-space:nowrap">
       <button class="btn btn-ghost btn-sm" onclick='nav("item-form",${JSON.stringify(i)})'>Sửa</button>
@@ -361,6 +362,12 @@ async function pageItemForm(item={}){
         <input id="f-shelf" type="number" min="0" value="${item.shelfDays??''}" placeholder="1"></div>
       <div class="field" id="f-ingtype-wrap" style="${item.itemType==='INGREDIENT'?'':'display:none'}">
         <label>Ingredient Type</label><input id="f-ingtype" value="${item.ingredientType??''}" placeholder="DRY, WET..."></div>
+      <div class="field" id="f-unitcost-ing-wrap" style="${item.itemType==='INGREDIENT'?'':'display:none'}">
+        <label>Giá vốn (đ/đvt) <small style="color:#94a3b8">Nhập tay</small></label>
+        <input id="f-unitcost" type="number" min="0" step="1" value="${item.unitCost??''}" placeholder="0"></div>
+      <div class="field" id="f-unitcost-ro-wrap" style="${(item.itemType==='PRODUCT'||item.itemType==='SEMI_PRODUCT')&&item.unitCost?'':'display:none'}">
+        <label>Giá vốn (đ/đvt) <small style="color:#94a3b8">Tính từ công thức</small></label>
+        <input value="${item.unitCost?fmt(item.unitCost)+'đ':'—'}" readonly style="background:#f8fafc;color:#475569"></div>
       <div class="field" style="display:flex;align-items:center;gap:12px">
         <label style="margin:0"><input type="checkbox" id="f-splittable" ${item.splittable===false?'':'checked'} style="margin-right:6px">Có thể xuất lẻ</label>
         <div style="display:flex;align-items:center;gap:6px">
@@ -392,6 +399,8 @@ function onItemTypeChange(){
   const t=document.getElementById('f-type').value;
   document.getElementById('f-shelf-wrap').style.display=t==='PRODUCT'?'':'none';
   document.getElementById('f-ingtype-wrap').style.display=t==='INGREDIENT'?'':'none';
+  document.getElementById('f-unitcost-ing-wrap').style.display=t==='INGREDIENT'?'':'none';
+  document.getElementById('f-unitcost-ro-wrap').style.display=(t==='PRODUCT'||t==='SEMI_PRODUCT')?'':'none';
   document.getElementById('recipe-section').style.display=(t==='PRODUCT'||t==='SEMI_PRODUCT')?'':'none';
 }
 function renderRL(){
@@ -423,6 +432,7 @@ async function saveItem(id){
     splittable:document.getElementById('f-splittable')?.checked??true,
     unitSize:document.getElementById('f-unitsize')?.value?+document.getElementById('f-unitsize').value:null,
     ingredientType:document.getElementById('f-ingtype')?.value.trim()||null,
+    unitCost:itemType==='INGREDIENT'&&document.getElementById('f-unitcost')?.value?+document.getElementById('f-unitcost').value:null,
     shelfDays:document.getElementById('f-shelf')?.value!==''&&document.getElementById('f-shelf')?.value!=null?+document.getElementById('f-shelf').value:null,
     recipeNote:document.getElementById('f-rnote')?.value||null,
     recipeLines:recipeLines.filter(l=>l.itemId).map(l=>({itemId:l.itemId,quantity:+l.qty,unit:l.unit,sortOrder:l.sort}))};

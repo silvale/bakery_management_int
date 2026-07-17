@@ -1,7 +1,7 @@
 package com.bakery.api.production.service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
+
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -397,9 +397,6 @@ public class ProductionRequestService
 
     // ── Business actions ─────────────────────────────────────────
 
-    /**
-     * Bếp bấm "Completed" trên 1 line → tạo DeliveryRecord(READY) + StockLot bánh thành phẩm.
-     */
     /**
      * Bếp bấm "Completed" trên 1 line → tạo DeliveryRecord(READY) + StockLot bánh thành phẩm.
      *

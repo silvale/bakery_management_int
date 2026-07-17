@@ -16,7 +16,9 @@ import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.master.entity.Ingredient;
 import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.entity.SemiProduct;
+import com.bakery.api.master.entity.UnitConversion;
 import com.bakery.api.master.repository.ItemLookupRepository;
+import com.bakery.api.master.repository.UnitConversionRepository;
 import com.bakery.api.pricing.entity.IngredientPrice;
 import com.bakery.api.pricing.repository.IngredientPriceRepository;
 import com.bakery.api.recipe.entity.Recipe;
@@ -52,6 +54,7 @@ public class RecipeCostService {
     private final IngredientPriceRepository ingredientPriceRepository;
     private final StockLotRepository stockLotRepository;
     private final ItemLookupRepository itemRepository;
+    private final UnitConversionRepository unitConversionRepository;
 
     // ── Public API ────────────────────────────────────────────────
 
@@ -114,22 +117,36 @@ public class RecipeCostService {
             } else {
                 // Ingredient (hoặc Product dùng trong recipe — hiếm nhưng không block)
                 PriceResolution resolved = resolveIngredientPrice(lineItem.getId());
-                BigDecimal lineCost = resolved.unitPrice()
+
+                // Quy đổi đơn vị: line.unit (đvt công thức) → item.unit (đvt giá nhập)
+                String lineUnit  = line.getUnit();
+                String itemUnit  = lineItem.getUnit();
+                ConversionResult conv = resolveConversionFactor(lineUnit, itemUnit);
+
+                // cost = qty(line_unit) × factor(line→item) × unit_cost(per item_unit)
+                BigDecimal effectiveUnitPrice = resolved.unitPrice().multiply(conv.factor());
+                BigDecimal lineCost = effectiveUnitPrice
                         .multiply(qty)
                         .setScale(COST_SCALE, RoundingMode.HALF_UP);
+
+                String source = resolved.source().equals("MISSING")
+                        ? "MISSING"
+                        : conv.source().equals("UNIT_MISMATCH")
+                                ? "UNIT_MISMATCH"
+                                : resolved.source();
 
                 breakdown.add(new LineCost(
                         lineItem.getCode(),
                         lineItem.getName(),
                         lineItem instanceof Ingredient ? "INGREDIENT" : "OTHER",
                         qty,
-                        line.getUnit(),
-                        resolved.unitPrice(),
+                        lineUnit,
+                        effectiveUnitPrice,
                         lineCost,
-                        resolved.source(),
+                        source,
                         List.of()
                 ));
-                if (resolved.source().equals("MISSING")) complete = false;
+                if (source.equals("MISSING") || source.equals("UNIT_MISMATCH")) complete = false;
             }
         }
 
@@ -248,4 +265,30 @@ public class RecipeCostService {
 
     /** Nội bộ: kết quả tra giá 1 nguyên liệu. */
     private record PriceResolution(BigDecimal unitPrice, String source) {}
+
+    /** Nội bộ: kết quả tra bảng unit_conversion. */
+    private record ConversionResult(BigDecimal factor, String source) {}
+
+    // ── Unit conversion ───────────────────────────────────────────
+
+    /**
+     * Tra hệ số quy đổi từ {@code lineUnit} (đơn vị công thức) sang {@code itemUnit} (đơn vị giá).
+     *
+     * <ul>
+     *   <li>Cùng đơn vị → factor = 1, source = "SAME_UNIT"</li>
+     *   <li>Tìm thấy trong bảng → factor, source = "CONVERTED"</li>
+     *   <li>Không tìm thấy → factor = 1, source = "UNIT_MISMATCH" (đánh dấu cost không chính xác)</li>
+     * </ul>
+     */
+    private ConversionResult resolveConversionFactor(String lineUnit, String itemUnit) {
+        if (lineUnit == null || itemUnit == null) {
+            return new ConversionResult(BigDecimal.ONE, "UNIT_MISMATCH");
+        }
+        if (lineUnit.equalsIgnoreCase(itemUnit)) {
+            return new ConversionResult(BigDecimal.ONE, "SAME_UNIT");
+        }
+        return unitConversionRepository.findConversion(lineUnit, itemUnit)
+                .map(uc -> new ConversionResult(uc.getFactor(), "CONVERTED"))
+                .orElse(new ConversionResult(BigDecimal.ONE, "UNIT_MISMATCH"));
+    }
 }

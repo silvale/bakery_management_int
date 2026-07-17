@@ -82,36 +82,7 @@ public class ProductionPlannerService {
         plan.setDayType(dayType);
         plan.setApprovalStatus(ApprovalStatus.DRAFT);
 
-        List<ProductionPlanLine> lines = new ArrayList<>();
-        Set<UUID> groupedItemIds = new HashSet<>();
-        List<ProductionGroup> activeGroups = groupRepository.findByActiveTrue();
-        for (ProductionGroup group : activeGroups) {
-            group.getItems().forEach(gi -> groupedItemIds.add(gi.getItem().getId()));
-        }
-
-        int sortOrder = 0;
-        for (ProductionGroup group : activeGroups) {
-            if ("FREE_GROUP".equals(group.getGroupType())) {
-                lines.addAll(buildFreeGroupLines(plan, group, dayType, emptyRemaining, sortOrder));
-            } else if ("BATCH_FORMULA".equals(group.getGroupType())) {
-                lines.addAll(buildBatchFormulaLines(plan, group, emptyRemaining, sortOrder));
-            }
-            sortOrder += group.getItems().size() + 1;
-        }
-
-        List<Item> allProducts = itemRepository.findAllProducts().stream()
-                .filter(i -> !groupedItemIds.contains(i.getId()))
-                .toList();
-
-        for (Item item : allProducts) {
-            List<ProductionThresholdRule> rules = ruleRepository
-                    .findByItemIdAndDayTypeOrderBySortOrderAsc(item.getId(), dayType);
-            if (rules.isEmpty()) continue;
-            ProductionPlanLine line = buildSimpleLine(plan, item, BigDecimal.ZERO, rules, sortOrder++);
-            if (line != null) lines.add(line);
-        }
-
-        plan.getLines().addAll(lines);
+        plan.getLines().addAll(buildLinesFromScratch(plan, dayType));
         ProductionPlan saved = planRepository.save(plan);
         initPlanLines(saved);
         return saved;
@@ -404,6 +375,19 @@ public class ProductionPlannerService {
         plan.setRejectedReason(null);
 
         // Tạo lại lines với tồn kho = 0 (giống generateForDate)
+        plan.getLines().addAll(buildLinesFromScratch(plan, dayType));
+        ProductionPlan saved = planRepository.save(plan);
+        initPlanLines(saved);
+        return saved;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Tạo toàn bộ lines cho plan từ đầu, giả sử tồn kho = 0.
+     * Dùng chung cho generateForDate() và regenerateRejected().
+     */
+    private List<ProductionPlanLine> buildLinesFromScratch(ProductionPlan plan, DayType dayType) {
         Map<UUID, BigDecimal> emptyRemaining = Map.of();
         List<ProductionPlanLine> lines = new ArrayList<>();
         Set<UUID> groupedItemIds = new HashSet<>();
@@ -434,13 +418,8 @@ public class ProductionPlannerService {
             if (line != null) lines.add(line);
         }
 
-        plan.getLines().addAll(lines);
-        ProductionPlan saved = planRepository.save(plan);
-        initPlanLines(saved);
-        return saved;
+        return lines;
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
      * Force-initialize tất cả lazy proxies bên trong plan.lines trong khi còn trong transaction.
