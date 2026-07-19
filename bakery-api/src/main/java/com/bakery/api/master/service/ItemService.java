@@ -87,6 +87,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     // ── Framework wiring ──────────────────────────────────────────────────────
 
     @Override protected BaseRepository<Item> getRepository() { return repository; }
+    @Override public Class<Item> getEntityClass() { return Item.class; }
     @Override protected BakeryActorResolver getActorResolver() { return actorResolver; }
     @Override protected CommandRequestRepository getCommandRequestRepository() { return commandRequestRepository; }
     @Override protected String getEntityName() { return "Item"; }

@@ -23,6 +23,9 @@ public class ProductionGroupResponse extends BaseResponse {
     private Integer targetWeekday;
     private Integer targetWeekend;
     private Integer thresholdPercent;
+    /** Base recipe cho nhóm FREE_GROUP: id + tên để hiển thị trên UI. */
+    private UUID baseRecipeId;
+    private String baseRecipeName;
     private Integer batchWeightGrams;
     private String note;
     private boolean active;
@@ -60,6 +63,13 @@ public class ProductionGroupResponse extends BaseResponse {
         r.setTargetWeekday(e.getTargetWeekday());
         r.setTargetWeekend(e.getTargetWeekend());
         r.setThresholdPercent(e.getThresholdPercent());
+        if (e.getBaseRecipe() != null) {
+            r.setBaseRecipeId(e.getBaseRecipe().getId());
+            String rName = null;
+            if (e.getBaseRecipe().getProduct() != null) rName = e.getBaseRecipe().getProduct().getName();
+            else if (e.getBaseRecipe().getSemiProduct() != null) rName = e.getBaseRecipe().getSemiProduct().getName();
+            r.setBaseRecipeName(rName != null ? rName : "Recipe #" + e.getBaseRecipe().getId().toString().substring(0, 8));
+        }
         r.setBatchWeightGrams(e.getBatchWeightGrams());
         r.setNote(e.getNote());
         r.setActive(e.isActive());

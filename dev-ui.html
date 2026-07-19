@@ -830,8 +830,13 @@ function jumpToRuleItem(itemId){
 // PRODUCTION GROUPS
 // ══════════════════════════════════════════════════════════════════════════════
 let pgItems=[];
+let allRecipes=[];
+async function loadAllRecipes(){
+  if(allRecipes.length)return;
+  try{const r=await api('GET','/api/v1/recipes/all');allRecipes=Array.isArray(r)?r:(r.content??[]);}catch(_){allRecipes=[];}
+}
 async function pageProdGroups(){
-  await Promise.all([loadAllItems(), loadAllItemGroups()]);
+  await Promise.all([loadAllItems(), loadAllItemGroups(), loadAllRecipes()]);
   const groups=allItemGroups;
   pgItems=[];
   document.getElementById('content').innerHTML=`
@@ -855,6 +860,13 @@ async function pageProdGroups(){
           <div class="field"><label>Target Weekend</label><input id="pg-twe" type="number" placeholder="50"></div>
           <div class="field"><label>Ngưỡng tồn % <small style="color:#94a3b8">(tuỳ chọn)</small></label>
             <input id="pg-thresh" type="number" min="1" max="100" placeholder="50 = chỉ SX khi còn &lt;50% target"></div>
+        </div>
+        <div class="field" style="margin-top:8px">
+          <label>Công thức base <small style="color:#94a3b8">(dùng để tính NL khi chưa phân bổ từng flavor)</small></label>
+          <select id="pg-base-recipe">
+            <option value="">-- Không có --</option>
+            ${allRecipes.map(r=>`<option value="${r.id}">${r.product?.name??r.semiProduct?.name??r.id}</option>`).join('')}
+          </select>
         </div>
       </div>
       <div id="pg-batch" class="form-full" style="display:none">
@@ -918,6 +930,7 @@ function editPG(id){
   document.getElementById('pg-tw').value=g.targetWeekday??'';
   document.getElementById('pg-twe').value=g.targetWeekend??'';
   document.getElementById('pg-thresh').value=g.thresholdPercent??'';
+  document.getElementById('pg-base-recipe').value=g.baseRecipeId??'';
   document.getElementById('pg-bw').value=g.batchWeightGrams??'';
   document.getElementById('pg-note').value=g.note??'';
   pgItems=(g.items??[]).map(gi=>{
@@ -933,7 +946,7 @@ function editPG(id){
 
 function clearPgForm(){
   document.getElementById('pg-edit-id').value='';
-  ['pg-code','pg-name','pg-tw','pg-twe','pg-thresh','pg-bw','pg-note'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['pg-code','pg-name','pg-tw','pg-twe','pg-thresh','pg-base-recipe','pg-bw','pg-note'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   document.getElementById('pg-type').value='FREE_GROUP';
   document.getElementById('pg-ig').value='';
   pgItems=[];renderPgItems();onPgType();
@@ -949,6 +962,7 @@ async function savePG(){
     targetWeekday:document.getElementById('pg-tw')?.value?+document.getElementById('pg-tw').value:null,
     targetWeekend:document.getElementById('pg-twe')?.value?+document.getElementById('pg-twe').value:null,
     thresholdPercent:document.getElementById('pg-thresh')?.value?+document.getElementById('pg-thresh').value:null,
+    baseRecipeId:document.getElementById('pg-base-recipe')?.value||null,
     batchWeightGrams:document.getElementById('pg-bw')?.value?+document.getElementById('pg-bw').value:null,
     note:document.getElementById('pg-note').value||null,
     items:pgItems.filter(i=>i.itemId).map(i=>({itemId:i.itemId,gramsPerUnit:i.g??null,sortOrder:i.s??0}))};
@@ -1331,6 +1345,7 @@ function renderPlan(plan){
           <button class="btn btn-danger" onclick="rejectPlanPrompt('${plan.id}')">❌ Reject</button>`:''}
         ${plan.approvalStatus==='REJECTED'?`<button class="btn btn-ghost" onclick="regeneratePlan('${plan.id}')">🔄 Tạo lại</button>`:''}
         ${plan.approvalStatus==='APPROVED'?`<button class="btn btn-ghost" onclick="generatePRFromPlan('${plan.id}')">📋 Tạo phiếu SX</button>`:''}
+        <button class="btn btn-ghost" onclick="checkIngredients('${plan.id}')">🔬 Kiểm tra NL</button>
       </div>
     </div>
     <table><thead><tr>
@@ -1338,7 +1353,8 @@ function renderPlan(plan){
       <th>Điều chỉnh</th><th>Ghi chú rule</th>
     </tr></thead>
     <tbody>${rows}</tbody></table>
-  </div>`;
+  </div>
+  <div id="ingredient-panel"></div>`;
   // Init badge với giá trị hiện tại (nếu nhân viên đã nhập trước đó)
   setTimeout(()=>{
     const groupKeys=[...new Set(
@@ -1396,8 +1412,24 @@ async function approvePlan(id){
     toast('Tổng số lượng nhóm FREE_GROUP phải bằng đúng target (hoặc bỏ trống toàn bộ nhóm)','err');
     return;
   }
-  await api('POST',`/api/v1/production/plans/${id}/approve`);toast('Đã approve kế hoạch');loadPlanList();
-  const plan=await api('GET',`/api/v1/production/plans/${id}`);renderPlan(plan);
+  const approveRes=await api('POST',`/api/v1/production/plans/${id}/approve`);
+  loadPlanList();
+  const plan=approveRes?.plan??approveRes;
+  if(plan)renderPlan(plan);
+  // Hiển thị cảnh báo NL thiếu (không vào được phiếu TRANSFER)
+  if(approveRes?.nlWarning && approveRes.nlShortage?.length){
+    const names=approveRes.nlShortage.map(s=>s.itemName||s.itemCode).join(', ');
+    const panel=document.getElementById('ingredient-panel');
+    const warn=`<div style="margin-top:10px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:14px 16px">
+      <strong>⚠️ ${approveRes.nlShortage.length} NL thiếu — chưa vào phiếu TRANSFER:</strong><br>
+      <span style="color:#92400e">${names}</span><br>
+      <small style="color:#78350f">Nhập kho MAIN cho các NL này, sau đó tạo phiếu TRANSFER bổ sung.</small>
+    </div>`;
+    if(panel)panel.innerHTML=warn;
+    toast(`⚠️ Đã duyệt nhưng ${approveRes.nlShortage.length} NL thiếu tồn MAIN`,'err');
+  } else {
+    toast('Đã approve kế hoạch. Phiếu SX và TRANSFER đã tạo tự động.');
+  }
 }
 async function regeneratePlan(id){
   if(!confirm('Xóa kế hoạch đã REJECTED và tạo lại DRAFT mới?'))return;
@@ -1418,6 +1450,116 @@ async function rejectPlanPrompt(id){
   await api('POST',`/api/v1/production/plans/${id}/reject?reason=${encodeURIComponent(reason)}`);
   toast('Đã reject');loadPlanList();
   const plan=await api('GET',`/api/v1/production/plans/${id}`);renderPlan(plan);
+}
+
+async function checkIngredients(planId){
+  const panel=document.getElementById('ingredient-panel');
+  if(!panel)return;
+  panel.innerHTML=`<div class="card"><div class="empty">Đang kiểm tra nguyên liệu...</div></div>`;
+  let res;
+  try{ res=await api('GET',`/api/v1/production/plans/${planId}/ingredient-check`); }
+  catch(e){ panel.innerHTML=`<div class="card"><div class="empty" style="color:#dc2626">Lỗi: ${e.message??e}</div></div>`; return; }
+
+  const {allSufficient,sufficient=[],shortage=[],planDate}=res;
+
+  function nlRow(r,isShortage){
+    const pct=r.available>0?(r.needed/r.available*100).toFixed(0):'—';
+    return `<tr>
+      <td><strong>${r.itemCode}</strong></td>
+      <td>${r.itemName}</td>
+      <td style="text-align:right">${fmt(r.needed)} ${r.unit}</td>
+      <td style="text-align:right">${fmt(r.available)} ${r.unit}</td>
+      ${isShortage
+        ?`<td style="text-align:right;color:#dc2626;font-weight:600">⚠️ Thiếu ${fmt(r.shortage)} ${r.unit}</td>`
+        :`<td style="text-align:right;color:#059669">✓ Đủ (${pct}%)</td>`}
+    </tr>`;
+  }
+
+  const shortageTable=shortage.length?`
+    <div style="margin-top:12px">
+      <div style="color:#dc2626;font-weight:600;margin-bottom:6px">⚠️ Thiếu ${shortage.length} nguyên liệu — cần nhập kho MAIN trước khi xuất:</div>
+      <table><thead><tr><th>Mã</th><th>Tên NL</th><th>Cần</th><th>Tồn MAIN</th><th>Tình trạng</th></tr></thead>
+      <tbody>${shortage.map(r=>nlRow(r,true)).join('')}</tbody></table>
+    </div>`:'';
+
+  const sufficientTable=sufficient.length?`
+    <div style="margin-top:12px">
+      <div style="color:#059669;font-weight:600;margin-bottom:6px">✅ ${sufficient.length} nguyên liệu đủ:</div>
+      <table><thead><tr><th>Mã</th><th>Tên NL</th><th>Cần</th><th>Tồn MAIN</th><th>Tình trạng</th></tr></thead>
+      <tbody>${sufficient.map(r=>nlRow(r,false)).join('')}</tbody></table>
+    </div>`:'';
+
+  const banner=allSufficient
+    ?`<div style="background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:10px 14px;color:#15803d;font-weight:600">
+        ✅ Tất cả nguyên liệu đủ để sản xuất kế hoạch ngày ${planDate}
+      </div>`
+    :`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:10px 14px;color:#dc2626;font-weight:600">
+        ⚠️ Nguyên liệu CHƯA ĐỦ — cần nhập thêm trước khi xuất kho
+      </div>`;
+
+  // Flow: thiếu → Nhập vào MAIN trước; đủ → Xuất MAIN→KITCHEN
+  const actionBtns=(!sufficient.length&&!shortage.length)
+    ?'<div class="empty">Không có nguyên liệu — kiểm tra công thức sản phẩm</div>'
+    :`<div style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:12px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;line-height:1.6">
+        <strong>Flow chuẩn:</strong><br>
+        1️⃣ Nếu thiếu NL → <strong>Tạo Phiếu Nhập</strong> vào kho MAIN (supplier giao hàng)<br>
+        2️⃣ Sau khi nhập xong, MAIN đủ → <strong>Tạo Phiếu Xuất</strong> MAIN→KITCHEN để bếp nhận
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        ${shortage.length?`<button class="btn btn-warning" onclick="generatePurchase('${planId}')">📥 Tạo Phiếu Nhập Kho MAIN (${shortage.length} NL thiếu)</button>`:''}
+        <button class="btn btn-primary" ${!allSufficient?'style="opacity:0.5" title="Cần nhập đủ NL vào MAIN trước"':''} onclick="generateTransfer('${planId}')">🚚 Tạo Phiếu Xuất MAIN→KITCHEN</button>
+      </div>
+    </div>`;
+
+  panel.innerHTML=`<div class="card" style="margin-top:0">
+    <div class="card-title">🔬 Kiểm tra Nguyên Liệu — Kế hoạch ${planDate}</div>
+    ${banner}
+    ${shortageTable}
+    ${sufficientTable}
+    ${actionBtns}
+    <div id="transfer-result"></div>
+  </div>`;
+}
+
+async function generatePurchase(planId){
+  const btn=event.target;
+  btn.disabled=true; btn.textContent='Đang tạo...';
+  try{
+    const res=await api('POST',`/api/v1/production/plans/${planId}/generate-purchase`);
+    const el=document.getElementById('transfer-result');
+    if(el) el.innerHTML=`<div style="margin-top:12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:12px 16px">
+      <strong>📥 Đã tạo phiếu nhập kho!</strong><br>
+      Mã phiếu: <code style="background:#fff;border:1px solid #d1d5db;padding:2px 8px;border-radius:4px;font-size:13px">${res.purchaseCode}</code>
+      &nbsp;·&nbsp; ${res.lineCount} nguyên liệu cần nhập
+      &nbsp;·&nbsp; Trạng thái: <strong>${res.status}</strong><br>
+      <span style="font-size:12px;color:#64748b;margin-top:4px;display:block">→ Vào Phiếu Nhập Kho để duyệt và nhận hàng vào MAIN. Sau khi nhập xong, quay lại tạo Phiếu Xuất MAIN→KITCHEN</span>
+    </div>`;
+    toast(`Đã tạo phiếu nhập ${res.purchaseCode} (${res.lineCount} NL)`);
+  } catch(e){
+    toast(`Lỗi: ${e.message??e}`,'err');
+    btn.disabled=false; btn.textContent='📥 Tạo Phiếu Nhập Kho MAIN';
+  }
+}
+
+async function generateTransfer(planId){
+  const btn=event.target;
+  btn.disabled=true; btn.textContent='Đang tạo...';
+  try{
+    const res=await api('POST',`/api/v1/production/plans/${planId}/generate-transfer`);
+    const el=document.getElementById('transfer-result');
+    if(el) el.innerHTML=`<div style="margin-top:12px;background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:12px 16px">
+      <strong>✅ Đã tạo phiếu xuất kho!</strong><br>
+      Mã phiếu: <code style="background:#fff;border:1px solid #d1d5db;padding:2px 8px;border-radius:4px;font-size:13px">${res.transferCode}</code>
+      &nbsp;·&nbsp; ${res.lineCount} nguyên liệu
+      &nbsp;·&nbsp; Trạng thái: <strong>${res.status}</strong><br>
+      <span style="font-size:12px;color:#64748b;margin-top:4px;display:block">→ Vào Phiếu Xuất Kho để duyệt và bếp nhận hàng</span>
+    </div>`;
+    toast(`Đã tạo phiếu xuất ${res.transferCode} (${res.lineCount} NL)`);
+  } catch(e){
+    toast(`Lỗi: ${e.message??e}`,'err');
+    btn.disabled=false; btn.textContent='🚚 Tạo Phiếu Xuất MAIN→KITCHEN';
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2325,14 +2467,24 @@ function renderCancelList(report,rows){
     <table style="width:100%;font-size:13px">
       <thead><tr>
         <th style="min-width:140px">Sản phẩm</th>
+        <th style="color:#dc2626;font-size:11px">Mã cần hủy (EX_CODE)</th>
         <th style="text-align:right;color:#2563eb">Nhận trong ngày</th>
-        <th style="text-align:right;color:#7c3aed">Còn lại cuối ngày</th>
-        <th style="text-align:right;color:#dc2626">Số lượng hủy</th>
-        <th style="color:#64748b;font-size:11px">Ghi chú</th>
+        <th style="text-align:right;color:#7c3aed">Tồn cuối ngày<br><small style="font-weight:400;color:#94a3b8">(HT dự kiến hủy)</small></th>
+        <th style="text-align:right;color:#dc2626">NV nhập hủy</th>
+        <th style="text-align:right;color:#64748b;font-size:11px">Lệch hủy<br><small style="font-weight:400">(NV − HT)</small></th>
       </tr></thead>
       <tbody>
-      ${rows.map(r=>`<tr>
+      ${rows.map(r=>{
+        const diff=r.discrepancyCancelQty!=null?+r.discrepancyCancelQty
+          :(r.qtyCancelled!=null&&r.qtyRemainingActual!=null?+r.qtyCancelled-+r.qtyRemainingActual:null);
+        const diffCell=diff==null?'<span style="color:#94a3b8">—</span>'
+          :diff===0?'<span style="color:#059669;font-size:11px">✓ Khớp</span>'
+          :diff<0?`<span style="color:#dc2626;font-weight:600" title="Hủy ít hơn HT ${fmt(Math.abs(diff))}">▼ ${fmt(Math.abs(diff))}</span>`
+          :`<span style="color:#f59e0b;font-weight:600" title="Hủy nhiều hơn HT ${fmt(diff)}">▲ ${fmt(diff)}</span>`;
+        const exCodes=(r.expiringExCodes??[]).map(ec=>`<code style="background:#fee2e2;color:#991b1b;padding:1px 5px;border-radius:3px;font-size:11px;margin:1px;display:inline-block">${ec}</code>`).join(' ');
+        return`<tr>
         <td><strong>${r.itemName}</strong><br><small style="color:#94a3b8">${r.itemCode}</small></td>
+        <td>${exCodes||'<span style="color:#94a3b8;font-size:11px">—</span>'}</td>
         <td style="text-align:right;color:#2563eb">${r.qtyReceived!=null?fmt(r.qtyReceived):'—'}</td>
         <td style="text-align:right;color:#7c3aed">${r.qtyRemainingActual!=null?fmt(r.qtyRemainingActual):'<span style="color:#f59e0b">chưa nhập</span>'}</td>
         <td style="text-align:right">
@@ -2346,8 +2498,8 @@ function renderCancelList(report,rows){
                 onkeydown="if(event.key==='Enter'){this.blur()}">`
           }
         </td>
-        <td style="font-size:11px;color:#64748b">${r.qtyCancelled!=null&&r.qtyRemainingActual!=null&&r.qtyCancelled!=r.qtyRemainingActual?'⚠️ Khác tồn':'✓'}</td>
-      </tr>`).join('')}
+        <td style="text-align:right">${diffCell}</td>
+      </tr>`;}).join('')}
       </tbody>
     </table>
     </div>
@@ -2447,27 +2599,36 @@ function renderHuyBanh(report,rows){
     <table style="width:100%;font-size:13px">
       <thead><tr>
         <th style="min-width:160px">Sản phẩm</th>
+        <th style="color:#dc2626;font-size:11px">Mã cần hủy (EX_CODE)</th>
         <th style="text-align:right;color:#2563eb">Nhận trong ngày</th>
-        <th style="text-align:right;color:#7c3aed">Còn lại cuối ngày</th>
-        <th style="text-align:right;color:#dc2626">Số lượng hủy</th>
+        <th style="text-align:right;color:#7c3aed">Tồn cuối ngày<br><small style="font-weight:400;color:#94a3b8">(HT dự kiến hủy)</small></th>
+        <th style="text-align:right;color:#dc2626">NV nhập hủy</th>
+        <th style="text-align:right;color:#64748b;font-size:11px">Lệch hủy<br><small style="font-weight:400">(NV − HT)</small></th>
         <th style="text-align:center;color:#64748b">Trạng thái</th>
       </tr></thead>
       <tbody>
       ${rows.map(r=>{
-        const diffRem=r.qtyCancelled!=null&&r.qtyRemainingActual!=null&&+r.qtyCancelled!==+r.qtyRemainingActual;
+        const diff=r.discrepancyCancelQty!=null?+r.discrepancyCancelQty
+          :(r.qtyCancelled!=null&&r.qtyRemainingActual!=null?+r.qtyCancelled-+r.qtyRemainingActual:null);
+        const diffCell=diff==null?'<span style="color:#94a3b8">—</span>'
+          :diff===0?'<span style="color:#059669;font-size:12px">✓ Khớp</span>'
+          :diff<0?`<span style="color:#dc2626;font-weight:600;font-size:12px" title="Hủy ít hơn HT ${fmt(Math.abs(diff))}">▼ ${fmt(Math.abs(diff))}</span>`
+          :`<span style="color:#f59e0b;font-weight:600;font-size:12px" title="Hủy nhiều hơn HT ${fmt(diff)}">▲ ${fmt(diff)}</span>`;
         const statusTag=r.qtyCancelled!=null
-          ?(diffRem?`<span style="color:#f59e0b;font-size:11px">⚠️ Khác tồn</span>`:`<span style="color:#059669;font-size:11px">✓ Đã nhập</span>`)
+          ?(diff===0?`<span style="color:#059669;font-size:11px">✓ Đã nhập</span>`:`<span style="color:#f59e0b;font-size:11px">⚠️ Lệch</span>`)
           :(r.qtyRemainingActual!=null?`<span style="color:#f59e0b;font-size:11px">Chưa nhập hủy</span>`:`<span style="color:#94a3b8;font-size:11px">Chưa có tồn</span>`);
         const expiryDates=(r.expiringProductionDates??[]).map(d=>{
           const exp=new Date(d);exp.setDate(exp.getDate()+(r.shelfDays??0));
           return`SX ${d} + ${r.shelfDays}ngày → HSD ${exp.toISOString().slice(0,10)}`;
         }).join(', ');
+        const exCodes=(r.expiringExCodes??[]).map(ec=>`<code style="background:#fee2e2;color:#991b1b;padding:1px 5px;border-radius:3px;font-size:11px;margin:1px;display:inline-block">${ec}</code>`).join(' ');
         return`<tr>
         <td>
           <strong>${r.itemName}</strong><br>
           <small style="color:#94a3b8">${r.itemCode}</small>
           ${expiryDates?`<br><small style="color:#dc2626;font-size:10px">${expiryDates}</small>`:''}
         </td>
+        <td>${exCodes||'<span style="color:#94a3b8;font-size:11px">—</span>'}</td>
         <td style="text-align:right;color:#2563eb">${r.qtyReceived!=null?fmt(r.qtyReceived):'—'}</td>
         <td style="text-align:right;color:#7c3aed">${r.qtyRemainingActual!=null?`<strong>${fmt(r.qtyRemainingActual)}</strong>`:'<span style="color:#f59e0b">chưa nhập</span>'}</td>
         <td style="text-align:right">
@@ -2481,6 +2642,7 @@ function renderHuyBanh(report,rows){
                 onkeydown="if(event.key==='Enter'){this.blur()}">`
           }
         </td>
+        <td style="text-align:right">${diffCell}</td>
         <td style="text-align:center">${statusTag}</td>
       </tr>`;}).join('')}
       </tbody>

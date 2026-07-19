@@ -28,6 +28,7 @@ import com.bakery.api.production.entity.DeliveryRecord;
 import com.bakery.api.production.entity.ProductionAdjustment;
 import com.bakery.api.production.entity.ProductionRequest;
 import com.bakery.api.production.entity.ProductionRequestLine;
+import com.bakery.api.master.repository.UnitConversionRepository;
 import com.bakery.api.production.repository.DeliveryRecordRepository;
 import com.bakery.api.production.repository.ProductionAdjustmentRepository;
 import com.bakery.api.production.repository.ProductionRequestRepository;
@@ -82,18 +83,25 @@ public class ProductionRequestService
     private final DeliveryRecordRepository deliveryRecordRepository;
     private final ProductionAdjustmentRepository adjustmentRepository;
     private final CommandRequestRepository commandRequestRepository;
+    private final UnitConversionRepository unitConversionRepository;
     private final BakeryActorResolver actorResolver;
 
     // ── Framework wiring ─────────────────────────────────────────
 
     @Override protected BaseRepository<ProductionRequest> getRepository() { return repository; }
+    @Override public Class<ProductionRequest> getEntityClass() { return ProductionRequest.class; }
     @Override protected BakeryActorResolver getActorResolver() { return actorResolver; }
     @Override protected CommandRequestRepository getCommandRequestRepository() { return commandRequestRepository; }
     @Override protected String getEntityName() { return "ProductionRequest"; }
 
     /**
      * PR sinh từ plan được lưu với DRAFT (default BaseEntity).
-     * Override để chấp nhận cả DRAFT và PENDING_APPROVAL → APPROVED.
+     * Override để chấp nhận cả DRAFT và PENDING_APPROVAL → APPROVED,
+     * sau đó gọi afterApprove() để trừ NL từ kho KITCHEN theo recipe.
+     *
+     * <p>Lưu ý flow chuẩn:
+     * 1. Approve TRANSFER MAIN→KITCHEN trước (MAIN giảm, KITCHEN tăng NL)
+     * 2. Approve phiếu SX (bước này) → KITCHEN giảm NL, bếp bắt đầu làm
      */
     @Override
     @org.springframework.transaction.annotation.Transactional
@@ -107,7 +115,10 @@ public class ProductionRequestService
         e.setApprovalStatus(ApprovalStatus.APPROVED);
         e.setApprovedAt(java.time.Instant.now());
         e.setApprovedBy(actorResolver.currentUserId());
-        return toResponse(repository.save(e));
+        ProductionRequest saved = repository.save(e);
+        // Trừ NL kho KITCHEN theo recipe × qty — PHẢI gọi sau khi save để có ID
+        afterApprove(saved);
+        return toResponse(saved);
     }
 
     /**
@@ -339,23 +350,30 @@ public class ProductionRequestService
     }
 
     /**
-     * APPROVE: FIFO deduct nguyên liệu từ kho KITCHEN theo recipe × plannedQty mỗi line.
+     * Approve phiếu SX: chỉ đổi trạng thái — KHÔNG trừ NL ở đây.
+     *
+     * <p>NL sẽ bị trừ tại {@link #completeLine} khi bếp hoàn thành sản xuất
+     * và {@code qtyProduced} đã rõ. Lúc đó TRANSFER MAIN→KITCHEN đã được duyệt
+     * nên KITCHEN có đủ hàng để trừ.
      */
     @Override
     protected void afterApprove(ProductionRequest e) {
-        Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
-                .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
+        // No-op: NL deduct moved to completeLine()
+    }
 
-        for (ProductionRequestLine line : e.getLines()) {
-            Recipe recipe = resolveRecipe(line);
-            if (recipe == null) continue;
-
-            List<RecipeLine> recipeLines = recipeLineRepository.findByRecipeIdOrderBySortOrderAsc(recipe.getId());
-            for (RecipeLine rl : recipeLines) {
-                BigDecimal needed = rl.getQuantity().multiply(line.getPlannedQty());
-                deductFromKitchen(needed, rl.getItem().getId(), kitchen, e);
-            }
-        }
+    /**
+     * Tra hệ số quy đổi từ {@code lineUnit} (đvt công thức) sang {@code itemUnit} (đvt kho).
+     * G→KG = 0.001. Cùng đvt hoặc không tìm thấy → 1.
+     */
+    private BigDecimal resolveConversionFactor(String lineUnit, String itemUnit) {
+        if (lineUnit == null || itemUnit == null) return BigDecimal.ONE;
+        if (lineUnit.equalsIgnoreCase(itemUnit)) return BigDecimal.ONE;
+        return unitConversionRepository.findConversion(lineUnit, itemUnit)
+                .map(uc -> uc.getFactor())
+                .orElseGet(() -> {
+                    log.warn("Không tìm thấy unit conversion: {} → {} — dùng factor=1", lineUnit, itemUnit);
+                    return BigDecimal.ONE;
+                });
     }
 
     private Recipe resolveRecipe(ProductionRequestLine line) {
@@ -429,9 +447,26 @@ public class ProductionRequestService
                     "qtyProduced (" + qtyProduced + ") ≠ plannedQty (" + plannedQty + "). Vui lòng chọn adjustmentType.");
         }
 
-        // Tạo StockLot bánh thành phẩm tại KITCHEN
         Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
                 .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
+
+        // Trừ NL kho KITCHEN theo recipe × qtyProduced (đơn vị được quy đổi)
+        Recipe recipe = resolveRecipe(line);
+        if (recipe != null) {
+            List<RecipeLine> recipeLines = recipeLineRepository.findByRecipeIdOrderBySortOrderAsc(recipe.getId());
+            for (RecipeLine rl : recipeLines) {
+                if (rl.getItem() == null) continue;
+                BigDecimal convFactor = resolveConversionFactor(
+                        rl.getUnit(), rl.getItem().getUnit());
+                BigDecimal needed = rl.getQuantity().multiply(qtyProduced).multiply(convFactor);
+                deductFromKitchen(needed, rl.getItem().getId(), kitchen, e);
+            }
+        } else {
+            log.warn("completeLine: không tìm thấy recipe cho sản phẩm {} — bỏ qua NL deduct",
+                    line.getProduct() != null ? line.getProduct().getCode() : "unknown");
+        }
+
+        // Tạo StockLot bánh thành phẩm tại KITCHEN
 
         StockLot productLot = new StockLot();
         productLot.setItem(line.getProduct());

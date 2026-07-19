@@ -1,5 +1,8 @@
 package com.bakery.api.production.entity;
 
+import org.hibernate.envers.Audited;
+import org.hibernate.envers.RelationTargetAuditMode;
+
 import java.math.BigDecimal;
 
 import com.bakery.api.master.entity.Item;
@@ -20,15 +23,18 @@ import lombok.Setter;
 
 @Getter
 @Setter
+@Audited
 @Entity
 @Table(name = "production_request_line")
 public class ProductionRequestLine extends BaseEntity {
 
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "production_request_id", nullable = false)
     private ProductionRequest productionRequest;
 
     /** Sản phẩm cần sản xuất (item_type = PRODUCT) */
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id", nullable = false)
     private Item product;
@@ -37,6 +43,7 @@ public class ProductionRequestLine extends BaseEntity {
      * Recipe version dùng để tính NL khi approve.
      * NULL = dùng recipe active mới nhất của product.
      */
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "recipe_id")
     private Recipe recipe;

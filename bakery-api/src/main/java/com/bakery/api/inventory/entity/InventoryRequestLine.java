@@ -1,5 +1,8 @@
 package com.bakery.api.inventory.entity;
 
+import org.hibernate.envers.Audited;
+import org.hibernate.envers.RelationTargetAuditMode;
+
 import java.math.BigDecimal;
 
 import com.bakery.api.master.entity.Item;
@@ -15,14 +18,17 @@ import lombok.Setter;
 
 @Getter
 @Setter
+@Audited
 @Entity
 @Table(name = "inventory_request_line")
 public class InventoryRequestLine extends BaseEntity {
 
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "inventory_request_id", nullable = false)
     private InventoryRequest inventoryRequest;
 
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_id", nullable = false)
     private Item item;

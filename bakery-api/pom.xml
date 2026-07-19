@@ -68,6 +68,12 @@
       <scope>runtime</scope>
     </dependency>
 
+    <!-- ===== Hibernate Envers (audit history) ===== -->
+    <dependency>
+      <groupId>org.hibernate.orm</groupId>
+      <artifactId>hibernate-envers</artifactId>
+    </dependency>
+
     <!-- ===== Cache ===== -->
     <dependency>
       <groupId>com.github.ben-manes.caffeine</groupId>

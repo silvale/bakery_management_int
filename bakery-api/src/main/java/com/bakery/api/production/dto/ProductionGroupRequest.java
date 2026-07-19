@@ -19,6 +19,8 @@ public record ProductionGroupRequest(
         Integer targetWeekend,
         /** Ngưỡng % tồn kho — chỉ SX khi tổng tồn < thresholdPercent% × target. NULL = luôn SX. */
         Integer thresholdPercent,
+        /** Công thức base chung cho nhóm FREE_GROUP — dùng để tính NL khi chưa phân bổ từng flavor. */
+        UUID baseRecipeId,
         // BATCH_FORMULA
         Integer batchWeightGrams,
         String note,

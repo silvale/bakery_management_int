@@ -74,10 +74,18 @@ public class DailyReportLine {
 
     /**
      * Nhân viên nhập — số bánh đã hủy cuối ngày.
-     * Chỉ áp dụng cho sản phẩm có shelf_days = 0 (bánh tươi trong ngày).
+     * Chỉ áp dụng cho sản phẩm hết HSD trong ngày (production_date + shelf_days ≤ reportDate).
      */
     @Column(name = "qty_cancelled", precision = 10, scale = 3)
     private BigDecimal qtyCancelled;
+
+    /**
+     * Chênh lệch hủy: qty_cancelled (NV nhập) - qty_remaining_actual (hệ thống tính).
+     * Âm = NV hủy ít hơn hệ thống dự kiến, dương = NV hủy nhiều hơn.
+     * Chỉ có giá trị sau FINALIZE với sản phẩm hết HSD.
+     */
+    @Column(name = "discrepancy_cancel", precision = 10, scale = 3)
+    private BigDecimal discrepancyCancel;
 
     /** Snapshot giá vốn tại thời điểm chốt */
     @Column(name = "unit_cost", precision = 15, scale = 2)

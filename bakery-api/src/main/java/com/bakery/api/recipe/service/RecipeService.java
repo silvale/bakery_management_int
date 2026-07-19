@@ -50,6 +50,7 @@ public class RecipeService
     // ── Framework wiring ─────────────────────────────────────────
 
     @Override protected BaseRepository<Recipe> getRepository() { return recipeRepository; }
+    @Override public Class<Recipe> getEntityClass() { return Recipe.class; }
     @Override protected BakeryActorResolver getActorResolver() { return actorResolver; }
     @Override protected CommandRequestRepository getCommandRequestRepository() { return commandRequestRepository; }
     @Override protected String getEntityName() { return "Recipe"; }

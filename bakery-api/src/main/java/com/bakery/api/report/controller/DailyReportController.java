@@ -69,6 +69,7 @@ public class DailyReportController {
             m.put("discrepancyKitchen",  l.getDiscrepancyKitchen());
             m.put("discrepancyPos",      l.getDiscrepancyPos());
             m.put("qtyCancelled",        l.getQtyCancelled());
+            m.put("discrepancyCancel",   l.getDiscrepancyCancel());
             m.put("sellingPrice",        l.getSellingPrice());
             m.put("note",                l.getNote() != null ? l.getNote() : "");
             return m;

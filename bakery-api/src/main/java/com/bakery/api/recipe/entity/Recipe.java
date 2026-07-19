@@ -1,5 +1,9 @@
 package com.bakery.api.recipe.entity;
 
+import org.hibernate.envers.Audited;
+import org.hibernate.envers.RelationTargetAuditMode;
+import org.hibernate.envers.NotAudited;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,14 +24,17 @@ import lombok.Setter;
 
 @Getter
 @Setter
+@Audited
 @Entity
 @Table(name = "recipe")
 public class Recipe extends BaseEntity {
 
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id")
     private Product product;
 
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "semi_product_id")
     private SemiProduct semiProduct;
@@ -45,10 +52,12 @@ public class Recipe extends BaseEntity {
      * NULL = công thức gốc (base).
      * Non-null = bản sao custom từ recipe gốc (full snapshot).
      */
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_recipe_id")
     private Recipe parentRecipe;
 
+    @NotAudited
     @OneToMany(mappedBy = "recipe", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("sortOrder ASC")   // JPQL field name, not column name
     private List<RecipeLine> lines = new ArrayList<>();

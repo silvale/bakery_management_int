@@ -4,9 +4,11 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import com.bakery.api.inventory.entity.InventoryRequest;
 import com.bakery.api.production.dto.ProductionPlanAdjustRequest;
 import com.bakery.api.production.dto.ProductionPlanResponse;
 import com.bakery.api.production.entity.ProductionPlan;
+import com.bakery.api.production.service.ProductionIngredientService;
 import com.bakery.api.production.service.ProductionPlanService;
 import com.bakery.api.production.service.ProductionPlannerService;
 import jakarta.validation.Valid;
@@ -34,6 +36,7 @@ public class ProductionPlanController {
 
     private final ProductionPlanService service;
     private final ProductionPlannerService plannerService;
+    private final ProductionIngredientService ingredientService;
 
     /** Bếp lấy danh sách kế hoạch đã APPROVED. */
     @GetMapping
@@ -78,10 +81,28 @@ public class ProductionPlanController {
         return service.adjust(id, req);
     }
 
-    /** Manager approve → bếp thấy ngay. */
+    /**
+     * Manager approve → bếp thấy ngay.
+     * Response bao gồm cả danh sách NL thiếu (nếu có) để UI cảnh báo.
+     */
     @PostMapping("/{id}/approve")
-    public ProductionPlanResponse approve(@PathVariable UUID id) {
-        return service.approve(id);
+    public java.util.Map<String, Object> approve(@PathVariable UUID id) {
+        ProductionPlanResponse plan = service.approve(id);
+
+        // Re-check NL ngay sau approve để phát hiện NL bị bỏ qua trong TRANSFER
+        java.util.Map<String, Object> nlCheck = ingredientService.checkIngredients(id);
+        @SuppressWarnings("unchecked")
+        java.util.List<?> shortage = (java.util.List<?>) nlCheck.get("shortage");
+
+        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("plan", plan);
+        result.put("nlWarning", shortage != null && !shortage.isEmpty());
+        result.put("nlShortage", shortage);
+        result.put("message", shortage != null && !shortage.isEmpty()
+                ? "Kế hoạch đã duyệt nhưng có " + shortage.size()
+                    + " NL thiếu tồn MAIN — chưa được đưa vào phiếu TRANSFER. Cần nhập kho trước."
+                : "Kế hoạch đã duyệt. Phiếu SX và TRANSFER đã được tạo tự động.");
+        return result;
     }
 
     /** Manager reject DRAFT. */
@@ -109,5 +130,48 @@ public class ProductionPlanController {
     public java.util.Map<String, Object> generateRequests(@PathVariable UUID id) {
         int count = service.generateRequestsFromApprovedPlan(id);
         return java.util.Map.of("planId", id, "requestsCreated", count);
+    }
+
+    /**
+     * Kiểm tra nguyên liệu kho MAIN có đủ cho kế hoạch SX không.
+     *
+     * <p>Trả về:
+     * - {@code allSufficient}: true nếu tất cả NL đủ
+     * - {@code sufficient}: danh sách NL đủ
+     * - {@code shortage}: danh sách NL thiếu (kèm số lượng cần thêm)
+     */
+    @GetMapping("/{id}/ingredient-check")
+    public java.util.Map<String, Object> ingredientCheck(@PathVariable UUID id) {
+        return ingredientService.checkIngredients(id);
+    }
+
+    /**
+     * Tạo phiếu nhập kho PURCHASE vào MAIN cho các NL đang thiếu.
+     * Dùng khi check NL thấy thiếu — tạo PO để nhập thêm trước khi xuất sang bếp.
+     */
+    @PostMapping("/{id}/generate-purchase")
+    public java.util.Map<String, Object> generatePurchase(@PathVariable UUID id) {
+        InventoryRequest req = ingredientService.generatePurchaseRequest(id);
+        return java.util.Map.of(
+                "purchaseCode", req.getCode(),
+                "purchaseId",   req.getId(),
+                "status",       req.getApprovalStatus(),
+                "lineCount",    req.getLines() != null ? req.getLines().size() : 0
+        );
+    }
+
+    /**
+     * Tạo phiếu xuất kho TRANSFER MAIN→KITCHEN cho kế hoạch SX.
+     * Phiếu ở trạng thái PENDING_APPROVAL — cần Admin duyệt trước khi xuất.
+     */
+    @PostMapping("/{id}/generate-transfer")
+    public java.util.Map<String, Object> generateTransfer(@PathVariable UUID id) {
+        InventoryRequest req = ingredientService.generateTransferRequest(id);
+        return java.util.Map.of(
+                "transferCode",  req.getCode(),
+                "transferId",    req.getId(),
+                "status",        req.getApprovalStatus(),
+                "lineCount",     req.getLines() != null ? req.getLines().size() : 0
+        );
     }
 }

@@ -176,6 +176,18 @@ public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
         return toResponse(saved);
     }
 
+    // ── History support ───────────────────────────────────────
+
+    /**
+     * Cast raw Envers snapshot object về entity type và map sang RES.
+     * Dùng bởi BakeryAdminResource history endpoints.
+     */
+    @Override
+    @SuppressWarnings("unchecked")
+    public RES mapToResponse(Object entity) {
+        return toResponse((E) entity);
+    }
+
     // ── Internal logging ──────────────────────────────────────
 
     private void log(CommandAction action, UUID entityId, String note, CommandStatus status) {

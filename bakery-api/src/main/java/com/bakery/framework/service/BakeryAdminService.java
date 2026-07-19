@@ -31,4 +31,18 @@ public interface BakeryAdminService<REQ, RES> {
     RES approve(UUID id);
 
     RES reject(UUID id, String reason);
+
+    /**
+     * Trả về entity class để EntityHistoryService query Envers.
+     * Mặc định null (không có history). Override trong service của entity có @Audited.
+     */
+    default Class<?> getEntityClass() {
+        return null;
+    }
+
+    /**
+     * Map raw entity object (từ Envers snapshot) sang response DTO.
+     * Dùng bởi BakeryAdminResource cho history endpoints.
+     */
+    RES mapToResponse(Object entity);
 }

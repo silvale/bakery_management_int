@@ -66,6 +66,9 @@ public class InventoryRequestService
     }
 
     @Override
+    public Class<InventoryRequest> getEntityClass() { return InventoryRequest.class; }
+
+    @Override
     protected BakeryActorResolver getActorResolver() {
         return actorResolver;
     }

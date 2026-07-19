@@ -1,5 +1,7 @@
 package com.bakery.api.master.entity;
 
+import org.hibernate.envers.Audited;
+
 import com.bakery.framework.entity.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -9,6 +11,7 @@ import lombok.Setter;
 
 @Getter
 @Setter
+@Audited
 @Entity
 @Table(name = "supplier")
 public class Supplier extends BaseEntity {

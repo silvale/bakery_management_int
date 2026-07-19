@@ -1,5 +1,8 @@
 package com.bakery.api.production.entity;
 
+import org.hibernate.envers.Audited;
+import org.hibernate.envers.NotAudited;
+
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +31,7 @@ import lombok.Setter;
  */
 @Getter
 @Setter
+@Audited
 @Entity
 @Table(name = "production_request")
 public class ProductionRequest extends BaseEntity {
@@ -46,6 +50,7 @@ public class ProductionRequest extends BaseEntity {
     @Column(name = "note", length = 500)
     private String note;
 
+    @NotAudited
     @OneToMany(mappedBy = "productionRequest", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("sortOrder ASC")
     private List<ProductionRequestLine> lines = new ArrayList<>();

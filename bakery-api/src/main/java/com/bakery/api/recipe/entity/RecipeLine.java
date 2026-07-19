@@ -1,5 +1,8 @@
 package com.bakery.api.recipe.entity;
 
+import org.hibernate.envers.Audited;
+import org.hibernate.envers.RelationTargetAuditMode;
+
 import java.math.BigDecimal;
 
 import com.bakery.api.master.entity.Item;
@@ -15,10 +18,12 @@ import lombok.Setter;
 
 @Getter
 @Setter
+@Audited
 @Entity
 @Table(name = "recipe_line")
 public class RecipeLine extends BaseEntity {
 
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "recipe_id", nullable = false)
     private Recipe recipe;
@@ -27,6 +32,7 @@ public class RecipeLine extends BaseEntity {
      * Vật tư dùng trong công thức — có thể là Ingredient hoặc SemiProduct.
      * FK duy nhất trỏ về bảng item; JPA dùng discriminator để load đúng subtype.
      */
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_id", nullable = false)
     private Item item;

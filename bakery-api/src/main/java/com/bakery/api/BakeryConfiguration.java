@@ -5,6 +5,7 @@ import java.util.Optional;
 
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
@@ -37,5 +38,16 @@ public class BakeryConfiguration {
     @Bean
     public AuditorAware<String> auditorAware() {
         return () -> Optional.of(actorResolver.currentUserId());
+    }
+
+    /** Cấu hình Hibernate Envers: suffix bảng _HIS, lưu snapshot khi xóa. */
+    @Bean
+    public HibernatePropertiesCustomizer enversPropertiesCustomizer() {
+        return properties -> {
+            properties.put("org.hibernate.envers.audit_table_suffix", "_HIS");
+            properties.put("org.hibernate.envers.store_data_at_delete", true);
+            properties.put("org.hibernate.envers.revision_field_name", "REV");
+            properties.put("org.hibernate.envers.revision_type_field_name", "REVTYPE");
+        };
     }
 }

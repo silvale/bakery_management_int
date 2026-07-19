@@ -20,6 +20,7 @@ public class SupplierService extends AbstractBakeryAdminService<Supplier, Suppli
     private final BakeryActorResolver actorResolver;
 
     @Override protected BaseRepository<Supplier> getRepository() { return repository; }
+    @Override public Class<Supplier> getEntityClass() { return Supplier.class; }
     @Override protected BakeryActorResolver getActorResolver() { return actorResolver; }
     @Override protected CommandRequestRepository getCommandRequestRepository() { return commandRequestRepository; }
     @Override protected String getEntityName() { return "Supplier"; }

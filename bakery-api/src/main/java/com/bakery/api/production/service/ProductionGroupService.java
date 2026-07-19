@@ -12,6 +12,8 @@ import com.bakery.api.production.entity.ProductionGroup;
 import com.bakery.api.production.entity.ProductionGroupItem;
 import com.bakery.api.production.repository.ItemGroupRepository;
 import com.bakery.api.production.repository.ProductionGroupRepository;
+import com.bakery.api.recipe.entity.Recipe;
+import com.bakery.api.recipe.repository.RecipeRepository;
 import com.bakery.framework.exception.ResourceNotFoundException;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +27,7 @@ public class ProductionGroupService {
     private final ProductionGroupRepository repository;
     private final ItemGroupRepository itemGroupRepository;
     private final ItemLookupRepository itemRepository;
+    private final RecipeRepository recipeRepository;
     private final EntityManager em;
 
     @Transactional(readOnly = true)
@@ -82,6 +85,15 @@ public class ProductionGroupService {
         e.setThresholdPercent(req.thresholdPercent());
         e.setBatchWeightGrams(req.batchWeightGrams());
         e.setNote(req.note());
+
+        // Base recipe cho FREE_GROUP
+        if (req.baseRecipeId() != null) {
+            Recipe recipe = recipeRepository.findById(req.baseRecipeId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Recipe", req.baseRecipeId()));
+            e.setBaseRecipe(recipe);
+        } else {
+            e.setBaseRecipe(null);
+        }
 
         if (req.itemGroupId() != null) {
             ItemGroup ig = itemGroupRepository.findById(req.itemGroupId())

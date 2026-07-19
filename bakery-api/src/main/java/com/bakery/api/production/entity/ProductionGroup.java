@@ -3,6 +3,7 @@ package com.bakery.api.production.entity;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.bakery.api.recipe.entity.Recipe;
 import com.bakery.framework.entity.BaseEntity;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
@@ -65,6 +66,15 @@ public class ProductionGroup extends BaseEntity {
     /** Trọng lượng 1 cối (gram). Ví dụ: 10000 = 10kg. */
     @Column(name = "batch_weight_grams")
     private Integer batchWeightGrams;
+
+    /**
+     * Công thức base chung cho toàn nhóm — dùng khi plan ở mức group (FREE_GROUP).
+     * Ví dụ: Pana Cotta base (kem mặn, agar, cream...) áp dụng cho tất cả flavor.
+     * NULL = không dùng base recipe, BOM expand từng item riêng.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "base_recipe_id")
+    private Recipe baseRecipe;
 
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;

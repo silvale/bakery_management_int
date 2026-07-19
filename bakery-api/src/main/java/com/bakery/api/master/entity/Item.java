@@ -1,5 +1,8 @@
 package com.bakery.api.master.entity;
 
+import org.hibernate.envers.Audited;
+import org.hibernate.envers.RelationTargetAuditMode;
+
 import com.bakery.api.production.entity.ItemGroup;
 import com.bakery.framework.entity.BaseEntity;
 import jakarta.persistence.Column;
@@ -25,6 +28,7 @@ import lombok.Setter;
  */
 @Getter
 @Setter
+@Audited
 @Entity
 @Table(name = "item")
 @Inheritance(strategy = InheritanceType.SINGLE_TABLE)
@@ -44,6 +48,7 @@ public abstract class Item extends BaseEntity {
      * Phòng/bộ phận sản xuất: PL=Phòng Lạnh, PK=Phòng Kem, BMN=Bánh Mì Ngọt...
      * Dùng cho cả phân loại sản phẩm (thay thế productCategory) và filter kế hoạch SX.
      */
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_group_id")
     private ItemGroup itemGroup;
