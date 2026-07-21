@@ -5,15 +5,18 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import com.bakery.api.inventory.entity.InventoryRequest;
 import com.bakery.api.production.dto.CompleteLineRequest;
 import com.bakery.api.production.dto.ProductionRequestRequest;
 import com.bakery.api.production.dto.ProductionRequestResponse;
+import com.bakery.api.production.service.ProductionIngredientService;
 import com.bakery.api.production.service.ProductionRequestService;
 import com.bakery.framework.controller.BakeryAdminResource;
 import com.bakery.framework.entity.AdjustmentType;
 import com.bakery.framework.service.BakeryAdminService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -45,6 +48,7 @@ public class ProductionRequestController
         extends BakeryAdminResource<ProductionRequestRequest, ProductionRequestResponse> {
 
     private final ProductionRequestService service;
+    private final ProductionIngredientService ingredientService;
 
     @Override
     protected BakeryAdminService<ProductionRequestRequest, ProductionRequestResponse> getService() {
@@ -102,5 +106,42 @@ public class ProductionRequestController
     public List<ProductionRequestResponse> approveAll(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return service.approveAll(date != null ? date : LocalDate.now());
+    }
+
+    /**
+     * Gợi ý số lượng BTP cần sản xuất dựa trên Phiếu SX DAILY đang chờ trong ngày.
+     *
+     * <p>Response:
+     * - {@code neededByPlan}: tổng BTP được dùng trong các DAILY PR của ngày đó
+     * - {@code kitchenStock}: tồn BTP hiện tại trong kho bếp
+     * - {@code suggested}: max(0, neededByPlan − kitchenStock)
+     *
+     * @param semiItemId ID của BTP cần sản xuất
+     * @param date       ngày sản xuất (mặc định hôm nay)
+     */
+    @GetMapping("/suggest-semi")
+    public java.util.Map<String, Object> suggestSemi(
+            @RequestParam UUID semiItemId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ingredientService.suggestSemiQty(semiItemId, date != null ? date : LocalDate.now());
+    }
+
+    /**
+     * Tạo phiếu xuất kho MAIN → KITCHEN cho nguyên liệu cần để sản xuất BTP.
+     *
+     * <p>Chỉ xuất phần NL còn thiếu trong KITCHEN. Nếu MAIN không đủ,
+     * xuất tối đa tồn MAIN và ghi chú NL nào bị bỏ qua.
+     *
+     * @param id ID Phiếu SX BTP (productionType = SEMI)
+     */
+    @PostMapping("/{id}/transfer-ingredients")
+    public java.util.Map<String, Object> transferIngredients(@PathVariable UUID id) {
+        InventoryRequest req = ingredientService.generateSemiTransferRequest(id);
+        return java.util.Map.of(
+                "transferCode", req.getCode(),
+                "transferId",   req.getId(),
+                "status",       req.getApprovalStatus(),
+                "lineCount",    req.getLines() != null ? req.getLines().size() : 0
+        );
     }
 }

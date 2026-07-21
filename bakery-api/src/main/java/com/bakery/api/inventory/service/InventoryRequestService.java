@@ -21,6 +21,7 @@ import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.repository.ItemLookupRepository;
 import com.bakery.api.master.repository.ProductExpiryConfigRepository;
 import com.bakery.api.master.repository.SupplierRepository;
+import com.bakery.api.master.repository.UnitConversionRepository;
 import com.bakery.api.master.repository.WarehouseRepository;
 import com.bakery.framework.entity.InventoryRequestType;
 import com.bakery.framework.entity.MovementType;
@@ -31,6 +32,7 @@ import com.bakery.framework.repository.CommandRequestRepository;
 import com.bakery.framework.security.BakeryActorResolver;
 import com.bakery.framework.service.AbstractBakeryAdminService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
@@ -40,6 +42,7 @@ import org.springframework.stereotype.Service;
  *   PURCHASE → tạo StockLot + StockMovement(IN) cho mỗi line
  *   TRANSFER → (Phase 2) tạo StockMovement(OUT) + StockMovement(IN)
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class InventoryRequestService
@@ -55,6 +58,7 @@ public class InventoryRequestService
     private final StockLotRepository stockLotRepository;
     private final StockMovementRepository stockMovementRepository;
     private final ProductExpiryConfigRepository expiryConfigRepository;
+    private final UnitConversionRepository unitConversionRepository;
     private final CommandRequestRepository commandRequestRepository;
     private final BakeryActorResolver actorResolver;
 
@@ -213,6 +217,25 @@ public class InventoryRequestService
         }
     }
 
+    /**
+     * Quy đổi số lượng từ đơn vị nhập liệu (line.unit) sang đơn vị lưu kho (item.unit).
+     *
+     * <p>Ví dụ: nhập 10 KG, item.unit = G → trả về 10000 G.
+     * Nếu cùng đơn vị hoặc không tìm thấy conversion → giữ nguyên và log warn.
+     */
+    private BigDecimal convertToItemUnit(BigDecimal qty, String fromUnit, Item item) {
+        String toUnit = item.getUnit();
+        if (fromUnit == null || toUnit == null) return qty;
+        if (fromUnit.equalsIgnoreCase(toUnit)) return qty;
+        return unitConversionRepository.findConversion(fromUnit, toUnit)
+                .map(uc -> qty.multiply(uc.getFactor()))
+                .orElseGet(() -> {
+                    log.warn("convertToItemUnit: không tìm thấy {} → {} cho item {} — giữ nguyên qty",
+                            fromUnit, toUnit, item.getCode());
+                    return qty;
+                });
+    }
+
     /** PURCHASE: tạo StockLot + StockMovement(IN) cho mỗi line */
     private void approvePurchase(InventoryRequest e) {
 
@@ -221,18 +244,22 @@ public class InventoryRequestService
         for (InventoryRequestLine line : e.getLines()) {
             Item item = line.getItem();
 
+            // Convert qty từ line.unit → item.unit trước khi lưu vào StockLot
+            // VD: nhập 10 KG, item.unit = G → lưu 10000 trong lot
+            BigDecimal qtyInItemUnit = convertToItemUnit(line.getQuantity(), line.getUnit(), item);
+
             // Tính expiry date nếu có config
             LocalDate expiryDate = expiryConfigRepository.findByItemId(item.getId())
                     .map(cfg -> receivedDate.plusDays(cfg.getShelfDays()))
                     .orElse(null);
 
-            // Tạo StockLot
+            // Tạo StockLot — qty luôn ở item.unit
             StockLot lot = new StockLot();
             lot.setItem(item);
             lot.setSupplier(e.getSupplier());
             lot.setWarehouse(e.getTargetWarehouse());
-            lot.setQtyInitial(line.getQuantity());
-            lot.setQtyRemaining(line.getQuantity());
+            lot.setQtyInitial(qtyInItemUnit);
+            lot.setQtyRemaining(qtyInItemUnit);
             lot.setUnitCost(line.getUnitCost() != null ? line.getUnitCost() : BigDecimal.ZERO);
             lot.setReceivedDate(receivedDate);
             lot.setExpiryDate(expiryDate);
@@ -242,7 +269,7 @@ public class InventoryRequestService
             StockMovement movement = new StockMovement();
             movement.setLot(savedLot);
             movement.setMovementType(MovementType.IN);
-            movement.setQty(line.getQuantity());
+            movement.setQty(qtyInItemUnit);
             movement.setRefId(e.getId());
             movement.setRefType(REF_TYPE);
             movement.setNote("Nhập hàng từ phiếu " + e.getCode());
@@ -258,8 +285,10 @@ public class InventoryRequestService
         UUID sourceWarehouseId = e.getSourceWarehouse() != null ? e.getSourceWarehouse().getId() : null;
 
         for (InventoryRequestLine line : e.getLines()) {
+            // Convert qty từ line.unit → item.unit (StockLot luôn lưu theo item.unit)
+            BigDecimal convertedQty = convertToItemUnit(line.getQuantity(), line.getUnit(), line.getItem());
             // Fixed unit: nếu item không tách lẻ → làm tròn lên bội số của unitSize
-            BigDecimal remaining = roundUpToUnitSize(line.getQuantity(), line.getItem());
+            BigDecimal remaining = roundUpToUnitSize(convertedQty, line.getItem());
 
             // FIFO: lấy các lot còn hàng của item này trong source warehouse, cũ nhất trước
             List<StockLot> lots = stockLotRepository

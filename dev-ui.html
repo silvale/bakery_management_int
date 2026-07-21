@@ -122,6 +122,7 @@ tr:hover td{background:#f8fafc}
 <script>
 const BASE='http://localhost:8080';
 let allItems=[],allWarehouses=[],allSuppliers=[],allItemGroups=[],mainStockItems=[];
+let allUnits=[]; // loaded from code_value WHERE group_key='UNIT'
 const PAGE_SIZE=20;
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -157,6 +158,16 @@ async function loadAllSuppliers(){
 }
 async function loadAllItemGroups(){
   try{const d=await api('GET','/api/v1/item-groups');allItemGroups=d??[];}catch(_){allItemGroups=[]}
+}
+async function loadAllUnits(){
+  try{const d=await api('GET','/api/v1/code-values?groupKey=UNIT&size=100&sort=sortOrder,asc');
+    allUnits=d?.content??[];}
+  catch(_){allUnits=[]}
+}
+/** Render <option> tags cho unit select. selectedVal = giá trị hiện tại cần pre-select. */
+function unitSelectHtml(selectedVal=''){
+  const opts=allUnits.map(u=>`<option value="${u.code}" ${u.code===(selectedVal??'').toUpperCase()?'selected':''}>${u.code} — ${u.name}</option>`).join('');
+  return `<option value="">— Chọn ĐVT —</option>${opts}`;
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -269,7 +280,7 @@ let itemsPage=0;
 
 async function pageItemsList(){
   itemsPage=0;
-  await Promise.all([loadAllItems(), loadAllItemGroups()]);
+  await Promise.all([loadAllItems(), loadAllItemGroups(), loadAllUnits()]);
   document.getElementById('content').innerHTML=`
   <div class="card">
     <div class="tabs" id="items-type-tabs">
@@ -379,7 +390,7 @@ async function approveItem(id){await api('POST',`/api/v1/items/${id}/approve`);t
 // Item Form
 let recipeLines=[];
 async function pageItemForm(item={}){
-  await Promise.all([loadAllItems(), loadAllSuppliers()]);
+  await Promise.all([loadAllItems(), loadAllSuppliers(), loadAllUnits()]);
   const isEdit=!!item.id;
   // l.item là ReferenceValue {key: itemCode, value: itemName} — không có id
   // Phải lookup ngược qua allItems bằng code
@@ -406,7 +417,7 @@ async function pageItemForm(item={}){
         </select></div>
       <div class="field"><label>Code *</label><input id="f-code" value="${item.code??''}"></div>
       <div class="field"><label>Tên *</label><input id="f-name" value="${item.name??''}"></div>
-      <div class="field"><label>Đơn vị *</label><input id="f-unit" value="${item.unit??''}" placeholder="cái, kg..."></div>
+      <div class="field"><label>Đơn vị *</label><select id="f-unit">${unitSelectHtml(item.unit)}</select></div>
       <div class="field" id="f-shelf-wrap" style="${item.itemType==='PRODUCT'?'':'display:none'}">
         <label>Hạn sử dụng (ngày) <small style="color:#94a3b8">0 = trong ngày</small></label>
         <input id="f-shelf" type="number" min="0" value="${item.shelfDays??''}" placeholder="1"></div>
@@ -466,14 +477,16 @@ function renderRL(){
   tb.innerHTML=recipeLines.map((l,i)=>`<tr>
     <td>${acHtml('acrl'+i,pool,l.itemId,'Tìm BTP / NL...')}</td>
     <td><input type="number" step="0.001" value="${l.qty}" onchange="recipeLines[${i}].qty=+this.value"></td>
-    <td><input id="rl-unit-${i}" value="${l.unit}" onchange="recipeLines[${i}].unit=this.value" placeholder="kg,g..."></td>
+    <td><select id="rl-unit-${i}" onchange="recipeLines[${i}].unit=this.value">${unitSelectHtml(l.unit)}</select></td>
     <td><input type="number" value="${l.sort||i+1}" onchange="recipeLines[${i}].sort=+this.value" style="width:50px"></td>
     <td><button class="btn btn-danger btn-sm" onclick="recipeLines.splice(${i},1);renderRL()">✕</button></td>
   </tr>`).join('');
   recipeLines.forEach((_,i)=>acOn('acrl'+i,item=>{
     recipeLines[i].itemId=item.id;
-    if(!recipeLines[i].unit){recipeLines[i].unit=item.unit||'';
-      const u=document.getElementById('rl-unit-'+i);if(u)u.value=item.unit||'';}
+    if(!recipeLines[i].unit){
+      const u=document.getElementById('rl-unit-'+i);
+      const val=(item.unit||'').toUpperCase();
+      recipeLines[i].unit=val;if(u)u.value=val;}
   }));
 }
 function addRL(){recipeLines.push({itemId:'',qty:'',unit:'',sort:recipeLines.length+1});renderRL();}
@@ -576,7 +589,7 @@ let pmActiveGroup=null; // null = Tất cả
 let pmAllMappings=[];
 
 async function pageProductMapping(){
-  await Promise.all([loadAllItems(), loadAllItemGroups()]);
+  await Promise.all([loadAllItems(), loadAllItemGroups(), loadAllUnits()]);
   const products=allItems.filter(i=>i.itemType==='PRODUCT');
   document.getElementById('content').innerHTML=`
   <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:14px">
@@ -892,7 +905,7 @@ async function loadAllRecipes(){
   try{const r=await api('GET','/api/v1/recipes/all');allRecipes=Array.isArray(r)?r:(r.content??[]);}catch(_){allRecipes=[];}
 }
 async function pageProdGroups(){
-  await Promise.all([loadAllItems(), loadAllItemGroups(), loadAllRecipes()]);
+  await Promise.all([loadAllItems(), loadAllItemGroups(), loadAllUnits(), loadAllRecipes()]);
   const groups=allItemGroups;
   pgItems=[];
   document.getElementById('content').innerHTML=`
@@ -1785,14 +1798,28 @@ async function pageProdRequests(){
   await loadAllItems();
   const today=new Date().toISOString().slice(0,10);
   document.getElementById('content').innerHTML=`
-  <div style="display:grid;grid-template-columns:1fr 1.8fr;gap:14px;align-items:start">
+  <!-- Tab bar -->
+  <div style="display:flex;gap:0;margin-bottom:14px;border-bottom:2px solid #e2e8f0">
+    <button id="tab-daily" onclick="switchPRTab('daily')"
+      style="padding:8px 18px;border:none;border-bottom:2px solid #6366f1;margin-bottom:-2px;background:none;font-weight:600;color:#6366f1;cursor:pointer">
+      📝 Phiếu SX DAILY / ORDER
+    </button>
+    <button id="tab-semi" onclick="switchPRTab('semi')"
+      style="padding:8px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-weight:600;color:#94a3b8;cursor:pointer">
+      🧪 Phiếu SX Bán Thành Phẩm
+    </button>
+  </div>
+
+  <!-- Tab: DAILY / ORDER -->
+  <div id="pr-tab-daily" style="display:grid;grid-template-columns:1fr 1.8fr;gap:14px;align-items:start">
     <div class="card">
       <div class="card-title">Tạo phiếu SX</div>
       <div class="form-grid">
         <div class="field form-full"><label>Loại *</label>
           <select id="pr-type">
-            <option value="DAILY">DAILY</option>
-            <option value="EXTRA">EXTRA</option>
+            <option value="DAILY">DAILY — theo kế hoạch</option>
+            <option value="ORDER">ORDER — đơn phát sinh</option>
+            <option value="SEMI">SEMI — bán thành phẩm</option>
           </select></div>
         <div class="field"><label>Ngày SX *</label><input type="date" id="pr-date" value="${today}"></div>
         <div class="field form-full"><label>Ghi chú</label><textarea id="pr-note" rows="2"></textarea></div>
@@ -1800,7 +1827,7 @@ async function pageProdRequests(){
       <hr class="divider">
       <div class="card-title" style="margin-bottom:6px">Dòng sản phẩm</div>
       <div style="display:grid;grid-template-columns:1fr 80px 50px 32px;gap:5px;margin-bottom:4px">
-        <small style="font-weight:600;color:#64748b">Sản phẩm</small>
+        <small style="font-weight:600;color:#64748b">Sản phẩm / BTP</small>
         <small style="font-weight:600;color:#64748b">Kế hoạch</small>
         <small style="font-weight:600;color:#64748b">Sort</small><div></div>
       </div>
@@ -1813,13 +1840,169 @@ async function pageProdRequests(){
         <div class="card-title" style="margin:0">Danh sách phiếu SX</div>
         <div style="display:flex;gap:6px;align-items:center">
           <input type="date" id="pr-filter-date" value="${today}" onchange="loadPRs()">
-          <button class="btn btn-success btn-sm" onclick="approveAllForDate()" title="Approve các phiếu đã hoàn thành toàn bộ line">✅ Approve All (đã làm xong)</button>
+          <button class="btn btn-success btn-sm" onclick="approveAllForDate()">✅ Approve All</button>
         </div>
       </div>
       <div id="pr-list"><div class="empty">Đang tải...</div></div>
     </div>
+  </div>
+
+  <!-- Tab: SEMI (Bán thành phẩm) -->
+  <div id="pr-tab-semi" style="display:none;grid-template-columns:1fr 1.8fr;gap:14px;align-items:start">
+    <div class="card">
+      <div class="card-title">🧪 Tạo phiếu SX Bán Thành Phẩm</div>
+      <p style="font-size:13px;color:#64748b;margin:0 0 12px">
+        BTP hoàn thành sẽ nhập thẳng vào <strong>kho bếp</strong> — không qua Giao Nhận.
+      </p>
+      <div class="form-grid">
+        <div class="field form-full"><label>Bán thành phẩm *</label>
+          <div id="semi-item-picker"></div>
+        </div>
+        <div class="field"><label>Ngày SX *</label>
+          <input type="date" id="semi-date" value="${today}" onchange="loadSemiSuggest()">
+        </div>
+        <div class="field form-full" id="semi-suggest-box" style="display:none">
+          <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:10px 12px;font-size:13px">
+            <div id="semi-suggest-content"></div>
+          </div>
+        </div>
+        <div class="field"><label>Số lượng *</label>
+          <input type="number" id="semi-qty" step="1" min="1" placeholder="Nhập số lượng">
+        </div>
+        <div class="field"><label>Đơn vị</label>
+          <input type="text" id="semi-unit" readonly style="background:#f8fafc;color:#64748b">
+        </div>
+        <div class="field form-full"><label>Ghi chú</label>
+          <textarea id="semi-note" rows="2"></textarea>
+        </div>
+      </div>
+      <div class="action-row">
+        <button class="btn btn-primary" onclick="saveSemiPR()">Tạo phiếu SX BTP</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="card-title" style="margin:0">Phiếu SX BTP</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="date" id="semi-filter-date" value="${today}" onchange="loadSemiPRs()">
+          <button class="btn btn-ghost btn-sm" onclick="loadSemiPRs()">🔄</button>
+        </div>
+      </div>
+      <div id="semi-pr-list"><div class="empty">Đang tải...</div></div>
+    </div>
   </div>`;
+
+  // Init DAILY tab
   prLines=[];renderPRLines();loadPRs();
+
+  // Init SEMI tab — item picker (SEMI_PRODUCT only)
+  let _semiItemId=null;
+  const semiPool=allItems.filter(x=>x.itemType==='SEMI_PRODUCT');
+  document.getElementById('semi-item-picker').innerHTML=acHtml('ac-semi-item',semiPool,null,'Tìm bán thành phẩm...');
+  acOn('ac-semi-item',item=>{
+    _semiItemId=item.id;
+    document.getElementById('semi-unit').value=item.unit??'';
+    loadSemiSuggest();
+  });
+  window._semiItemId=()=>_semiItemId;
+
+  loadSemiPRs();
+}
+
+function switchPRTab(tab){
+  document.getElementById('pr-tab-daily').style.display=tab==='daily'?'grid':'none';
+  document.getElementById('pr-tab-semi').style.display=tab==='semi'?'grid':'none';
+  document.getElementById('tab-daily').style.cssText=`padding:8px 18px;border:none;border-bottom:2px solid ${tab==='daily'?'#6366f1':'transparent'};margin-bottom:-2px;background:none;font-weight:600;color:${tab==='daily'?'#6366f1':'#94a3b8'};cursor:pointer`;
+  document.getElementById('tab-semi').style.cssText=`padding:8px 18px;border:none;border-bottom:2px solid ${tab==='semi'?'#6366f1':'transparent'};margin-bottom:-2px;background:none;font-weight:600;color:${tab==='semi'?'#6366f1':'#94a3b8'};cursor:pointer`;
+  if(tab==='semi') loadSemiPRs();
+}
+
+async function loadSemiSuggest(){
+  const itemId=window._semiItemId?.();
+  const date=document.getElementById('semi-date')?.value;
+  const box=document.getElementById('semi-suggest-box');
+  const content=document.getElementById('semi-suggest-content');
+  if(!itemId||!date){if(box)box.style.display='none';return;}
+  const r=await api('GET',`/api/v1/production-requests/suggest-semi?semiItemId=${itemId}&date=${date}`);
+  if(!r){if(box)box.style.display='none';return;}
+  const needed=+r.neededByPlan||0;
+  const stock=+r.kitchenStock||0;
+  const sug=+r.suggested||0;
+  box.style.display='';
+  content.innerHTML=`
+    <div style="font-weight:600;color:#166534;margin-bottom:6px">💡 Gợi ý số lượng</div>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12px">
+      <span style="color:#64748b">Kế hoạch DAILY cần:</span><strong>${needed} ${r.unit}</strong>
+      <span style="color:#64748b">Tồn kho bếp:</span><strong style="color:#0284c7">${stock} ${r.unit}</strong>
+      <span style="color:#64748b">Cần sản xuất thêm:</span><strong style="color:${sug>0?'#dc2626':'#059669'}">${sug} ${r.unit}</strong>
+    </div>`;
+  // Pre-fill qty nếu người dùng chưa nhập gì
+  const qtyEl=document.getElementById('semi-qty');
+  if(qtyEl&&(!qtyEl.value||+qtyEl.value===0)) qtyEl.value=sug>0?sug:'';
+}
+
+async function saveSemiPR(){
+  const itemId=window._semiItemId?.();
+  if(!itemId){toast('Chọn bán thành phẩm trước','err');return;}
+  const qty=+document.getElementById('semi-qty')?.value||0;
+  if(qty<=0){toast('Nhập số lượng hợp lệ','err');return;}
+  const date=document.getElementById('semi-date')?.value||new Date().toISOString().slice(0,10);
+  const note=document.getElementById('semi-note')?.value||null;
+  const body={
+    productionType:'SEMI',
+    productionDate:date,
+    note,
+    lines:[{productId:itemId,plannedQty:qty,sortOrder:1}]
+  };
+  const pr=await api('POST','/api/v1/production-requests',body);
+  if(!pr)return;
+  toast(`✅ Đã tạo phiếu ${pr.code}`);
+  document.getElementById('semi-qty').value='';
+  document.getElementById('semi-note').value='';
+  loadSemiPRs();
+  // Tự động gợi ý tạo phiếu NL
+  if(confirm(`Tạo phiếu xuất NL MAIN → BẾP cho phiếu ${pr.code}?`)){
+    await createSemiTransfer(pr.id,pr.code);
+  }
+}
+
+async function createSemiTransfer(prId,prCode){
+  const r=await api('POST',`/api/v1/production-requests/${prId}/transfer-ingredients`);
+  if(r)toast(`📦 Tạo phiếu NL ${r.transferCode} (${r.lineCount} NL) — cần Admin duyệt`);
+}
+
+async function loadSemiPRs(){
+  const date=document.getElementById('semi-filter-date')?.value||new Date().toISOString().slice(0,10);
+  const el=document.getElementById('semi-pr-list');if(!el)return;
+  const data=await api('GET',`/api/v1/production-requests?size=200`);
+  const items=(data?.content??[]).filter(r=>r.productionType==='SEMI'&&r.productionDate===date);
+  if(!items.length){el.innerHTML='<div class="empty">Chưa có phiếu SX BTP cho ngày này</div>';return;}
+  el.innerHTML=`<table><thead><tr>
+    <th>Mã phiếu</th><th>BTP</th><th>SL kế hoạch</th><th>Status</th><th></th>
+  </tr></thead><tbody>
+  ${items.map(r=>{
+    const mainLine=r.lines?.[0];
+    return`<tr>
+      <td><strong>${r.code??'—'}</strong></td>
+      <td>${mainLine?.product?.name??'—'}</td>
+      <td style="text-align:right">${mainLine?.plannedQty??'—'} ${mainLine?.unit??''}</td>
+      <td>${badge(r.approvalStatus)}</td>
+      <td style="white-space:nowrap">
+        ${r.approvalStatus==='DRAFT'||r.approvalStatus==='PENDING_APPROVAL'
+          ?`<button class="btn btn-success btn-sm" onclick="approvePR('${r.id}')">Approve</button>`:''}
+        <button class="btn btn-ghost btn-sm" onclick="createSemiTransfer('${r.id}','${r.code}')">📦 Phiếu NL</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleSemiPR('${r.id}')">Chi tiết</button>
+      </td>
+    </tr>
+    <tr id="semi-prd-${r.id}" style="display:none">
+      <td colspan="5"><div class="detail-inner">${renderPRDetail(r)}</div></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+function toggleSemiPR(id){
+  const row=document.getElementById(`semi-prd-${id}`);if(!row)return;
+  row.style.display=row.style.display==='none'?'':'none';
 }
 function renderPRLines(){
   const pool=allItems.filter(x=>x.itemType==='PRODUCT'||x.itemType==='SEMI_PRODUCT');
@@ -1918,7 +2101,23 @@ function togglePR(id){
   document.querySelectorAll('[id^="prd-"]').forEach(r=>r.style.display='none');
   if(!open)row.style.display='';
 }
-async function approvePR(id){await api('POST',`/api/v1/production-requests/${id}/approve`);toast('Đã approve');loadPRs();}
+async function approvePR(id){
+  const pr=await api('POST',`/api/v1/production-requests/${id}/approve`);
+  // Auto-complete tất cả lines có plannedQty > 0 → tạo DeliveryRecord → Giao Nhận
+  const pendingLines=(pr?.lines??[]).filter(l=>l.lineStatus==='PENDING'&&(l.plannedQty??0)>0);
+  if(pendingLines.length){
+    const batch=pendingLines.map(l=>({lineId:l.id,qtyProduced:l.plannedQty,adjustmentType:null,reason:null,note:null}));
+    try{
+      await api('POST',`/api/v1/production-requests/${id}/lines/complete-batch`,batch);
+      toast(`✅ Đã approve + hoàn thành ${pendingLines.length} line → vào Giao Nhận để shop xác nhận`);
+    }catch(e){
+      toast('Đã approve nhưng có lỗi khi complete lines — kiểm tra lại NL kho bếp','err');
+    }
+  }else{
+    toast('Đã approve phiếu SX');
+  }
+  loadPRs();
+}
 async function doCompleteLine(prId,lineId,planned,productionDate){
   const input=document.getElementById(`qty-${lineId}`);
   const val=(input?.value??'').trim();
@@ -2251,7 +2450,7 @@ async function loadStock(){
 // ══════════════════════════════════════════════════════════════════════════════
 let irLines=[];
 async function pageInventoryRequests(){
-  await Promise.all([loadAllItems(),loadAllWarehouses(),loadAllSuppliers()]);
+  await Promise.all([loadAllItems(),loadAllWarehouses(),loadAllSuppliers(),loadAllUnits()]);
   document.getElementById('content').innerHTML=`
   <div class="tabs">
     <div class="tab active" onclick="switchIRTab('list',this)">📋 Danh sách</div>
@@ -2330,15 +2529,17 @@ function renderIRLines(){
     <div style="display:grid;grid-template-columns:1fr 80px 70px ${isPurchase?'90px':''} 50px 32px;gap:5px;margin-bottom:5px;align-items:center">
       ${acHtml('acir'+i,pool,l.itemId,'Tìm nguyên liệu / sản phẩm...')}
       <input type="number" step="0.001" value="${l.qty??''}" onchange="irLines[${i}].qty=this.value" placeholder="Qty">
-      <input id="ir-unit-${i}" value="${l.unit??''}" onchange="irLines[${i}].unit=this.value" placeholder="kg, cái...">
+      <select id="ir-unit-${i}" onchange="irLines[${i}].unit=this.value">${unitSelectHtml(l.unit)}</select>
       ${isPurchase?`<input type="number" step="0.01" value="${l.cost??''}" onchange="irLines[${i}].cost=this.value" placeholder="Đơn giá">`:''}
       <input type="number" value="${l.sort||i+1}" onchange="irLines[${i}].sort=+this.value">
       <button class="btn btn-danger btn-sm" onclick="irLines.splice(${i},1);renderIRLines()">✕</button>
     </div>`).join('');
   irLines.forEach((_,i)=>acOn('acir'+i,item=>{
     irLines[i].itemId=item.id;
-    if(!irLines[i].unit){irLines[i].unit=item.unit||'';
-      const u=document.getElementById('ir-unit-'+i);if(u)u.value=item.unit||'';}
+    if(!irLines[i].unit){
+      const u=document.getElementById('ir-unit-'+i);
+      const val=(item.unit||'').toUpperCase();
+      irLines[i].unit=val;if(u)u.value=val;}
   }));
 }
 function addIRLine(){irLines.push({itemId:'',qty:'',unit:'',cost:'',sort:irLines.length+1});renderIRLines();}

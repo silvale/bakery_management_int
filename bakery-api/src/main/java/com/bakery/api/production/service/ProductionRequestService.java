@@ -253,11 +253,25 @@ public class ProductionRequestService
 
     @Override
     protected void beforeCreate(ProductionRequest e) {
-        String prefix = e.getProductionType() == ProductionType.ORDER ? "PR-ORDER" : "PR-DAILY";
         LocalDate date = e.getProductionDate() != null ? e.getProductionDate() : LocalDate.now();
-        String codePrefix = prefix + "-" + date.format(DATE_FMT) + "-";
+        String dateStr = date.format(DATE_FMT);
+
+        // Lấy group code từ itemGroup của line đầu tiên (nếu có)
+        String groupCode = e.getLines().stream()
+                .map(l -> l.getProduct())
+                .filter(java.util.Objects::nonNull)
+                .map(item -> item.getItemGroup())
+                .filter(java.util.Objects::nonNull)
+                .map(ig -> ig.getCode())
+                .findFirst()
+                .orElse(null);
+
+        // Format: PR-{DATE}-{GROUP}-{INDEX} hoặc PR-{DATE}-{INDEX} nếu không có group
+        String codePrefix = groupCode != null
+                ? "PR-" + dateStr + "-" + groupCode + "-"
+                : "PR-" + dateStr + "-";
         long count = repository.countByCodeStartingWith(codePrefix);
-        e.setCode(codePrefix + String.format("%03d", count + 1));
+        e.setCode(codePrefix + (count + 1));
     }
 
     /**
@@ -483,27 +497,35 @@ public class ProductionRequestService
         inMv.setNote("Bánh thành phẩm từ phiếu " + e.getCode());
         stockMovementRepository.save(inMv);
 
-        // Tạo DeliveryRecord
-        DeliveryRecord dr = new DeliveryRecord();
-        dr.setProductionRequestLine(line);
-        dr.setQtyProduced(qtyProduced);
-        dr.setDeliveryStatus(DeliveryStatus.READY);
-        dr.setNote(note);
-        DeliveryRecord savedDr = deliveryRecordRepository.save(dr);
+        // BTP (SEMI_PRODUCT) ở lại kho bếp — không tạo DeliveryRecord, không giao shop
+        boolean isSemiProduct = e.getProductionType() == ProductionType.SEMI;
 
-        // Nếu lệch → tạo ProductionAdjustment chờ bếp trưởng duyệt
-        if (hasDeviation) {
-            ProductionAdjustment adj = new ProductionAdjustment();
-            adj.setDeliveryRecord(savedDr);
-            adj.setAdjustmentType(adjustmentType);
-            adj.setSource(AdjustmentSource.KITCHEN_COMPLETE);
-            adj.setOriginalQty(plannedQty);
-            adj.setAdjustedQty(qtyProduced);
-            adj.setDelta(qtyProduced.subtract(plannedQty));
-            adj.setReason(reason);
-            adj.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
-            adj.setCreatedBy(actorResolver.currentUserId());
-            adjustmentRepository.save(adj);
+        if (!isSemiProduct) {
+            // Tạo DeliveryRecord — chỉ cho PRODUCT thành phẩm giao shop
+            DeliveryRecord dr = new DeliveryRecord();
+            dr.setProductionRequestLine(line);
+            dr.setQtyProduced(qtyProduced);
+            dr.setDeliveryStatus(DeliveryStatus.READY);
+            dr.setNote(note);
+            DeliveryRecord savedDr = deliveryRecordRepository.save(dr);
+
+            // Nếu lệch → tạo ProductionAdjustment chờ bếp trưởng duyệt
+            if (hasDeviation) {
+                ProductionAdjustment adj = new ProductionAdjustment();
+                adj.setDeliveryRecord(savedDr);
+                adj.setAdjustmentType(adjustmentType);
+                adj.setSource(AdjustmentSource.KITCHEN_COMPLETE);
+                adj.setOriginalQty(plannedQty);
+                adj.setAdjustedQty(qtyProduced);
+                adj.setDelta(qtyProduced.subtract(plannedQty));
+                adj.setReason(reason);
+                adj.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+                adj.setCreatedBy(actorResolver.currentUserId());
+                adjustmentRepository.save(adj);
+            }
+        } else {
+            log.info("completeLine SEMI: {} × {} → kho bếp (không tạo DeliveryRecord)",
+                    line.getProduct().getCode(), qtyProduced);
         }
 
         line.setLineStatus(ProductionLineStatus.COMPLETED);
