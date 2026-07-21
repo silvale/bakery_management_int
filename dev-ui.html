@@ -81,46 +81,89 @@ tr:hover td{background:#f8fafc}
   <h1>🥐 Bakery Dev</h1>
   <div class="nav-group">
     <div class="nav-label">Master Data</div>
-    <div class="nav-item active" onclick="nav('items-list')">📋 Sản phẩm</div>
-    <div class="nav-item" onclick="nav('item-form',{})">➕ Tạo sản phẩm</div>
-    <div class="nav-item" onclick="nav('suppliers')">🏭 Nhà cung cấp</div>
-    <div class="nav-item" onclick="nav('product-mapping')">🔗 Product Mapping</div>
-    <div class="nav-item" onclick="nav('item-groups')">🏠 Item Groups</div>
+    <div class="nav-item active" data-screen="ITEMS" onclick="nav('items-list')">📋 Sản phẩm</div>
+    <div class="nav-item" data-screen="ITEMS" onclick="nav('item-form',{})">➕ Tạo sản phẩm</div>
+    <div class="nav-item" data-screen="SUPPLIERS" onclick="nav('suppliers')">🏭 Nhà cung cấp</div>
+    <div class="nav-item" data-screen="PRODUCT_MAPPING" onclick="nav('product-mapping')">🔗 Product Mapping</div>
+    <div class="nav-item" data-screen="ITEM_GROUPS" onclick="nav('item-groups')">🏠 Item Groups</div>
   </div>
   <div class="nav-group">
     <div class="nav-label">Kế hoạch SX</div>
-    <div class="nav-item" onclick="nav('sx-config')">📋 Cấu hình SX</div>
-    <div class="nav-item" onclick="nav('prod-groups')">🔧 Prod Groups</div>
-    <div class="nav-item" onclick="nav('threshold-rules')">📏 Threshold Rules</div>
-    <div class="nav-item" onclick="nav('prod-plans')">📅 Kế hoạch ngày</div>
+    <div class="nav-item" data-screen="SX_CONFIG" onclick="nav('sx-config')">📋 Cấu hình SX</div>
+    <div class="nav-item" data-screen="PROD_GROUPS" onclick="nav('prod-groups')">🔧 Prod Groups</div>
+    <div class="nav-item" data-screen="THRESHOLD_RULES" onclick="nav('threshold-rules')">📏 Threshold Rules</div>
+    <div class="nav-item" data-screen="PROD_PLANS" onclick="nav('prod-plans')">📅 Kế hoạch ngày</div>
   </div>
   <div class="nav-group">
     <div class="nav-label">Sản xuất</div>
-    <div class="nav-item" onclick="nav('prod-requests')">📝 Phiếu SX</div>
-    <div class="nav-item" onclick="nav('delivery-records')">🚚 Giao nhận</div>
-    <div class="nav-item" onclick="nav('prod-adjustments')">⚠️ Điều chỉnh SX</div>
+    <div class="nav-item" data-screen="PROD_REQUESTS" onclick="nav('prod-requests')">📝 Phiếu SX</div>
+    <div class="nav-item" data-screen="DELIVERY_RECORDS" onclick="nav('delivery-records')">🚚 Giao nhận</div>
+    <div class="nav-item" data-screen="PROD_ADJUSTMENTS" onclick="nav('prod-adjustments')">⚠️ Điều chỉnh SX</div>
   </div>
   <div class="nav-group">
     <div class="nav-label">Kho</div>
-    <div class="nav-item" onclick="nav('stock-summary')">📦 Tồn kho</div>
-    <div class="nav-item" onclick="nav('inventory-requests')">📋 Phiếu kho</div>
+    <div class="nav-item" data-screen="STOCK_SUMMARY" onclick="nav('stock-summary')">📦 Tồn kho</div>
+    <div class="nav-item" data-screen="INVENTORY_REQUESTS" onclick="nav('inventory-requests')">📋 Phiếu kho</div>
   </div>
   <div class="nav-group">
     <div class="nav-label">Báo cáo</div>
-    <div class="nav-item" onclick="nav('daily-report')">📊 Báo cáo ngày</div>
-    <div class="nav-item" onclick="nav('huy-banh')">🗑 Hủy bánh</div>
-    <div class="nav-item" onclick="nav('pos-sales')">🏪 POS Sales</div>
+    <div class="nav-item" data-screen="DAILY_REPORT" onclick="nav('daily-report')">📊 Báo cáo ngày</div>
+    <div class="nav-item" data-screen="HUY_BANH" onclick="nav('huy-banh')">🗑 Hủy bánh</div>
+    <div class="nav-item" data-screen="POS_SALES" onclick="nav('pos-sales')">🏪 POS Sales</div>
   </div>
+  <div class="nav-group">
+    <div class="nav-label">Hệ thống</div>
+    <div class="nav-item" data-screen="USERS" onclick="nav('users')">👤 Tài khoản</div>
+    <div class="nav-item" data-screen="ROLES" onclick="nav('roles')">🔐 Phân quyền</div>
+  </div>
+
+<!-- Login Overlay -->
+<div id="login-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.85);z-index:10000;display:flex;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;padding:36px 40px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+    <div style="text-align:center;margin-bottom:24px">
+      <div style="font-size:32px;margin-bottom:8px">🥐</div>
+      <h2 style="font-size:18px;font-weight:700;color:#0f172a">Bakery Management</h2>
+      <p style="font-size:13px;color:#64748b;margin-top:4px">Đăng nhập để tiếp tục</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#475569;display:block;margin-bottom:4px">Tên đăng nhập</label>
+        <input id="lo-username" type="text" placeholder="admin" autocomplete="username"
+          style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:9px 12px;font-size:14px;outline:none"
+          onkeydown="if(event.key==='Enter')document.getElementById('lo-password').focus()">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#475569;display:block;margin-bottom:4px">Mật khẩu</label>
+        <input id="lo-password" type="password" placeholder="••••••••" autocomplete="current-password"
+          style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:9px 12px;font-size:14px;outline:none"
+          onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <div id="lo-error" style="display:none;color:#dc2626;font-size:12px;text-align:center"></div>
+      <button onclick="doLogin()" id="lo-btn"
+        style="background:#2563eb;color:#fff;border:none;border-radius:6px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px">
+        Đăng nhập
+      </button>
+    </div>
+  </div>
+</div>
 </nav>
 
 <div id="main">
-  <div id="topbar"><h2 id="page-title">Danh sách sản phẩm</h2></div>
+  <div id="topbar">
+  <h2 id="page-title">Danh sách sản phẩm</h2>
+  <div id="user-badge" style="display:none;align-items:center;gap:10px;font-size:13px">
+    <span id="user-info" style="color:#475569"></span>
+    <button onclick="doLogout()" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;color:#374151">Đăng xuất</button>
+  </div>
+</div>
   <div id="content"></div>
 </div>
 <div id="toast"></div>
 
 <script>
 const BASE='http://localhost:8080';
+let _token = sessionStorage.getItem('bk_token') || '';
+let _currentUser = null;
 let allItems=[],allWarehouses=[],allSuppliers=[],allItemGroups=[],mainStockItems=[];
 let allUnits=[]; // loaded from code_value WHERE group_key='UNIT'
 const PAGE_SIZE=20;
@@ -128,16 +171,31 @@ const PAGE_SIZE=20;
 // ── API ───────────────────────────────────────────────────────────────────────
 async function api(method,path,body){
   try{
-    const res=await fetch(BASE+path,{method,headers:{'Content-Type':'application/json'},body:body!=null?JSON.stringify(body):undefined});
-    if(!res.ok){const t=await res.text();throw new Error(t||res.statusText)}
+    const headers={'Content-Type':'application/json'};
+    if(_token) headers['Authorization']='Bearer '+_token;
+    const res=await fetch(BASE+path,{method,headers,body:body!=null?JSON.stringify(body):undefined});
+    if(res.status===401){doLogout();throw new Error('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');}
+    if(!res.ok){
+      const t=await res.text();
+      let msg=res.statusText||'Lỗi không xác định';
+      try{const j=JSON.parse(t);msg=j.detail||j.message||j.title||msg;}catch(_){if(t)msg=t;}
+      throw new Error(msg);
+    }
     if(res.status===204)return null;
     return res.json();
   }catch(e){toast(e.message,'err');throw e}
 }
 async function apiForm(path,formData){
   try{
-    const res=await fetch(BASE+path,{method:'POST',body:formData});
-    if(!res.ok){const t=await res.text();throw new Error(t||res.statusText)}
+    const fHeaders={};
+    if(_token) fHeaders['Authorization']='Bearer '+_token;
+    const res=await fetch(BASE+path,{method:'POST',headers:fHeaders,body:formData});
+    if(!res.ok){
+      const t=await res.text();
+      let msg=res.statusText||'Lỗi không xác định';
+      try{const j=JSON.parse(t);msg=j.detail||j.message||j.title||msg;}catch(_){if(t)msg=t;}
+      throw new Error(msg);
+    }
     return res.json();
   }catch(e){toast(e.message,'err');throw e}
 }
@@ -170,6 +228,103 @@ function unitSelectHtml(selectedVal=''){
   return `<option value="">— Chọn ĐVT —</option>${opts}`;
 }
 
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function doLogin(){
+  const username = document.getElementById('lo-username').value.trim();
+  const password = document.getElementById('lo-password').value;
+  const errEl = document.getElementById('lo-error');
+  const btn = document.getElementById('lo-btn');
+  if(!username||!password){errEl.textContent='Vui lòng nhập đầy đủ';errEl.style.display='block';return;}
+  btn.disabled=true; btn.textContent='Đang đăng nhập...';
+  try{
+    const res = await fetch(BASE+'/api/v1/auth/login',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username,password})
+    });
+    if(!res.ok){
+      const t=await res.text();
+      let msg='Sai username/password';
+      try{const j=JSON.parse(t);msg=j.detail||j.message||j.title||msg;}catch(_){if(t)msg=t;}
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    _token = data.accessToken;
+    _currentUser = data;
+    sessionStorage.setItem('bk_token', _token);
+    sessionStorage.setItem('bk_user', JSON.stringify(data));
+    document.getElementById('login-overlay').style.display='none';
+    document.getElementById('user-badge').style.display='flex';
+    document.getElementById('user-info').textContent=`${data.fullName||data.username} (${data.roleCode})`;
+    errEl.style.display='none';
+    await loadAndApplySidebarPermissions(data.roleCode, data.roleId);
+    // Navigate to first visible screen
+    const firstVisible = document.querySelector('.nav-item[data-screen]:not([style*="none"])');
+    if(firstVisible) firstVisible.click(); else nav('items-list');
+  }catch(e){
+    errEl.textContent=e.message||'Đăng nhập thất bại';
+    errEl.style.display='block';
+  }finally{btn.disabled=false; btn.textContent='Đăng nhập';}
+}
+
+async function doLogout(){
+  try{ if(_token) await fetch(BASE+'/api/v1/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+_token}}); }catch(_){}
+  _token=''; _currentUser=null;
+  sessionStorage.removeItem('bk_token'); sessionStorage.removeItem('bk_user');
+  document.getElementById('user-badge').style.display='none';
+  showLoginScreen();
+}
+
+function showLoginScreen(){
+  const overlay = document.getElementById('login-overlay');
+  overlay.style.display='flex';
+  setTimeout(()=>document.getElementById('lo-username').focus(),100);
+}
+
+function checkAuth(){
+  const saved = sessionStorage.getItem('bk_user');
+  if(_token && saved){
+    try{
+      _currentUser = JSON.parse(saved);
+      document.getElementById('user-badge').style.display='flex';
+      document.getElementById('user-info').textContent=`${_currentUser.fullName||_currentUser.username} (${_currentUser.roleCode})`;
+      loadAndApplySidebarPermissions(_currentUser.roleCode, _currentUser.roleId);
+      return true;
+    }catch(_){}
+  }
+  return false;
+}
+
+
+let _userPerms = null; // { "ITEMS": ["VIEW","CREATE",...], ... } or null = superadmin
+
+async function loadAndApplySidebarPermissions(roleCode, roleId){
+  if(roleCode.toUpperCase() === 'SUPER_ADMIN'){
+    _userPerms = null; // null = show all
+  } else {
+    try {
+      _userPerms = await fetch(BASE + `/api/v1/user-roles/${roleId}/permissions`, {
+        headers: _token ? {'Authorization': 'Bearer ' + _token} : {}
+      }).then(r => r.ok ? r.json() : {});
+    } catch(_){ _userPerms = {}; }
+  }
+  applySidebarPermissions();
+}
+
+function applySidebarPermissions(){
+  document.querySelectorAll('.nav-item[data-screen]').forEach(el => {
+    const screen = el.dataset.screen;
+    const visible = _userPerms === null || (_userPerms[screen] && _userPerms[screen].includes('VIEW'));
+    el.style.display = visible ? '' : 'none';
+  });
+  // Hide nav-group label if all items in group are hidden
+  document.querySelectorAll('.nav-group').forEach(group => {
+    const items = group.querySelectorAll('.nav-item');
+    const anyVisible = [...items].some(el => el.style.display !== 'none');
+    group.style.display = anyVisible ? '' : 'none';
+  });
+}
+
 // ── Toast ─────────────────────────────────────────────────────────────────────
 function toast(msg,type='ok'){
   const el=document.createElement('div');
@@ -185,13 +340,15 @@ const PAGE_TITLES={'items-list':'Danh sách sản phẩm','item-form':'Tạo / S
   'sx-config':'Cấu hình sản xuất','prod-groups':'Production Groups','threshold-rules':'Threshold Rules','prod-plans':'Kế hoạch sản xuất',
   'prod-requests':'Phiếu sản xuất','delivery-records':'Giao nhận bếp → shop','prod-adjustments':'Điều chỉnh SX',
   'stock-summary':'Tồn kho','inventory-requests':'Phiếu kho',
-  'daily-report':'Báo cáo ngày','huy-banh':'Hủy bánh','pos-sales':'POS Sales'};
+  'daily-report':'Báo cáo ngày','huy-banh':'Hủy bánh','pos-sales':'POS Sales',
+  'users':'Tài khoản người dùng','roles':'Phân quyền (Roles)'};
 const PAGE_FNS={'items-list':pageItemsList,'item-form':pageItemForm,'suppliers':pageSuppliers,
   'product-mapping':pageProductMapping,'item-groups':pageItemGroups,
   'sx-config':pageSxConfig,'prod-groups':pageProdGroups,
   'threshold-rules':pageThresholdRules,'prod-plans':pageProdPlans,'prod-requests':pageProdRequests,
   'delivery-records':pageDeliveryRecords,'prod-adjustments':pageProdAdjustments,'stock-summary':pageStockSummary,
-  'inventory-requests':pageInventoryRequests,'daily-report':pageDailyReport,'huy-banh':pageHuyBanh,'pos-sales':pagePosSales};
+  'inventory-requests':pageInventoryRequests,'daily-report':pageDailyReport,'huy-banh':pageHuyBanh,'pos-sales':pagePosSales,
+  'users':showUsers,'roles':showRoles};
 
 function nav(page,data){
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
@@ -3144,8 +3301,324 @@ async function loadPOS(){
   </tr>`).join('')}</tbody></table>`;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ROLES (Phân quyền)
+// ══════════════════════════════════════════════════════════════════════════════
+async function showRoles(){
+  document.getElementById('page-title').textContent='Phân quyền (User Roles)';
+  const content=document.getElementById('content');
+  content.innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+    <div class="card">
+      <div class="card-title">Tạo / Sửa Role</div>
+      <input type="hidden" id="role-id">
+      <div class="form-grid">
+        <div class="field"><label>Code *</label><input id="role-code" placeholder="VD: ADMIN, KITCHEN, SHOP"></div>
+        <div class="field"><label>Tên *</label><input id="role-name" placeholder="VD: Quản trị viên"></div>
+        <div class="field form-full"><label>Mô tả</label><input id="role-desc" placeholder="Mô tả ngắn về role này"></div>
+      </div>
+      <div class="action-row">
+        <button class="btn btn-ghost" onclick="resetRoleForm()">Huỷ</button>
+        <button class="btn btn-primary" onclick="saveRole()">💾 Lưu</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Danh sách Role</div>
+      <div id="role-list"><div class="empty">Đang tải...</div></div>
+    </div>
+  </div>
+  <div class="card" id="perm-matrix-card" style="margin-top:16px;display:none">
+    <div class="card-title" id="perm-matrix-title">Ma trận phân quyền</div>
+    <div id="perm-matrix-body"></div>
+    <div class="action-row" style="margin-top:12px">
+      <button class="btn btn-ghost" onclick="document.getElementById('perm-matrix-card').style.display='none'">Đóng</button>
+      <button class="btn btn-primary" id="perm-save-btn" onclick="savePermissions()">💾 Lưu quyền</button>
+    </div>
+  </div>`;
+  loadRoles();
+}
+function resetRoleForm(){
+  document.getElementById('role-id').value='';
+  document.getElementById('role-code').value='';
+  document.getElementById('role-name').value='';
+  document.getElementById('role-desc').value='';
+}
+function editRole(r){
+  document.getElementById('role-id').value=r.id;
+  document.getElementById('role-code').value=r.code||'';
+  document.getElementById('role-name').value=r.name||'';
+  document.getElementById('role-desc').value=r.description||'';
+}
+async function saveRole(){
+  const id=document.getElementById('role-id').value;
+  const body={
+    code:document.getElementById('role-code').value.trim(),
+    name:document.getElementById('role-name').value.trim(),
+    description:document.getElementById('role-desc').value.trim()||null
+  };
+  if(!body.code||!body.name){toast('Code và Tên là bắt buộc','err');return;}
+  if(id){
+    await api('PUT',`/api/v1/user-roles/${id}`,body);
+    toast('Đã cập nhật role');
+  }else{
+    await api('POST','/api/v1/user-roles',body);
+    toast('Đã tạo role mới');
+  }
+  resetRoleForm();loadRoles();
+}
+async function deleteRole(id,name){
+  if(!confirm(`Xoá role "${name}"?`))return;
+  await api('DELETE',`/api/v1/user-roles/${id}`);
+  toast('Đã xoá role');loadRoles();
+}
+async function loadRoles(){
+  const data=await api('GET','/api/v1/user-roles?size=100');
+  const el=document.getElementById('role-list');if(!el)return;
+  const list=data?.content??data??[];
+  if(!list.length){el.innerHTML='<div class="empty">Chưa có role nào</div>';return;}
+  el.innerHTML=`<table><thead><tr><th>Code</th><th>Tên</th><th>Mô tả</th><th></th></tr></thead>
+  <tbody>${list.map(r=>`<tr>
+    <td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">${r.code}</code></td>
+    <td>${r.name}</td>
+    <td style="color:#64748b;font-size:12px">${r.description||'—'}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" onclick='editRole(${JSON.stringify(r)})'>✏️</button>
+      <button class="btn btn-primary btn-sm" onclick="showPermissionMatrix('${r.id}','${r.name}')">🔑</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteRole('${r.id}','${r.name}')">🗑</button>
+    </td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
+
+// ── Permission Matrix ───────────────────────────────────────────────────────
+let _permRoleId = null;
+async function showPermissionMatrix(roleId, roleName){
+  _permRoleId = roleId;
+  const card = document.getElementById('perm-matrix-card');
+  const title = document.getElementById('perm-matrix-title');
+  const body  = document.getElementById('perm-matrix-body');
+  title.textContent = `Ma trận phân quyền: ${roleName}`;
+  body.innerHTML = '<div class="empty">Đang tải...</div>';
+  card.style.display = 'block';
+  card.scrollIntoView({behavior:'smooth', block:'start'});
+
+  const [screens, permsMap] = await Promise.all([
+    api('GET', '/api/v1/screens'),
+    api('GET', `/api/v1/user-roles/${roleId}/permissions`)
+  ]);
+  // permsMap: { "ITEMS": ["VIEW","CREATE",...], ... }
+
+  // collect all unique actions across screens in order
+  const ACTION_ORDER = ['VIEW','CREATE','UPDATE','DELETE','APPROVE','REJECT','FINALIZE','HISTORY'];
+
+  body.innerHTML = `
+  <div style="overflow-x:auto">
+  <table style="border-collapse:collapse;width:100%;font-size:13px">
+    <thead>
+      <tr>
+        <th style="text-align:left;padding:8px 12px;background:#f8fafc;border-bottom:2px solid #e2e8f0;min-width:160px">Màn hình</th>
+        ${ACTION_ORDER.map(a=>`<th style="text-align:center;padding:8px 10px;background:#f8fafc;border-bottom:2px solid #e2e8f0;color:#475569;font-size:11px">${a}</th>`).join('')}
+        <th style="text-align:center;padding:8px 10px;background:#f8fafc;border-bottom:2px solid #e2e8f0;color:#94a3b8;font-size:11px">Tất cả</th>
+      </tr>
+    </thead>
+    <tbody>
+    ${screens.map((sc,i)=>{
+      const avail = sc.availableActions || [];
+      const granted = (permsMap[sc.code] || []);
+      return `<tr style="background:${i%2===0?'#fff':'#f8fafc'}">
+        <td style="padding:8px 12px;font-weight:500;border-bottom:1px solid #f1f5f9">
+          <div>${sc.name}</div>
+          <div style="color:#94a3b8;font-size:11px;font-family:monospace">${sc.code}</div>
+        </td>
+        ${ACTION_ORDER.map(a=>{
+          if(!avail.includes(a)) return `<td style="text-align:center;padding:8px 10px;border-bottom:1px solid #f1f5f9"><span style="color:#e2e8f0">—</span></td>`;
+          const checked = granted.includes(a) ? 'checked' : '';
+          return `<td style="text-align:center;padding:8px 10px;border-bottom:1px solid #f1f5f9">
+            <input type="checkbox" class="perm-cb" data-screen="${sc.code}" data-action="${a}" ${checked}
+              style="width:16px;height:16px;cursor:pointer;accent-color:#6366f1">
+          </td>`;
+        }).join('')}
+        <td style="text-align:center;padding:8px 10px;border-bottom:1px solid #f1f5f9">
+          <button class="btn btn-ghost btn-sm" onclick="toggleRow('${sc.code}',${JSON.stringify(avail)})"
+            style="font-size:11px;padding:2px 6px">±</button>
+        </td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+  </table>
+  </div>
+  <div style="margin-top:8px;font-size:12px;color:#94a3b8">
+    💡 Tip: SUPER_ADMIN bỏ qua toàn bộ phân quyền (không cần cấu hình).
+  </div>`;
+}
+
+function toggleRow(screenCode, availActions){
+  const cbs = [...document.querySelectorAll(`.perm-cb[data-screen="${screenCode}"]`)];
+  const allChecked = cbs.every(cb => cb.checked);
+  cbs.forEach(cb => { if(availActions.includes(cb.dataset.action)) cb.checked = !allChecked; });
+}
+
+async function savePermissions(){
+  if(!_permRoleId) return;
+  const cbs = [...document.querySelectorAll('.perm-cb:checked')];
+  const permissions = cbs.map(cb=>({screenCode: cb.dataset.screen, actionCode: cb.dataset.action}));
+  await api('PUT', `/api/v1/user-roles/${_permRoleId}/permissions`, {permissions});
+  toast('Đã lưu phân quyền ✓');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// USERS (Tài khoản)
+// ══════════════════════════════════════════════════════════════════════════════
+let allRoles=[];
+async function showUsers(){
+  document.getElementById('page-title').textContent='Tài khoản người dùng';
+  const content=document.getElementById('content');
+  allRoles=await api('GET','/api/v1/user-roles?size=100').then(d=>d?.content??d??[]);
+  const roleOptions=allRoles.map(r=>`<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
+  content.innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 2fr;gap:16px;align-items:start">
+    <div class="card">
+      <div class="card-title">Tạo / Sửa tài khoản</div>
+      <input type="hidden" id="user-id">
+      <div class="form-grid">
+        <div class="field form-full"><label>Tên đăng nhập *</label><input id="user-username" placeholder="VD: admin, kitchen1"></div>
+        <div class="field form-full"><label>Họ và tên</label><input id="user-fullname" placeholder="Nguyễn Văn A"></div>
+        <div class="field form-full"><label>Role</label>
+          <select id="user-role"><option value="">-- Chọn role --</option>${roleOptions}</select></div>
+        <div class="field form-full"><label id="user-pw-label">Mật khẩu *</label>
+          <input type="password" id="user-password" placeholder="Để trống = giữ nguyên khi sửa"></div>
+      </div>
+      <div class="action-row">
+        <button class="btn btn-ghost" onclick="resetUserForm()">Huỷ</button>
+        <button class="btn btn-primary" onclick="saveUser()">💾 Lưu</button>
+      </div>
+
+      <hr class="divider">
+      <div class="card-title">Đổi mật khẩu</div>
+      <div class="field" style="margin-bottom:8px"><label>Tài khoản</label>
+        <select id="cp-user-id"><option value="">— Chọn tài khoản —</option></select></div>
+      <div class="field" style="margin-bottom:8px"><label>Mật khẩu mới *</label>
+        <input type="password" id="cp-new-password"></div>
+      <div class="action-row">
+        <button class="btn btn-warn" onclick="changePassword()">🔑 Đổi mật khẩu</button>
+      </div>
+
+      <hr class="divider">
+      <div class="card-title">🔑 Test Login</div>
+      <div class="field" style="margin-bottom:8px"><label>Username</label><input id="login-user" placeholder="admin"></div>
+      <div class="field" style="margin-bottom:8px"><label>Password</label><input type="password" id="login-pass"></div>
+      <div class="action-row">
+        <button class="btn btn-success" onclick="testLogin()">🚀 Login</button>
+      </div>
+      <div id="login-result" style="margin-top:10px;font-size:12px;word-break:break-all;background:#f8fafc;padding:8px;border-radius:4px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Danh sách tài khoản</div>
+      <div id="user-list"><div class="empty">Đang tải...</div></div>
+    </div>
+  </div>`;
+  loadUsers();
+}
+function resetUserForm(){
+  document.getElementById('user-id').value='';
+  document.getElementById('user-username').value='';
+  document.getElementById('user-fullname').value='';
+  document.getElementById('user-role').value='';
+  document.getElementById('user-password').value='';
+  document.getElementById('user-pw-label').textContent='Mật khẩu *';
+}
+function editUser(u){
+  document.getElementById('user-id').value=u.id;
+  document.getElementById('user-username').value=u.username||'';
+  document.getElementById('user-fullname').value=u.fullName||'';
+  document.getElementById('user-role').value=u.roleId||'';
+  document.getElementById('user-password').value='';
+  document.getElementById('user-pw-label').textContent='Mật khẩu mới (để trống = giữ nguyên)';
+}
+async function saveUser(){
+  const id=document.getElementById('user-id').value;
+  const body={
+    username:document.getElementById('user-username').value.trim(),
+    fullName:document.getElementById('user-fullname').value.trim()||null,
+    roleId:document.getElementById('user-role').value||null,
+    password:document.getElementById('user-password').value||null
+  };
+  if(!body.username){toast('Username là bắt buộc','err');return;}
+  if(!id&&!body.password){toast('Mật khẩu là bắt buộc khi tạo mới','err');return;}
+  if(id){
+    await api('PUT',`/api/v1/user-accounts/${id}`,body);
+    toast('Đã cập nhật tài khoản');
+  }else{
+    await api('POST','/api/v1/user-accounts',body);
+    toast('Đã tạo tài khoản mới');
+  }
+  resetUserForm();loadUsers();
+}
+async function deleteUser(id,name){
+  if(!confirm(`Xoá tài khoản "${name}"?`))return;
+  await api('DELETE',`/api/v1/user-accounts/${id}`);
+  toast('Đã xoá tài khoản');loadUsers();
+}
+async function changePassword(){
+  const id=document.getElementById('cp-user-id').value.trim();
+  const pw=document.getElementById('cp-new-password').value;
+  if(!id||!pw){toast('Chọn tài khoản và nhập mật khẩu mới','err');return;}
+  await api('POST',`/api/v1/user-accounts/${id}/change-password`,{newPassword:pw});
+  toast('Đã đổi mật khẩu thành công');
+  document.getElementById('cp-new-password').value='';
+}
+async function testLogin(){
+  const username=document.getElementById('login-user').value.trim();
+  const password=document.getElementById('login-pass').value;
+  if(!username||!password){toast('Nhập username và password','err');return;}
+  try{
+    const res=await api('POST','/api/v1/auth/login',{username,password});
+    const el=document.getElementById('login-result');
+    el.style.display='block';
+    el.innerHTML=`<strong style="color:#16a34a">✅ Login thành công!</strong><br>
+      Role: <strong>${res.roleCode}</strong> (${res.roleName})<br>
+      User: ${res.fullName||res.username}<br>
+      <span style="color:#64748b">Access Token (đầu):</span><br>
+      <code style="font-size:11px">${(res.accessToken||'').substring(0,60)}...</code>`;
+    toast(`Đăng nhập thành công — ${res.username} (${res.roleCode})`);
+  }catch(e){
+    document.getElementById('login-result').style.display='none';
+    toast('Đăng nhập thất bại — sai username/password','err');
+  }
+}
+async function loadUsers(){
+  const data=await api('GET','/api/v1/user-accounts?size=100');
+  const el=document.getElementById('user-list');if(!el)return;
+  const list=data?.content??data??[];
+  if(!list.length){el.innerHTML='<div class="empty">Chưa có tài khoản nào</div>';return;}
+  // populate change-password dropdown
+  const cpSel=document.getElementById('cp-user-id');
+  if(cpSel){
+    const cur=cpSel.value;
+    cpSel.innerHTML='<option value="">— Chọn tài khoản —</option>'+
+      list.map(u=>`<option value="${u.id}">${u.fullName||u.username} (${u.username})</option>`).join('');
+    if(cur)cpSel.value=cur;
+  }
+  el.innerHTML=`<table><thead><tr><th>Username</th><th>Họ tên</th><th>Role</th><th>Trạng thái</th><th></th></tr></thead>
+  <tbody>${list.map(u=>`<tr>
+    <td><strong>${u.username}</strong></td>
+    <td>${u.fullName||'—'}</td>
+    <td>${u.roleCode?`<span class="badge b-approved">${u.roleCode}</span>`:'<span style="color:#94a3b8">Chưa gán</span>'}</td>
+    <td><span class="badge ${u.status==='ACTIVE'?'b-active':'b-rejected'}">${u.status||'?'}</span></td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" onclick='editUser(${JSON.stringify(u)})' title="Sửa">✏️</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cp-user-id').value='${u.id}'" title="Chọn đổi MK">🔑</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${u.username}')">🗑</button>
+    </td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
-nav('items-list');
+if(checkAuth()){
+  nav('items-list');
+}else{
+  showLoginScreen();
+}
 </script>
 </body>
 </html>

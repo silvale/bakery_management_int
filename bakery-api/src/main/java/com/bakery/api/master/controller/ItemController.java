@@ -27,6 +27,9 @@ public class ItemController extends BakeryAdminResource<ItemRequest, ItemRespons
     private final ItemService service;
 
     @Override
+    protected String screenCode() { return "ITEMS"; }
+
+    @Override
     protected BakeryAdminService<ItemRequest, ItemResponse> getService() {
         return service;
     }

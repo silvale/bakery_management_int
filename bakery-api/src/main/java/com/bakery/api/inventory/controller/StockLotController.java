@@ -44,6 +44,9 @@ public class StockLotController extends BakeryAdminResource<Void, StockLotRespon
     private final StockLotRepository stockLotRepository;
 
     @Override
+    protected String screenCode() { return "STOCK_SUMMARY"; }
+
+    @Override
     protected BakeryAdminService<Void, StockLotResponse> getService() {
         return service;
     }

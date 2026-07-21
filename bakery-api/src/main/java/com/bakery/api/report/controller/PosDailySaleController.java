@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import com.bakery.framework.security.RequirePermission;
 
 /**
  * API upload và xem dữ liệu POS.
@@ -23,6 +24,7 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/v1/pos-sales")
 @RequiredArgsConstructor
+@RequirePermission(screen = "POS_SALES", action = "VIEW")
 public class PosDailySaleController {
 
     private final PosDailySaleService service;
@@ -34,6 +36,7 @@ public class PosDailySaleController {
     }
 
     @PostMapping("/upload")
+    @RequirePermission(screen = "POS_SALES", action = "CREATE")
     public PosDailySaleService.UploadResult upload(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate saleDate,
             @RequestParam MultipartFile file) {

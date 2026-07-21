@@ -12,6 +12,7 @@ import com.bakery.api.production.service.ProductionIngredientService;
 import com.bakery.api.production.service.ProductionPlanService;
 import com.bakery.api.production.service.ProductionPlannerService;
 import jakarta.validation.Valid;
+import com.bakery.framework.security.RequirePermission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -34,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/production/plans")
 @RequiredArgsConstructor
+@RequirePermission(screen = "PROD_PLANS", action = "VIEW")
 public class ProductionPlanController {
 
     private final ProductionPlanService service;
@@ -57,6 +59,7 @@ public class ProductionPlanController {
      * Idempotent: nếu đã tồn tại → trả về plan hiện tại.
      */
     @PostMapping("/generate")
+    @RequirePermission(screen = "PROD_PLANS", action = "CREATE")
     public ProductionPlanResponse generate(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         ProductionPlan plan = plannerService.generateForDate(date);
@@ -77,6 +80,7 @@ public class ProductionPlanController {
 
     /** Manager điều chỉnh số lượng khi còn DRAFT. */
     @PutMapping("/{id}/adjust")
+    @RequirePermission(screen = "PROD_PLANS", action = "CREATE")
     public ProductionPlanResponse adjust(
             @PathVariable UUID id,
             @Valid @RequestBody ProductionPlanAdjustRequest req) {
@@ -88,6 +92,7 @@ public class ProductionPlanController {
      * Response bao gồm cả danh sách NL thiếu (nếu có) để UI cảnh báo.
      */
     @PostMapping("/{id}/approve")
+    @RequirePermission(screen = "PROD_PLANS", action = "APPROVE")
     public java.util.Map<String, Object> approve(@PathVariable UUID id) {
         ProductionPlanResponse plan = service.approve(id);
 
@@ -109,6 +114,7 @@ public class ProductionPlanController {
 
     /** Manager reject DRAFT. */
     @PostMapping("/{id}/reject")
+    @RequirePermission(screen = "PROD_PLANS", action = "REJECT")
     public ProductionPlanResponse reject(
             @PathVariable UUID id,
             @RequestParam(required = false) String reason) {
@@ -119,6 +125,7 @@ public class ProductionPlanController {
      * Tạo lại kế hoạch đã bị REJECTED — xóa lines cũ, generate DRAFT mới với tồn kho = 0.
      */
     @PostMapping("/{id}/regenerate")
+    @RequirePermission(screen = "PROD_PLANS", action = "CREATE")
     public ProductionPlanResponse regenerate(@PathVariable UUID id) {
         ProductionPlan plan = plannerService.regenerateRejected(id);
         return service.findById(plan.getId());
@@ -129,6 +136,7 @@ public class ProductionPlanController {
      * Chỉ cho phép xóa khi trạng thái là DRAFT.
      */
     @DeleteMapping("/{id}")
+    @RequirePermission(screen = "PROD_PLANS", action = "CREATE")
     public ResponseEntity<Void> deleteDraft(@PathVariable UUID id) {
         service.deleteDraft(id);
         return ResponseEntity.noContent().build();
@@ -139,6 +147,7 @@ public class ProductionPlanController {
      * Dùng khi approve xong nhưng phiếu SX chưa được tạo (vd: items chưa có item_group).
      */
     @PostMapping("/{id}/generate-requests")
+    @RequirePermission(screen = "PROD_PLANS", action = "CREATE")
     public java.util.Map<String, Object> generateRequests(@PathVariable UUID id) {
         int count = service.generateRequestsFromApprovedPlan(id);
         return java.util.Map.of("planId", id, "requestsCreated", count);
@@ -149,6 +158,7 @@ public class ProductionPlanController {
      * BATCH_FORMULA: plannedQty = số cối; FREE_GROUP: plannedQty = override target.
      */
     @PutMapping("/{id}/groups/{groupId}/planned-qty")
+    @RequirePermission(screen = "PROD_PLANS", action = "CREATE")
     public ProductionPlanResponse updateGroupPlannedQty(
             @PathVariable UUID id,
             @PathVariable UUID groupId,
@@ -174,6 +184,7 @@ public class ProductionPlanController {
      * Dùng khi check NL thấy thiếu — tạo PO để nhập thêm trước khi xuất sang bếp.
      */
     @PostMapping("/{id}/generate-purchase")
+    @RequirePermission(screen = "PROD_PLANS", action = "CREATE")
     public java.util.Map<String, Object> generatePurchase(@PathVariable UUID id) {
         InventoryRequest req = ingredientService.generatePurchaseRequest(id);
         return java.util.Map.of(
@@ -189,6 +200,7 @@ public class ProductionPlanController {
      * Phiếu ở trạng thái PENDING_APPROVAL — cần Admin duyệt trước khi xuất.
      */
     @PostMapping("/{id}/generate-transfer")
+    @RequirePermission(screen = "PROD_PLANS", action = "CREATE")
     public java.util.Map<String, Object> generateTransfer(@PathVariable UUID id) {
         InventoryRequest req = ingredientService.generateTransferRequest(id);
         return java.util.Map.of(

@@ -7,6 +7,7 @@ import com.bakery.api.production.dto.ItemGroupRequest;
 import com.bakery.api.production.dto.ItemGroupResponse;
 import com.bakery.api.production.service.ItemGroupService;
 import jakarta.validation.Valid;
+import com.bakery.framework.security.RequirePermission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/item-groups")
 @RequiredArgsConstructor
+@RequirePermission(screen = "ITEM_GROUPS", action = "VIEW")
 public class ItemGroupController {
 
     private final ItemGroupService service;
@@ -41,17 +43,20 @@ public class ItemGroupController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @RequirePermission(screen = "ITEM_GROUPS", action = "CREATE")
     public ItemGroupResponse create(@Valid @RequestBody ItemGroupRequest req) {
         return service.create(req);
     }
 
     @PutMapping("/{id}")
+    @RequirePermission(screen = "ITEM_GROUPS", action = "UPDATE")
     public ItemGroupResponse update(@PathVariable UUID id, @Valid @RequestBody ItemGroupRequest req) {
         return service.update(id, req);
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @RequirePermission(screen = "ITEM_GROUPS", action = "DELETE")
     public void delete(@PathVariable UUID id) {
         service.delete(id);
     }

@@ -236,14 +236,14 @@ public class RecipeService
             Item item = itemRepository.findById(req.productId())
                     .orElseThrow(() -> new ResourceNotFoundException("Product", req.productId()));
             if (!(item instanceof Product p)) {
-                throw new IllegalArgumentException("itemId " + req.productId() + " không phải PRODUCT.");
+                throw new IllegalArgumentException("\"" + item.getName() + "\" không phải sản phẩm (PRODUCT).");
             }
             recipe.setProduct(p);
         } else {
             Item item = itemRepository.findById(req.semiProductId())
                     .orElseThrow(() -> new ResourceNotFoundException("SemiProduct", req.semiProductId()));
             if (!(item instanceof SemiProduct sp)) {
-                throw new IllegalArgumentException("itemId " + req.semiProductId() + " không phải SEMI_PRODUCT.");
+                throw new IllegalArgumentException("\"" + item.getName() + "\" không phải bán thành phẩm (SEMI_PRODUCT).");
             }
             recipe.setSemiProduct(sp);
         }

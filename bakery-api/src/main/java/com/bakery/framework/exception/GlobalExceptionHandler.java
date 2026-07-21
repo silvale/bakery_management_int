@@ -20,6 +20,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -49,6 +50,17 @@ public class GlobalExceptionHandler {
         problem.setDetail(ex.getMessage());
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ProblemDetail> handleResponseStatus(ResponseStatusException ex) {
+        HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+        if (status == null) status = HttpStatus.INTERNAL_SERVER_ERROR;
+        ProblemDetail problem = ProblemDetail.forStatus(status);
+        problem.setTitle(status.getReasonPhrase());
+        problem.setDetail(ex.getReason());
+        problem.setProperty("timestamp", Instant.now());
+        return ResponseEntity.status(status).body(problem);
     }
 
     @ExceptionHandler(AccessDeniedException.class)

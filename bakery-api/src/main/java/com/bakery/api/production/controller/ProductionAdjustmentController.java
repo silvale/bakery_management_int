@@ -7,6 +7,7 @@ import java.util.UUID;
 import com.bakery.api.production.entity.ProductionAdjustment;
 import com.bakery.api.production.service.ProductionAdjustmentService;
 import com.bakery.framework.entity.AdjustmentType;
+import com.bakery.framework.security.RequirePermission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/production-adjustments")
 @RequiredArgsConstructor
+@RequirePermission(screen = "PROD_ADJUSTMENTS", action = "VIEW")
 public class ProductionAdjustmentController {
 
     private final ProductionAdjustmentService service;
@@ -42,11 +44,13 @@ public class ProductionAdjustmentController {
     }
 
     @PostMapping("/{id}/approve")
+    @RequirePermission(screen = "PROD_ADJUSTMENTS", action = "APPROVE")
     public ProductionAdjustment approve(@PathVariable UUID id) {
         return service.approve(id);
     }
 
     @PostMapping("/{id}/reject")
+    @RequirePermission(screen = "PROD_ADJUSTMENTS", action = "REJECT")
     public ProductionAdjustment reject(
             @PathVariable UUID id,
             @RequestParam(required = false) String reason) {
@@ -58,6 +62,7 @@ public class ProductionAdjustmentController {
      * Endpoint này chỉ expose cho role ADMIN — bảo vệ ở tầng security config.
      */
     @PostMapping("/admin/correct")
+    @RequirePermission(screen = "PROD_ADJUSTMENTS", action = "APPROVE")
     public ProductionAdjustment adminCorrect(
             @RequestParam UUID deliveryRecordId,
             @RequestParam AdjustmentType adjustmentType,

@@ -51,6 +51,9 @@ public class ProductionRequestController
     private final ProductionIngredientService ingredientService;
 
     @Override
+    protected String screenCode() { return "PROD_REQUESTS"; }
+
+    @Override
     protected BakeryAdminService<ProductionRequestRequest, ProductionRequestResponse> getService() {
         return service;
     }
@@ -72,6 +75,7 @@ public class ProductionRequestController
             @RequestParam(required = false) AdjustmentType adjustmentType,
             @RequestParam(required = false) String reason,
             @RequestParam(required = false) String note) {
+        checkPermission("APPROVE");
         return service.completeLine(id, lineId, qtyProduced, adjustmentType, reason, note);
     }
 
@@ -92,6 +96,7 @@ public class ProductionRequestController
     public ProductionRequestResponse completeLines(
             @PathVariable UUID id,
             @RequestBody List<CompleteLineRequest> items) {
+        checkPermission("APPROVE");
         return service.completeLines(id, items);
     }
 
@@ -105,6 +110,7 @@ public class ProductionRequestController
     @PostMapping("/approve-all")
     public List<ProductionRequestResponse> approveAll(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        checkPermission("APPROVE");
         return service.approveAll(date != null ? date : LocalDate.now());
     }
 
@@ -136,6 +142,7 @@ public class ProductionRequestController
      */
     @PostMapping("/{id}/transfer-ingredients")
     public java.util.Map<String, Object> transferIngredients(@PathVariable UUID id) {
+        checkPermission("CREATE");
         InventoryRequest req = ingredientService.generateSemiTransferRequest(id);
         return java.util.Map.of(
                 "transferCode", req.getCode(),

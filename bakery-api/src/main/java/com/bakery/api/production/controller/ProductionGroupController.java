@@ -7,6 +7,7 @@ import com.bakery.api.production.dto.ProductionGroupRequest;
 import com.bakery.api.production.dto.ProductionGroupResponse;
 import com.bakery.api.production.service.ProductionGroupService;
 import jakarta.validation.Valid;
+import com.bakery.framework.security.RequirePermission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/production-groups")
 @RequiredArgsConstructor
+@RequirePermission(screen = "PROD_GROUPS", action = "VIEW")
 public class ProductionGroupController {
 
     private final ProductionGroupService service;
@@ -45,11 +47,13 @@ public class ProductionGroupController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @RequirePermission(screen = "PROD_GROUPS", action = "CREATE")
     public ProductionGroupResponse create(@Valid @RequestBody ProductionGroupRequest req) {
         return service.create(req);
     }
 
     @PutMapping("/{id}")
+    @RequirePermission(screen = "PROD_GROUPS", action = "UPDATE")
     public ProductionGroupResponse update(
             @PathVariable UUID id, @Valid @RequestBody ProductionGroupRequest req) {
         return service.update(id, req);
@@ -57,6 +61,7 @@ public class ProductionGroupController {
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @RequirePermission(screen = "PROD_GROUPS", action = "DELETE")
     public void delete(@PathVariable UUID id) {
         service.delete(id);
     }

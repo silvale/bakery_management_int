@@ -18,6 +18,9 @@ public class ProductMappingController
     private final ProductMappingService service;
 
     @Override
+    protected String screenCode() { return "PRODUCT_MAPPING"; }
+
+    @Override
     protected BakeryAdminService<ProductMappingRequest, ProductMappingResponse> getService() {
         return service;
     }

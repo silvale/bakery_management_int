@@ -205,7 +205,9 @@ public class ProductionAdjustmentService {
         }
 
         if (remaining.compareTo(BigDecimal.ZERO) > 0) {
-            throw new IllegalStateException("Kho bếp không đủ NL để bù adjustment: itemId=" + itemId);
+            Item item = entityManager.find(Item.class, itemId);
+            String itemName = (item != null) ? item.getName() : itemId.toString();
+            throw new IllegalStateException("Kho bếp không đủ NL để bù adjustment: " + itemName + " (thiếu " + remaining + ")");
         }
     }
 

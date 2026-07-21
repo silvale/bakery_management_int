@@ -31,6 +31,9 @@ public class InventoryRequestController
     private final InventoryRequestService service;
 
     @Override
+    protected String screenCode() { return "INVENTORY_REQUESTS"; }
+
+    @Override
     protected BakeryAdminService<InventoryRequestRequest, InventoryRequestResponse> getService() {
         return service;
     }

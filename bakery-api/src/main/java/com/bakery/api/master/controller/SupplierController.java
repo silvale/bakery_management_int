@@ -17,6 +17,9 @@ public class SupplierController extends BakeryAdminResource<SupplierRequest, Sup
     private final SupplierService service;
 
     @Override
+    protected String screenCode() { return "SUPPLIERS"; }
+
+    @Override
     protected BakeryAdminService<SupplierRequest, SupplierResponse> getService() {
         return service;
     }

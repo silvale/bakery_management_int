@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import com.bakery.framework.security.RequirePermission;
 
 /**
  * API báo cáo cuối ngày.
@@ -39,11 +40,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/daily-reports")
 @RequiredArgsConstructor
+@RequirePermission(screen = "DAILY_REPORT", action = "VIEW")
 public class DailyReportController {
 
     private final DailyReportService service;
 
     @PostMapping("/init")
+    @RequirePermission(screen = "DAILY_REPORT", action = "CREATE")
     public Map<String, Object> initReport(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportDate) {
         DailyReport r = service.getOrCreateDraft(reportDate);
@@ -83,6 +86,7 @@ public class DailyReportController {
      * @param qtyRemainingActual số bánh còn lại thực tế tại cửa hàng
      */
     @PostMapping("/{id}/remaining")
+    @RequirePermission(screen = "DAILY_REPORT", action = "CREATE")
     public ResponseEntity<Void> updateRemaining(
             @PathVariable UUID id,
             @RequestParam UUID itemId,
@@ -108,6 +112,7 @@ public class DailyReportController {
      * @param qtyCancelled số bánh đã hủy
      */
     @PostMapping("/{id}/cancel")
+    @RequirePermission(screen = "DAILY_REPORT", action = "CREATE")
     public ResponseEntity<Void> updateCancelled(
             @PathVariable UUID id,
             @RequestParam UUID itemId,
@@ -121,6 +126,7 @@ public class DailyReportController {
      * Tổng hợp: DeliveryRecord + POS + snapshot giá → FINALIZED.
      */
     @PostMapping("/{id}/finalize")
+    @RequirePermission(screen = "DAILY_REPORT", action = "FINALIZE")
     public Map<String, Object> finalize(@PathVariable UUID id) {
         DailyReport r = service.finalize(id);
         return Map.of("id", r.getId(), "reportDate", r.getReportDate(),

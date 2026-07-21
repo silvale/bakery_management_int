@@ -2,12 +2,12 @@ package com.bakery.api.production.controller;
 
 import java.math.BigDecimal;
 import java.util.UUID;
-
 import java.time.LocalDate;
 import java.util.List;
 
 import com.bakery.api.production.dto.DeliveryRecordResponse;
 import com.bakery.api.production.service.ProductionRequestService;
+import com.bakery.framework.security.RequirePermission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/delivery-records")
 @RequiredArgsConstructor
+@RequirePermission(screen = "DELIVERY_RECORDS", action = "VIEW")
 public class DeliveryRecordController {
 
     private final ProductionRequestService service;
@@ -45,6 +46,7 @@ public class DeliveryRecordController {
      * @param note        ghi chú (optional)
      */
     @PostMapping("/{id}/confirm")
+    @RequirePermission(screen = "DELIVERY_RECORDS", action = "APPROVE")
     public DeliveryRecordResponse confirm(
             @PathVariable UUID id,
             @RequestParam BigDecimal qtyReceived,

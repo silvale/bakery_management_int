@@ -392,7 +392,7 @@ public class ProductionRequestService
         return recipeRepository.findByProductIdAndActiveTrue(line.getProduct().getId()).orElse(null);
     }
 
-    private void deductFromKitchen(BigDecimal needed, UUID itemId, Warehouse kitchen, ProductionRequest e) {
+    private void deductFromKitchen(BigDecimal needed, UUID itemId, String itemName, Warehouse kitchen, ProductionRequest e) {
         List<StockLot> lots = stockLotRepository
                 .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(itemId, BigDecimal.ZERO)
                 .stream()
@@ -420,7 +420,7 @@ public class ProductionRequestService
 
         if (remaining.compareTo(BigDecimal.ZERO) > 0) {
             throw new IllegalStateException(
-                    "Kho bếp không đủ nguyên liệu: itemId=" + itemId + " (thiếu " + remaining + ")");
+                    "Kho bếp không đủ nguyên liệu: " + itemName + " (thiếu " + remaining + ")");
         }
     }
 
@@ -470,7 +470,7 @@ public class ProductionRequestService
                 BigDecimal convFactor = resolveConversionFactor(
                         rl.getUnit(), rl.getItem().getUnit());
                 BigDecimal needed = rl.getQuantity().multiply(qtyProduced).multiply(convFactor);
-                deductFromKitchen(needed, rl.getItem().getId(), kitchen, e);
+                deductFromKitchen(needed, rl.getItem().getId(), rl.getItem().getName(), kitchen, e);
             }
         } else {
             log.warn("completeLine: không tìm thấy recipe cho sản phẩm {} — bỏ qua NL deduct",
