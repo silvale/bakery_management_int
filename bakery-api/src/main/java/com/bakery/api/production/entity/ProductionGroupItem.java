@@ -40,6 +40,23 @@ public class ProductionGroupItem extends BaseEntity {
     @Column(name = "grams_per_unit", precision = 8, scale = 2)
     private BigDecimal gramsPerUnit;
 
+    /**
+     * Cách tính số lượng default khi lập kế hoạch BATCH_FORMULA.
+     * <ul>
+     *   <li><b>BY_WEIGHT</b>: default qty = floor(batch_weight_grams / grams_per_unit)</li>
+     *   <li><b>BY_COUNT</b>: default qty = defaultQtyPerBatch (admin set cứng)</li>
+     * </ul>
+     */
+    @Column(name = "config_type", nullable = false, length = 20)
+    private String configType = "BY_WEIGHT";
+
+    /**
+     * Số lượng default mỗi cối — bắt buộc khi configType = BY_COUNT,
+     * có thể dùng để override với BY_WEIGHT.
+     */
+    @Column(name = "default_qty_per_batch")
+    private Integer defaultQtyPerBatch;
+
     @Column(name = "sort_order", nullable = false)
     private int sortOrder = 0;
 }

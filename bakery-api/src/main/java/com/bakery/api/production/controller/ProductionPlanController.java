@@ -14,6 +14,8 @@ import com.bakery.api.production.service.ProductionPlannerService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -58,7 +60,7 @@ public class ProductionPlanController {
     public ProductionPlanResponse generate(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         ProductionPlan plan = plannerService.generateForDate(date);
-        return ProductionPlanResponse.from(plan);
+        return service.findById(plan.getId());
     }
 
     /** Manager xem kế hoạch theo ngày (DRAFT hoặc APPROVED). */
@@ -119,7 +121,17 @@ public class ProductionPlanController {
     @PostMapping("/{id}/regenerate")
     public ProductionPlanResponse regenerate(@PathVariable UUID id) {
         ProductionPlan plan = plannerService.regenerateRejected(id);
-        return ProductionPlanResponse.from(plan);
+        return service.findById(plan.getId());
+    }
+
+    /**
+     * Xóa kế hoạch DRAFT để tạo lại từ đầu.
+     * Chỉ cho phép xóa khi trạng thái là DRAFT.
+     */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteDraft(@PathVariable UUID id) {
+        service.deleteDraft(id);
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -130,6 +142,18 @@ public class ProductionPlanController {
     public java.util.Map<String, Object> generateRequests(@PathVariable UUID id) {
         int count = service.generateRequestsFromApprovedPlan(id);
         return java.util.Map.of("planId", id, "requestsCreated", count);
+    }
+
+    /**
+     * Cập nhật plannedQty cho 1 group trong plan (chỉ khi còn DRAFT).
+     * BATCH_FORMULA: plannedQty = số cối; FREE_GROUP: plannedQty = override target.
+     */
+    @PutMapping("/{id}/groups/{groupId}/planned-qty")
+    public ProductionPlanResponse updateGroupPlannedQty(
+            @PathVariable UUID id,
+            @PathVariable UUID groupId,
+            @RequestParam int plannedQty) {
+        return service.updateGroupPlannedQty(id, groupId, plannedQty);
     }
 
     /**

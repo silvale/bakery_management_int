@@ -39,12 +39,18 @@ public class ProductionGroupResponse extends BaseResponse {
         private UUID itemId;   // UUID của item — dùng để call API
         private ReferenceValue item;
         private BigDecimal gramsPerUnit;
+        /** BY_WEIGHT | BY_COUNT */
+        private String configType;
+        /** Số lượng default mỗi cối (BY_COUNT hoặc override BY_WEIGHT). */
+        private Integer defaultQtyPerBatch;
         private int sortOrder;
 
         public static GroupItemResponse from(ProductionGroupItem gi) {
             GroupItemResponse r = new GroupItemResponse();
             r.setId(gi.getId());
             r.setGramsPerUnit(gi.getGramsPerUnit());
+            r.setConfigType(gi.getConfigType());
+            r.setDefaultQtyPerBatch(gi.getDefaultQtyPerBatch());
             r.setSortOrder(gi.getSortOrder());
             if (gi.getItem() != null) {
                 r.setItemId(gi.getItem().getId());

@@ -20,8 +20,10 @@ import com.bakery.api.master.entity.SemiProduct;
 import com.bakery.api.master.entity.Warehouse;
 import com.bakery.api.master.repository.UnitConversionRepository;
 import com.bakery.api.master.repository.WarehouseRepository;
+import com.bakery.api.production.entity.ProductionGroup;
 import com.bakery.api.production.entity.ProductionPlan;
 import com.bakery.api.production.entity.ProductionPlanLine;
+import com.bakery.api.production.repository.ProductionPlanGroupRepository;
 import com.bakery.api.production.repository.ProductionPlanLineRepository;
 import com.bakery.api.production.repository.ProductionPlanRepository;
 import com.bakery.api.recipe.entity.Recipe;
@@ -57,6 +59,7 @@ public class ProductionIngredientService {
 
     private final ProductionPlanRepository planRepository;
     private final ProductionPlanLineRepository planLineRepository;
+    private final ProductionPlanGroupRepository planGroupRepository;
     private final RecipeRepository recipeRepository;
     private final RecipeLineRepository recipeLineRepository;
     private final StockLotRepository stockLotRepository;
@@ -279,46 +282,63 @@ public class ProductionIngredientService {
 
     /**
      * Expand BOM 2 tầng: PRODUCT recipe → SEMI_PRODUCT recipe → INGREDIENT.
-     * Tổng hợp theo ingredient_id, nhân với adjustedQty (hoặc suggestedQty) của plan line.
      *
-     * <p><b>FREE_GROUP fallback</b>: Nếu plan line thuộc FREE_GROUP có {@code suggestedQty = null}
-     * (admin chưa phân bổ từng flavor), và group có {@code baseRecipe}, hệ thống tự động dùng
-     * {@code baseRecipe × group target qty} để tính NL. Mỗi group chỉ expand 1 lần.
+     * <p><b>BATCH_FORMULA</b>: NL = {@code baseRecipe × plannedQty} (plannedQty = số cối từ
+     * {@link com.bakery.api.production.entity.ProductionPlanGroup}). Không expand per-item.
+     *
+     * <p><b>FREE_GROUP</b>: NL = {@code baseRecipe × plannedQty} (plannedQty = target đã resolve
+     * weekday/weekend). Không expand per-item flavor.
+     *
+     * <p><b>Thường (SIMPLE)</b>: expand per-item recipe × adjustedQty (hoặc suggestedQty).
+     *
+     * <p>Mỗi group chỉ expand 1 lần (track bằng {@code expandedGroupIds}).
      */
     private Map<UUID, IngredientNeed> expandBom(ProductionPlan plan) {
         List<ProductionPlanLine> lines = planLineRepository.findByPlanIdOrderBySortOrderAsc(plan.getId());
         Map<UUID, IngredientNeed> result = new LinkedHashMap<>();
-        // Track groups đã expand base_recipe (tránh double-count)
         java.util.Set<UUID> expandedGroupIds = new java.util.HashSet<>();
+
+        // Load tất cả ProductionPlanGroup của plan này (1 query)
+        Map<UUID, Integer> plannedQtyByGroupId = planGroupRepository.findByPlanId(plan.getId()).stream()
+                .collect(Collectors.toMap(
+                        ppg -> ppg.getGroup().getId(),
+                        com.bakery.api.production.entity.ProductionPlanGroup::getPlannedQty));
 
         for (ProductionPlanLine planLine : lines) {
             Item product = planLine.getItem();
             if (product == null) continue;
 
-            // qty để SX (manager có thể đã điều chỉnh)
-            Integer rawQty = planLine.getAdjustedQty() != null
-                    ? planLine.getAdjustedQty()
-                    : planLine.getSuggestedQty();
+            ProductionGroup group = planLine.getGroup();
 
-            // ── FREE_GROUP fallback: qty null → dùng baseRecipe của group ────────
-            com.bakery.api.production.entity.ProductionGroup group = planLine.getGroup();
-            if ((rawQty == null || rawQty <= 0) && group != null && group.getBaseRecipe() != null) {
+            // ── GROUP-LEVEL EXPAND (FREE_GROUP hoặc BATCH_FORMULA với base_recipe) ──
+            if (group != null && group.getBaseRecipe() != null
+                    && ("FREE_GROUP".equals(group.getGroupType()) || "BATCH_FORMULA".equals(group.getGroupType()))) {
                 if (!expandedGroupIds.contains(group.getId())) {
                     expandedGroupIds.add(group.getId());
-                    BigDecimal groupQty = resolveGroupTargetQty(group, plan.getPlanDate());
+                    // Ưu tiên plannedQty từ ProductionPlanGroup; fallback về target weekday/weekend cho FREE_GROUP
+                    BigDecimal groupQty;
+                    if (plannedQtyByGroupId.containsKey(group.getId())) {
+                        groupQty = BigDecimal.valueOf(plannedQtyByGroupId.get(group.getId()));
+                    } else {
+                        groupQty = resolveGroupTargetQty(group, plan.getPlanDate());
+                    }
                     if (groupQty.compareTo(BigDecimal.ZERO) > 0) {
-                        log.debug("expandBom: nhóm {} (FREE_GROUP) dùng base_recipe × {} thay vì per-item",
-                                group.getCode(), groupQty);
+                        log.debug("expandBom: nhóm {} ({}) dùng base_recipe × {}",
+                                group.getCode(), group.getGroupType(), groupQty);
                         expandRecipe(group.getBaseRecipe(), groupQty, result);
                     }
                 }
+                // Với group-level expand: không expand per-item — skip luôn
                 continue;
             }
 
+            // ── PER-ITEM EXPAND (SIMPLE hoặc group chưa có base_recipe) ──
+            Integer rawQty = planLine.getAdjustedQty() != null
+                    ? planLine.getAdjustedQty()
+                    : planLine.getSuggestedQty();
             if (rawQty == null || rawQty <= 0) continue;
             BigDecimal qty = BigDecimal.valueOf(rawQty);
 
-            // Lấy active recipe của PRODUCT (per-item — khi manager đã phân bổ qty)
             recipeRepository.findByProductIdAndActiveTrue(product.getId())
                     .ifPresent(recipe -> expandRecipe(recipe, qty, result));
         }
@@ -326,11 +346,10 @@ public class ProductionIngredientService {
     }
 
     /**
-     * Tính target qty của group theo ngày trong tuần.
+     * Fallback: tính target qty của group theo ngày trong tuần (khi chưa có ProductionPlanGroup).
      * Thứ 7/CN = WEEKEND, còn lại = WEEKDAY.
      */
-    private BigDecimal resolveGroupTargetQty(
-            com.bakery.api.production.entity.ProductionGroup group, java.time.LocalDate date) {
+    private BigDecimal resolveGroupTargetQty(ProductionGroup group, java.time.LocalDate date) {
         java.time.DayOfWeek dow = date.getDayOfWeek();
         boolean isWeekend = dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY;
         int target = isWeekend

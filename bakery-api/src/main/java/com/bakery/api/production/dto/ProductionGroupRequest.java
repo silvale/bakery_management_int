@@ -30,5 +30,9 @@ public record ProductionGroupRequest(
             @NotNull UUID itemId,
             /** Gram/cái — chỉ bắt buộc với BATCH_FORMULA. */
             BigDecimal gramsPerUnit,
+            /** BY_WEIGHT | BY_COUNT — cách tính default qty khi lập kế hoạch BATCH_FORMULA. */
+            String configType,
+            /** Số lượng default mỗi cối — bắt buộc khi configType=BY_COUNT. */
+            Integer defaultQtyPerBatch,
             int sortOrder) {}
 }

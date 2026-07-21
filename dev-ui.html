@@ -121,7 +121,7 @@ tr:hover td{background:#f8fafc}
 
 <script>
 const BASE='http://localhost:8080';
-let allItems=[],allWarehouses=[],allSuppliers=[],allItemGroups=[];
+let allItems=[],allWarehouses=[],allSuppliers=[],allItemGroups=[],mainStockItems=[];
 const PAGE_SIZE=20;
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -210,6 +210,54 @@ function itemOpts(filter){
 }
 function whOpts(){return allWarehouses.map(w=>`<option value="${w.id}">${w.code} — ${w.name}</option>`).join('')}
 function supOpts(){return allSuppliers.map(s=>`<option value="${s.id}">${s.code} — ${s.name}</option>`).join('')}
+
+// ── Custom Autocomplete (contains/like search) ────────────────────────────────
+window._acPools={};window._acCbs={};
+function acHtml(uid,pool,initId,ph='Tìm...'){
+  window._acPools[uid]=pool;
+  const f=pool.find(x=>x.id===initId);
+  const v=f?`${f.code} — ${f.name}`:'';
+  return `<div style="position:relative;width:100%">
+    <input id="${uid}-inp" type="text" value="${v}" placeholder="${ph}" autocomplete="off" style="width:100%;box-sizing:border-box"
+      oninput="_acShow('${uid}')" onfocus="_acShow('${uid}')" onblur="setTimeout(()=>_acClose('${uid}'),160)">
+    <div id="${uid}-d" style="display:none;position:absolute;top:100%;left:0;right:0;min-width:240px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;max-height:220px;overflow-y:auto;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.12)"></div>
+  </div>`;
+}
+function acOn(uid,cb){window._acCbs[uid]=cb;}
+function _acShow(uid){
+  const inp=document.getElementById(uid+'-inp');
+  const drop=document.getElementById(uid+'-d');
+  const pool=window._acPools[uid]||[];
+  if(!inp||!drop)return;
+  const q=inp.value.trim().toLowerCase();
+  const hits=(q?pool.filter(x=>x.code.toLowerCase().includes(q)||x.name.toLowerCase().includes(q)):pool).slice(0,15);
+  if(!hits.length){drop.style.display='none';return;}
+  drop.innerHTML=hits.map(x=>`<div style="padding:7px 12px;cursor:pointer;font-size:13px;white-space:nowrap"
+    onmousedown="_acPick('${uid}','${x.id}')"
+    onmouseover="this.style.background='#f1f5f9'"
+    onmouseout="this.style.background=''">
+    <strong>${x.code}</strong> — ${x.name}${x.unit?' <small style="color:#94a3b8">'+x.unit+'</small>':''}
+  </div>`).join('');
+  drop.style.display='block';
+}
+function _acPick(uid,id){
+  const pool=window._acPools[uid]||[];
+  const item=pool.find(x=>x.id===id);if(!item)return;
+  const inp=document.getElementById(uid+'-inp');
+  if(inp)inp.value=`${item.code} — ${item.name}`;
+  _acClose(uid);
+  const cb=window._acCbs[uid];if(cb)cb(item);
+}
+function _acClose(uid){const d=document.getElementById(uid+'-d');if(d)d.style.display='none';}
+
+// Load tồn kho MAIN (để filter khi tạo TRANSFER)
+async function loadMainStock(){
+  try{
+    const rows=await api('GET','/api/v1/stock-lots/summary?warehouseCode=MAIN');
+    const ids=new Set((rows??[]).filter(r=>r.qtyRemaining>0).map(r=>r.itemId));
+    mainStockItems=allItems.filter(x=>ids.has(x.id));
+  }catch(_){mainStockItems=[...allItems];}
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ITEMS — 3 tab chính: Sản Phẩm | Bán Thành Phẩm | Nguyên Liệu
@@ -309,11 +357,13 @@ async function loadItems(){
 
   if(!items.length){wrap.innerHTML='<div class="empty">Không có dữ liệu</div>';return;}
   const showGroup=itemsActiveType==='PRODUCT'&&itemsActiveGroup===null;
+  const showSupplier=itemsActiveType==='INGREDIENT';
   wrap.innerHTML=`<table><thead><tr>
-    ${showGroup?'<th>Nhóm</th>':''}<th>Code</th><th>Tên</th><th>Đơn vị</th><th style="text-align:right">Giá vốn</th><th>Status</th><th></th>
+    ${showGroup?'<th>Nhóm</th>':''}${showSupplier?'<th>Nhà cung cấp</th>':''}<th>Code</th><th>Tên</th><th>Đơn vị</th><th style="text-align:right">Giá vốn</th><th>Status</th><th></th>
   </tr></thead><tbody>
   ${items.map(i=>`<tr>
     ${showGroup?`<td>${i.itemGroup?.value??i.itemGroup?.name??'<span style="color:#cbd5e1">—</span>'}</td>`:''}
+    ${showSupplier?`<td style="color:${i.defaultSupplier?'#0f172a':'#cbd5e1'}">${i.defaultSupplier?.value??i.defaultSupplier?.name??'—'}</td>`:''}
     <td><code>${i.code}</code></td><td>${i.name}</td><td>${i.unit}</td>
     <td style="text-align:right;color:${i.unitCost?'#0f172a':'#cbd5e1'}">${i.unitCost?fmt(i.unitCost)+'đ':'—'}</td>
     <td>${badge(i.approvalStatus)}</td>
@@ -329,7 +379,7 @@ async function approveItem(id){await api('POST',`/api/v1/items/${id}/approve`);t
 // Item Form
 let recipeLines=[];
 async function pageItemForm(item={}){
-  await loadAllItems();
+  await Promise.all([loadAllItems(), loadAllSuppliers()]);
   const isEdit=!!item.id;
   // l.item là ReferenceValue {key: itemCode, value: itemName} — không có id
   // Phải lookup ngược qua allItems bằng code
@@ -362,6 +412,12 @@ async function pageItemForm(item={}){
         <input id="f-shelf" type="number" min="0" value="${item.shelfDays??''}" placeholder="1"></div>
       <div class="field" id="f-ingtype-wrap" style="${item.itemType==='INGREDIENT'?'':'display:none'}">
         <label>Ingredient Type</label><input id="f-ingtype" value="${item.ingredientType??''}" placeholder="DRY, WET..."></div>
+      <div class="field" id="f-sup-wrap" style="${item.itemType==='INGREDIENT'?'':'display:none'}">
+        <label>Nhà cung cấp</label>
+        <select id="f-sup">
+          <option value="">-- Không có --</option>
+          ${allSuppliers.map(s=>`<option value="${s.id}" ${item.defaultSupplier?.key===s.code?'selected':''}>${s.code} — ${s.name}</option>`).join('')}
+        </select></div>
       <div class="field" id="f-unitcost-ing-wrap" style="${item.itemType==='INGREDIENT'?'':'display:none'}">
         <label>Giá vốn (đ/đvt) <small style="color:#94a3b8">Nhập tay</small></label>
         <input id="f-unitcost" type="number" min="0" step="1" value="${item.unitCost??''}" placeholder="0"></div>
@@ -399,27 +455,26 @@ function onItemTypeChange(){
   const t=document.getElementById('f-type').value;
   document.getElementById('f-shelf-wrap').style.display=t==='PRODUCT'?'':'none';
   document.getElementById('f-ingtype-wrap').style.display=t==='INGREDIENT'?'':'none';
+  document.getElementById('f-sup-wrap').style.display=t==='INGREDIENT'?'':'none';
   document.getElementById('f-unitcost-ing-wrap').style.display=t==='INGREDIENT'?'':'none';
   document.getElementById('f-unitcost-ro-wrap').style.display=(t==='PRODUCT'||t==='SEMI_PRODUCT')?'':'none';
   document.getElementById('recipe-section').style.display=(t==='PRODUCT'||t==='SEMI_PRODUCT')?'':'none';
 }
 function renderRL(){
   const tb=document.getElementById('recipe-tbody');if(!tb)return;
+  const pool=allItems.filter(x=>x.itemType!=='PRODUCT');
   tb.innerHTML=recipeLines.map((l,i)=>`<tr>
-    <td><select id="rl-item-${i}" onchange="recipeLines[${i}].itemId=this.value">
-      <option value="">-- Chọn --</option>
-      ${allItems.filter(x=>x.itemType!=='PRODUCT').map(x=>`<option value="${x.id}">[${x.itemType?.[0]}] ${x.code} — ${x.name}</option>`).join('')}
-    </select></td>
+    <td>${acHtml('acrl'+i,pool,l.itemId,'Tìm BTP / NL...')}</td>
     <td><input type="number" step="0.001" value="${l.qty}" onchange="recipeLines[${i}].qty=+this.value"></td>
-    <td><input value="${l.unit}" onchange="recipeLines[${i}].unit=this.value" placeholder="kg,g..."></td>
+    <td><input id="rl-unit-${i}" value="${l.unit}" onchange="recipeLines[${i}].unit=this.value" placeholder="kg,g..."></td>
     <td><input type="number" value="${l.sort||i+1}" onchange="recipeLines[${i}].sort=+this.value" style="width:50px"></td>
     <td><button class="btn btn-danger btn-sm" onclick="recipeLines.splice(${i},1);renderRL()">✕</button></td>
   </tr>`).join('');
-  // Ép value sau khi DOM đã render (tránh browser ignore selected attr)
-  recipeLines.forEach((l,i)=>{
-    const sel=document.getElementById(`rl-item-${i}`);
-    if(sel&&l.itemId)sel.value=l.itemId;
-  });
+  recipeLines.forEach((_,i)=>acOn('acrl'+i,item=>{
+    recipeLines[i].itemId=item.id;
+    if(!recipeLines[i].unit){recipeLines[i].unit=item.unit||'';
+      const u=document.getElementById('rl-unit-'+i);if(u)u.value=item.unit||'';}
+  }));
 }
 function addRL(){recipeLines.push({itemId:'',qty:'',unit:'',sort:recipeLines.length+1});renderRL();}
 async function saveItem(id){
@@ -432,6 +487,7 @@ async function saveItem(id){
     splittable:document.getElementById('f-splittable')?.checked??true,
     unitSize:document.getElementById('f-unitsize')?.value?+document.getElementById('f-unitsize').value:null,
     ingredientType:document.getElementById('f-ingtype')?.value.trim()||null,
+    defaultSupplierId:document.getElementById('f-sup')?.value||null,
     unitCost:itemType==='INGREDIENT'&&document.getElementById('f-unitcost')?.value?+document.getElementById('f-unitcost').value:null,
     shelfDays:document.getElementById('f-shelf')?.value!==''&&document.getElementById('f-shelf')?.value!=null?+document.getElementById('f-shelf').value:null,
     recipeNote:document.getElementById('f-rnote')?.value||null,
@@ -903,18 +959,24 @@ function onPgType(){
 }
 function renderPgItems(){
   const isBatch=document.getElementById('pg-type')?.value==='BATCH_FORMULA';
+  const pool=allItems.filter(x=>x.itemType==='PRODUCT');
   const el=document.getElementById('pg-items-rows');if(!el)return;
-  el.innerHTML=pgItems.map((it,i)=>`
-    <div class="group-item-row">
-      <select id="pgi-sel-${i}" onchange="pgItems[${i}].itemId=this.value">
-        <option value="">-- Chọn SP --</option>${itemOpts(x=>x.itemType==='PRODUCT')}
+  el.innerHTML=pgItems.map((it,i)=>`<div class="group-item-row" style="grid-template-columns:${isBatch?'1fr 90px 80px 70px auto':'1fr auto'}">
+    ${acHtml('acpg'+i,pool,it.itemId,'Tìm sản phẩm...')}
+    ${isBatch?`
+      <input type="number" step="0.01" placeholder="gram/cái" value="${it.g??''}" title="Gram mỗi cái"
+        onchange="pgItems[${i}].g=+this.value">
+      <select title="Cách tính default" onchange="pgItems[${i}].ct=this.value" style="border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px">
+        <option value="BY_WEIGHT" ${(it.ct??'BY_WEIGHT')==='BY_WEIGHT'?'selected':''}>Theo kg</option>
+        <option value="BY_COUNT"  ${it.ct==='BY_COUNT'?'selected':''}>Cố định</option>
       </select>
-      ${isBatch?`<input type="number" step="0.01" placeholder="gram/cái" value="${it.g??''}" onchange="pgItems[${i}].g=+this.value">`:'<div></div>'}
-      <input type="number" value="${it.s||i+1}" onchange="pgItems[${i}].s=+this.value">
-      <button class="btn btn-danger btn-sm" onclick="pgItems.splice(${i},1);renderPgItems()">✕</button>
-    </div>`).join('');
-  // Ép select.value sau khi DOM render (tránh ReferenceValue lookup issue)
-  pgItems.forEach((it,i)=>{const s=document.getElementById(`pgi-sel-${i}`);if(s&&it.itemId)s.value=it.itemId;});
+      <input type="number" min="1" placeholder="default/cối" value="${it.dq??''}" title="Số cái default mỗi cối (BY_COUNT)"
+        onchange="pgItems[${i}].dq=+this.value">
+    `:''}
+    <input type="number" value="${it.s||i+1}" onchange="pgItems[${i}].s=+this.value" style="width:45px" title="Thứ tự">
+    <button class="btn btn-danger btn-sm" onclick="pgItems.splice(${i},1);renderPgItems()">✕</button>
+  </div>`).join('');
+  pgItems.forEach((_,i)=>acOn('acpg'+i,item=>{pgItems[i].itemId=item.id;}));
 }
 function addPgItem(){pgItems.push({itemId:'',g:null,s:pgItems.length+1});renderPgItems();}
 
@@ -935,7 +997,7 @@ function editPG(id){
   document.getElementById('pg-note').value=g.note??'';
   pgItems=(g.items??[]).map(gi=>{
     const found=allItems.find(x=>x.code===(gi.item?.key??''));
-    return {itemId:found?.id??'', g:gi.gramsPerUnit??null, s:gi.sortOrder??0};
+    return {itemId:found?.id??'', g:gi.gramsPerUnit??null, ct:gi.configType??'BY_WEIGHT', dq:gi.defaultQtyPerBatch??null, s:gi.sortOrder??0};
   });
   onPgType();
   document.getElementById('pg-save-btn').textContent='Lưu thay đổi';
@@ -965,7 +1027,7 @@ async function savePG(){
     baseRecipeId:document.getElementById('pg-base-recipe')?.value||null,
     batchWeightGrams:document.getElementById('pg-bw')?.value?+document.getElementById('pg-bw').value:null,
     note:document.getElementById('pg-note').value||null,
-    items:pgItems.filter(i=>i.itemId).map(i=>({itemId:i.itemId,gramsPerUnit:i.g??null,sortOrder:i.s??0}))};
+    items:pgItems.filter(i=>i.itemId).map(i=>({itemId:i.itemId,gramsPerUnit:i.g??null,configType:i.ct??'BY_WEIGHT',defaultQtyPerBatch:i.dq??null,sortOrder:i.s??0}))};
   if(!body.code||!body.name){toast('Code và Tên là bắt buộc','err');return;}
   id?await api('PUT',`/api/v1/production-groups/${id}`,body):await api('POST','/api/v1/production-groups',body);
   toast(id?'Đã cập nhật group':'Đã tạo production group');
@@ -1236,17 +1298,11 @@ async function loadPlanList(){
 }
 async function loadPlanByDate(date){
   if(!date)return;
-  const cont=document.getElementById('plan-detail');
-  try{const plan=await api('GET',`/api/v1/production/plans/by-date?date=${date}`);renderPlan(plan);}
-  catch(_){
-    if(cont)cont.innerHTML=`<div class="card">
-      <div class="empty" style="padding:24px">
-        Chưa có kế hoạch cho ngày <strong>${date}</strong>
-        <div style="margin-top:12px">
-          <button class="btn btn-primary" onclick="generatePlan('${date}')">⚡ Tạo kế hoạch ngay</button>
-        </div>
-      </div>
-    </div>`;
+  try{
+    const plan=await api('GET',`/api/v1/production/plans/by-date?date=${date}`);
+    renderPlan(plan,date);
+  }catch(_){
+    renderPlan(null,date);
   }
 }
 async function generatePlan(date){
@@ -1257,10 +1313,25 @@ async function generatePlan(date){
 async function loadPlanById(id){
   const plan=await api('GET',`/api/v1/production/plans/${id}`);renderPlan(plan);
 }
-function renderPlan(plan){
+function renderPlan(plan,dateHint){
   const cont=document.getElementById('plan-detail');if(!cont)return;
+  if(!plan){
+    const d=dateHint||document.getElementById('plan-date-input')?.value||'';
+    cont.innerHTML=`<div class="card">
+      <div class="empty" style="padding:24px">
+        Chưa có kế hoạch cho ngày <strong>${d}</strong>
+        <div style="margin-top:12px">
+          <button class="btn btn-primary" onclick="generatePlan('${d}')">⚡ Tạo kế hoạch ngay</button>
+        </div>
+      </div>
+    </div>`;
+    return;
+  }
   const isDraft=plan.approvalStatus==='DRAFT';
   const lines=plan.lines??[];
+  // Build lookup: groupCode → PlanGroupSummary (plannedQty, batchWeightGrams, groupType)
+  const planGroupMap={};
+  for(const pg of plan.planGroups??[]){planGroupMap[pg.groupCode]=pg;}
 
   // Tách lines có group và không có group
   const grouped=new Map(); // groupKey -> {group, lines[]}
@@ -1278,14 +1349,23 @@ function renderPlan(plan){
   function adjustCell(l){
     const val=l.adjustedQty??l.suggestedQty??'';
     const groupKey=l.group?.key??'';
+    const dq=l.defaultQtyPerBatch??0;
+    const gpu=l.gramsPerUnit??0; // gram/cái — dùng để validate tổng trọng lượng BATCH_FORMULA
     return isDraft
       ?`<input type="number" style="width:70px;border:1px solid #d1d5db;border-radius:4px;padding:3px 6px;font-size:13px"
-          data-group="${groupKey}" data-lineid="${l.id}"
-          value="${val}" onchange="updatePlanLine('${plan.id}','${l.id}',this.value);validateFreeGroup('${groupKey}')">`
+          data-group="${groupKey}" data-lineid="${l.id}" data-default-qty="${dq}" data-grams-per-unit="${gpu}"
+          value="${val}" onchange="updatePlanLine('${plan.id}','${l.id}',this.value);validateFreeGroup('${groupKey}');validateBatchWeight('${groupKey}')">`
       :(l.adjustedQty??l.suggestedQty??'—');
   }
 
   function lineRow(l,indent){
+    const isBatchLine=l.planType==='BATCH_FORMULA';
+    // BATCH_FORMULA: "Gợi ý" = defaultQtyPerBatch/cối (hằng số), thay vì suggestedQty tĩnh từ lúc tạo plan
+    const sugCell=isBatchLine
+      ?(l.defaultQtyPerBatch!=null
+        ?`<span style="color:#64748b">${l.defaultQtyPerBatch}<small style="color:#94a3b8">/cối</small></span>`
+        :'—')
+      :`<strong>${l.suggestedQty??'—'}</strong>`;
     return `<tr>
       <td style="${indent?'padding-left:28px':''}">
         ${indent?'<span style="color:#94a3b8;margin-right:4px">↳</span>':''}
@@ -1293,7 +1373,7 @@ function renderPlan(plan){
       </td>
       <td><span style="font-size:11px;color:#94a3b8">${l.planType}</span></td>
       <td>${fmt(l.qtyRemaining)}</td>
-      <td><strong>${l.suggestedQty??'—'}</strong></td>
+      <td>${sugCell}</td>
       <td>${adjustCell(l)}</td>
       <td style="font-size:12px;color:#64748b">${l.ruleNote??'—'}</td>
     </tr>`;
@@ -1301,19 +1381,64 @@ function renderPlan(plan){
 
   function groupRows(g){
     const sumRem=g.lines.reduce((s,l)=>s+(+(l.qtyRemaining??0)),0);
-    // FREE_GROUP: suggestedQty=null per line, lấy "cần thêm N" từ ruleNote của line đầu
-    const isFree=g.lines[0]?.planType==='FREE_GROUP';
+    const planType=g.lines[0]?.planType;
+    const isFree=planType==='FREE_GROUP';
+    const isBatch=planType==='BATCH_FORMULA';
+    const pg=planGroupMap[g.group.key??''];
+    const gKey=g.group.key??'';
+
+    // ── BATCH_FORMULA ─────────────────────────────────────────────
+    if(isBatch){
+      const numBatches=pg?.plannedQty??1;
+      const batchWg=pg?.batchWeightGrams??0;
+      // Tính tổng trọng lượng hiện tại từ lines (adjustedQty * gramsPerUnit)
+      const totalGrams=g.lines.reduce((s,l)=>{
+        const qty=l.adjustedQty??l.suggestedQty??0;
+        const g2=+(l.gramsPerUnit??0);
+        return s+qty*g2;
+      },0);
+      const expectedGrams=numBatches*batchWg;
+      const weightOk=batchWg===0||Math.abs(totalGrams-expectedGrams)<1;
+      const weightWarnHtml=(!weightOk&&isDraft)
+        ?`<span id="batch-warn-${gKey}" style="color:#dc2626;font-size:11px;margin-left:8px">
+            ⚠️ ${(totalGrams/1000).toFixed(2)}kg / ${(expectedGrams/1000).toFixed(2)}kg cần
+            — tăng số cối hoặc giảm số lượng</span>`
+        :(weightOk&&batchWg>0?`<span id="batch-warn-${gKey}" style="color:#059669;font-size:11px;margin-left:8px">✓ ${(totalGrams/1000).toFixed(2)}kg</span>`:'');
+
+      const batchInput=isDraft
+        ?`<span style="font-size:12px;color:#64748b">Số cối: </span>
+           <input type="number" id="nb-${gKey}" min="1" value="${numBatches}"
+             data-batch-weight="${batchWg}"
+             style="width:50px;border:1px solid #d1d5db;border-radius:4px;padding:2px 4px;font-size:13px"
+             onchange="updateBatchPlannedQty('${plan.id}','${pg?.groupId??''}',this.value,'${gKey}')">
+           ${batchWg>0?`<span style="font-size:11px;color:#94a3b8;margin-left:4px">× ${(batchWg/1000).toFixed(1)}kg/cối</span>`:''}
+           ${weightWarnHtml}`
+        :`<span style="font-size:12px;color:#64748b">${numBatches} cối${batchWg>0?` (${(numBatches*batchWg/1000).toFixed(1)}kg)`:''}</span>`;
+
+      const sumDefaultPerBatch=g.lines.reduce((s,l)=>s+(l.defaultQtyPerBatch??0),0);
+      const sumAdj=g.lines.reduce((s,l)=>s+(l.adjustedQty??l.suggestedQty??0),0);
+      return `<tr style="background:#fef9c3;border-top:2px solid #fbbf24">
+        <td><strong>🧪 ${g.group.name??g.group.key}</strong></td>
+        <td>${batchInput}</td>
+        <td><strong>${sumRem.toFixed(2).replace(/\.00$/,'')}</strong></td>
+        <td><span style="color:#64748b">${sumDefaultPerBatch}<small style="color:#94a3b8">/cối</small></span></td>
+        <td><strong>${sumAdj}</strong></td>
+        <td></td>
+      </tr>
+      ${g.lines.map(l=>lineRow(l,true)).join('')}`;
+    }
+
+    // ── FREE_GROUP ────────────────────────────────────────────────
     let sumSug,sumAdj;
     if(isFree){
-      const m=(g.lines[0]?.ruleNote??'').match(/cần thêm (\d+)/);
-      sumSug=m?+m[1]:'—';
+      const freeQty=pg?.plannedQty;
+      sumSug=freeQty??((g.lines[0]?.ruleNote??'').match(/cần thêm (\d+)/)?.[1]??'—');
       const adjTotal=g.lines.reduce((s,l)=>s+(l.adjustedQty??0),0);
       sumAdj=adjTotal>0?adjTotal:sumSug;
     } else {
       sumSug=g.lines.reduce((s,l)=>s+(l.suggestedQty??0),0);
       sumAdj=g.lines.reduce((s,l)=>s+(l.adjustedQty??l.suggestedQty??0),0);
     }
-    const gKey=g.group.key??'';
     const freeTarget=isFree&&typeof sumSug==='number'?sumSug:null;
     return `<tr style="background:#f1f5f9;border-top:2px solid #cbd5e1">
       <td colspan="2"><strong>📦 ${g.group.name??g.group.key}</strong>
@@ -1342,7 +1467,8 @@ function renderPlan(plan){
       </div>
       <div style="display:flex;gap:8px">
         ${isDraft?`<button class="btn btn-success" onclick="approvePlan('${plan.id}')">✅ Approve</button>
-          <button class="btn btn-danger" onclick="rejectPlanPrompt('${plan.id}')">❌ Reject</button>`:''}
+          <button class="btn btn-danger" onclick="rejectPlanPrompt('${plan.id}')">❌ Reject</button>
+          <button class="btn btn-ghost" onclick="resetDraftPlan('${plan.id}','${plan.planDate}')">🔄 Tạo lại</button>`:''}
         ${plan.approvalStatus==='REJECTED'?`<button class="btn btn-ghost" onclick="regeneratePlan('${plan.id}')">🔄 Tạo lại</button>`:''}
         ${plan.approvalStatus==='APPROVED'?`<button class="btn btn-ghost" onclick="generatePRFromPlan('${plan.id}')">📋 Tạo phiếu SX</button>`:''}
         <button class="btn btn-ghost" onclick="checkIngredients('${plan.id}')">🔬 Kiểm tra NL</button>
@@ -1407,9 +1533,91 @@ function validateAllFreeGroups(){
   return results.every(Boolean);
 }
 
+// Validate tổng trọng lượng BATCH_FORMULA theo group key
+// Đọc data-grams-per-unit từ các input, tính totalGrams vs expected = numBatches × batchWeight
+function validateBatchWeight(gKey){
+  if(!gKey)return true;
+  const nbEl=document.getElementById(`nb-${gKey}`);
+  if(!nbEl)return true; // không phải batch group
+  const batchWg=+nbEl.getAttribute('data-batch-weight')||0;
+  if(batchWg===0)return true; // chưa config batch weight → bỏ qua
+  const numBatches=+nbEl.value||1;
+  const expectedGrams=numBatches*batchWg;
+  const inputs=[...document.querySelectorAll(`input[data-group="${gKey}"][data-lineid]`)];
+  const totalGrams=inputs.reduce((s,inp)=>{
+    const qty=+(inp.value||0);
+    const gpu=+inp.getAttribute('data-grams-per-unit')||0;
+    return s+qty*gpu;
+  },0);
+  const ok=Math.abs(totalGrams-expectedGrams)<1;
+  const warnEl=document.getElementById(`batch-warn-${gKey}`);
+  if(warnEl){
+    if(!ok){
+      warnEl.innerHTML=`⚠️ ${(totalGrams/1000).toFixed(2)}kg / ${(expectedGrams/1000).toFixed(2)}kg cần — tăng số cối hoặc giảm số lượng`;
+      warnEl.style.color='#dc2626';
+    } else {
+      warnEl.innerHTML=`✓ ${(totalGrams/1000).toFixed(2)}kg`;
+      warnEl.style.color='#059669';
+    }
+  }
+  // Highlight inputs: đỏ nếu sai, bình thường nếu ok
+  inputs.forEach(inp=>{
+    inp.style.borderColor=ok?'#d1d5db':'#fca5a5';
+  });
+  return ok;
+}
+
+// Validate tất cả BATCH_FORMULA groups trên màn hình — trả về true nếu tất cả pass
+function validateAllBatchWeights(){
+  const nbEls=[...document.querySelectorAll('[id^="nb-"]')];
+  if(!nbEls.length)return true;
+  return nbEls.map(el=>validateBatchWeight(el.id.replace('nb-',''))).every(Boolean);
+}
+
+// Cập nhật số cối (plannedQty) cho BATCH_FORMULA group
+// Sau đó batch-adjust tất cả lines trong group: adjustedQty = defaultQtyPerBatch × numBatches
+async function updateBatchPlannedQty(planId,groupId,val,gKey){
+  const numBatches=Math.max(1,+val);
+  const nbEl=document.getElementById(`nb-${gKey}`);
+  if(nbEl)nbEl.value=numBatches;
+
+  // Tính adjustedQty cho từng line trong group có defaultQtyPerBatch
+  const lineInputs=[...document.querySelectorAll(`input[data-group="${gKey}"][data-lineid]`)];
+  const lineAdjusts=[];
+  for(const inp of lineInputs){
+    const dq=+inp.getAttribute('data-default-qty');
+    if(dq>0){
+      const newQty=dq*numBatches;
+      inp.value=newQty;
+      lineAdjusts.push({lineId:inp.getAttribute('data-lineid'),adjustedQty:newQty});
+    }
+  }
+
+  // Gọi API song song — planned-qty chỉ update nếu có groupId
+  const promises=[];
+  if(groupId){
+    promises.push(api('PUT',`/api/v1/production/plans/${planId}/groups/${groupId}/planned-qty?plannedQty=${numBatches}`));
+  }
+  if(lineAdjusts.length){
+    promises.push(api('PUT',`/api/v1/production/plans/${planId}/adjust`,{lines:lineAdjusts}));
+  }
+  if(!promises.length)return;
+  await Promise.all(promises);
+  // Re-fetch để đảm bảo lấy data mới nhất sau khi cả 2 API đã commit
+  const plan=await api('GET',`/api/v1/production/plans/${planId}`);
+  if(plan)renderPlan(plan);
+  // Restore số cối — renderPlan có thể reset về pg.plannedQty (=1 nếu plan cũ chưa có planGroup)
+  const nbElAfter=document.getElementById(`nb-${gKey}`);
+  if(nbElAfter)nbElAfter.value=numBatches;
+}
+
 async function approvePlan(id){
   if(!validateAllFreeGroups()){
     toast('Tổng số lượng nhóm FREE_GROUP phải bằng đúng target (hoặc bỏ trống toàn bộ nhóm)','err');
+    return;
+  }
+  if(!validateAllBatchWeights()){
+    toast('Trọng lượng nhóm BATCH_FORMULA chưa khớp với số cối — kiểm tra lại số lượng trước khi duyệt','err');
     return;
   }
   const approveRes=await api('POST',`/api/v1/production/plans/${id}/approve`);
@@ -1435,6 +1643,13 @@ async function regeneratePlan(id){
   if(!confirm('Xóa kế hoạch đã REJECTED và tạo lại DRAFT mới?'))return;
   const plan=await api('POST',`/api/v1/production/plans/${id}/regenerate`);
   toast('Đã tạo lại kế hoạch DRAFT');loadPlanList();renderPlan(plan);
+}
+async function resetDraftPlan(id,date){
+  if(!confirm('Xóa kế hoạch DRAFT này và tạo lại từ đầu?\n(Dùng khi vừa cập nhật config nhóm sản xuất)'))return;
+  await api('DELETE',`/api/v1/production/plans/${id}`);
+  toast('Đã xóa. Đang tạo lại...');
+  const plan=await api('POST',`/api/v1/production/plans/generate?date=${date}`);
+  toast('Đã tạo lại kế hoạch với config mới');loadPlanList();renderPlan(plan);
 }
 async function generatePRFromPlan(id){
   const res=await api('POST',`/api/v1/production/plans/${id}/generate-requests`);
@@ -1607,16 +1822,16 @@ async function pageProdRequests(){
   prLines=[];renderPRLines();loadPRs();
 }
 function renderPRLines(){
+  const pool=allItems.filter(x=>x.itemType==='PRODUCT'||x.itemType==='SEMI_PRODUCT');
   const el=document.getElementById('pr-lines');if(!el)return;
   el.innerHTML=prLines.map((l,i)=>`
     <div style="display:grid;grid-template-columns:1fr 80px 50px 32px;gap:5px;margin-bottom:5px;align-items:center">
-      <select onchange="prLines[${i}].itemId=this.value">
-        <option value="">-- Chọn SP --</option>${itemOpts(x=>x.itemType==='PRODUCT')}
-      </select>
+      ${acHtml('acpr'+i,pool,l.itemId,'Tìm sản phẩm / BTP...')}
       <input type="number" step="0.5" value="${l.qty??''}" onchange="prLines[${i}].qty=+this.value" placeholder="Qty">
       <input type="number" value="${l.sort||i+1}" onchange="prLines[${i}].sort=+this.value">
       <button class="btn btn-danger btn-sm" onclick="prLines.splice(${i},1);renderPRLines()">✕</button>
     </div>`).join('');
+  prLines.forEach((_,i)=>acOn('acpr'+i,item=>{prLines[i].itemId=item.id;}));
 }
 function addPRLine(){prLines.push({itemId:'',qty:'',sort:prLines.length+1});renderPRLines();}
 async function savePR(){
@@ -2105,22 +2320,26 @@ function onIRType(){
   document.getElementById('ir-sup-wrap').style.display=t==='PURCHASE'?'':'none';
   document.getElementById('ir-src-wrap').style.display=t==='TRANSFER'?'':'none';
   document.getElementById('ir-cost-hdr').style.display=t==='PURCHASE'?'':'none';
-  renderIRLines();
+  if(t==='TRANSFER'){loadMainStock().then(()=>renderIRLines());}else{renderIRLines();}
 }
 function renderIRLines(){
   const isPurchase=document.getElementById('ir-type')?.value==='PURCHASE';
+  const pool=isPurchase?allItems:mainStockItems.length?mainStockItems:allItems;
   const el=document.getElementById('ir-lines');if(!el)return;
   el.innerHTML=irLines.map((l,i)=>`
     <div style="display:grid;grid-template-columns:1fr 80px 70px ${isPurchase?'90px':''} 50px 32px;gap:5px;margin-bottom:5px;align-items:center">
-      <select onchange="irLines[${i}].itemId=this.value">
-        <option value="">-- Chọn NL/SP --</option>${itemOpts()}
-      </select>
+      ${acHtml('acir'+i,pool,l.itemId,'Tìm nguyên liệu / sản phẩm...')}
       <input type="number" step="0.001" value="${l.qty??''}" onchange="irLines[${i}].qty=this.value" placeholder="Qty">
-      <input value="${l.unit??''}" onchange="irLines[${i}].unit=this.value" placeholder="kg, cái...">
+      <input id="ir-unit-${i}" value="${l.unit??''}" onchange="irLines[${i}].unit=this.value" placeholder="kg, cái...">
       ${isPurchase?`<input type="number" step="0.01" value="${l.cost??''}" onchange="irLines[${i}].cost=this.value" placeholder="Đơn giá">`:''}
       <input type="number" value="${l.sort||i+1}" onchange="irLines[${i}].sort=+this.value">
       <button class="btn btn-danger btn-sm" onclick="irLines.splice(${i},1);renderIRLines()">✕</button>
     </div>`).join('');
+  irLines.forEach((_,i)=>acOn('acir'+i,item=>{
+    irLines[i].itemId=item.id;
+    if(!irLines[i].unit){irLines[i].unit=item.unit||'';
+      const u=document.getElementById('ir-unit-'+i);if(u)u.value=item.unit||'';}
+  }));
 }
 function addIRLine(){irLines.push({itemId:'',qty:'',unit:'',cost:'',sort:irLines.length+1});renderIRLines();}
 async function saveIR(){

@@ -9,7 +9,9 @@ import java.util.stream.Collectors;
 import com.bakery.api.production.dto.ProductionPlanAdjustRequest;
 import com.bakery.api.production.dto.ProductionPlanResponse;
 import com.bakery.api.production.entity.ProductionPlan;
+import com.bakery.api.production.entity.ProductionPlanGroup;
 import com.bakery.api.production.entity.ProductionPlanLine;
+import com.bakery.api.production.repository.ProductionPlanGroupRepository;
 import com.bakery.api.production.repository.ProductionPlanLineRepository;
 import com.bakery.api.production.repository.ProductionPlanRepository;
 import com.bakery.framework.entity.ApprovalStatus;
@@ -33,6 +35,7 @@ public class ProductionPlanService {
 
     private final ProductionPlanRepository planRepository;
     private final ProductionPlanLineRepository lineRepository;
+    private final ProductionPlanGroupRepository planGroupRepository;
     private final BakeryActorResolver actorResolver;
     private final ProductionRequestService productionRequestService;
     private final ProductionIngredientService ingredientService;
@@ -40,9 +43,11 @@ public class ProductionPlanService {
     /** Manager xem kế hoạch theo ngày (DRAFT hoặc APPROVED). */
     @Transactional(readOnly = true)
     public ProductionPlanResponse findByDate(LocalDate date) {
-        ProductionPlan plan = planRepository.findByPlanDate(date)
-                .orElseThrow(() -> new ResourceNotFoundException("ProductionPlan for date " + date));
-        return ProductionPlanResponse.from(plan);
+        ProductionPlan plan = planRepository.findByPlanDate(date).orElse(null);
+        if(plan == null){
+            return null;
+        }
+        return buildResponse(plan);
     }
 
     /** Bếp xem danh sách kế hoạch đã APPROVED. */
@@ -87,7 +92,7 @@ public class ProductionPlanService {
             }
         }
 
-        return ProductionPlanResponse.from(plan);
+        return buildResponse(plan);
     }
 
     /**
@@ -156,7 +161,57 @@ public class ProductionPlanService {
         return ProductionPlanResponse.from(planRepository.save(plan));
     }
 
+    /**
+     * Cập nhật plannedQty cho 1 group trong plan (chỉ khi còn DRAFT).
+     * BATCH_FORMULA: plannedQty = số cối. FREE_GROUP: plannedQty = target qty override.
+     *
+     * @return plan response đầy đủ sau khi cập nhật
+     */
+    @Transactional
+    public ProductionPlanResponse updateGroupPlannedQty(UUID planId, UUID groupId, int plannedQty) {
+        ProductionPlan plan = getById(planId);
+        assertDraft(plan);
+        if (plannedQty < 0) throw new IllegalArgumentException("plannedQty phải >= 0.");
+
+        ProductionPlanGroup ppg = planGroupRepository.findByPlanIdAndGroupId(planId, groupId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "ProductionPlanGroup for plan " + planId + " group " + groupId));
+        ppg.setPlannedQty(plannedQty);
+        planGroupRepository.save(ppg);
+
+        log.info("updateGroupPlannedQty: plan={} group={} plannedQty={}", planId, groupId, plannedQty);
+        return buildResponse(plan);
+    }
+
+    /**
+     * Xóa kế hoạch DRAFT (để tạo lại từ đầu với config mới).
+     * Chỉ cho phép khi status = DRAFT.
+     */
+    @Transactional
+    public void deleteDraft(UUID planId) {
+        ProductionPlan plan = getById(planId);
+        assertDraft(plan);
+        planGroupRepository.findByPlanId(planId).forEach(planGroupRepository::delete);
+        lineRepository.deleteAllByPlanId(planId);
+        planRepository.delete(plan);
+        log.info("deleteDraft: plan {} ngày {} đã xóa.", planId, plan.getPlanDate());
+    }
+
     // ── Private ───────────────────────────────────────────────────────────────
+
+    /**
+     * Builds plan response với planGroups populated.
+     * Dùng thay vì static ProductionPlanResponse.from() để có đủ dữ liệu group.
+     */
+    private ProductionPlanResponse buildResponse(ProductionPlan plan) {
+        ProductionPlanResponse r = ProductionPlanResponse.from(plan);
+        List<ProductionPlanResponse.PlanGroupSummary> groups =
+                planGroupRepository.findByPlanIdWithGroup(plan.getId()).stream()
+                        .map(ProductionPlanResponse.PlanGroupSummary::from)
+                        .toList();
+        r.setPlanGroups(groups);
+        return r;
+    }
 
     private ProductionPlan getById(UUID id) {
         return planRepository.findById(id)

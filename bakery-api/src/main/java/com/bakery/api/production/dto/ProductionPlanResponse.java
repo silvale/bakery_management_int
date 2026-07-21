@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.bakery.api.production.entity.ProductionPlan;
+import com.bakery.api.production.entity.ProductionPlanGroup;
 import com.bakery.api.production.entity.ProductionPlanLine;
 import com.bakery.framework.dto.BaseResponse;
 import com.bakery.framework.metadata.ReferenceValue;
@@ -27,6 +28,12 @@ public class ProductionPlanResponse extends BaseResponse {
     /** Danh sách items nhóm theo planType + group để FE render từng section. */
     private List<PlanLineResponse> lines;
 
+    /**
+     * Thông tin plannedQty theo từng group (FREE_GROUP + BATCH_FORMULA).
+     * FE dùng để hiển thị num_batches input và validate BATCH_FORMULA weight.
+     */
+    private List<PlanGroupSummary> planGroups;
+
     @Getter
     @Setter
     @NoArgsConstructor
@@ -42,6 +49,8 @@ public class ProductionPlanResponse extends BaseResponse {
         /** Số lượng hiệu lực: adjustedQty nếu có, ngược lại suggestedQty. */
         private Integer effectiveQty;
         private BigDecimal gramsPerUnit;
+        /** BATCH_FORMULA: số lượng default mỗi cối — FE dùng để tính adjustedQty = defaultQtyPerBatch × numBatches. */
+        private Integer defaultQtyPerBatch;
         private String ruleNote;
         private int sortOrder;
 
@@ -54,6 +63,7 @@ public class ProductionPlanResponse extends BaseResponse {
             r.setAdjustedQty(line.getAdjustedQty());
             r.setEffectiveQty(line.getEffectiveQty());
             r.setGramsPerUnit(line.getGramsPerUnit());
+            r.setDefaultQtyPerBatch(line.getDefaultQtyPerBatch());
             r.setRuleNote(line.getRuleNote());
             r.setSortOrder(line.getSortOrder());
             if (line.getItem() != null) {
@@ -63,6 +73,37 @@ public class ProductionPlanResponse extends BaseResponse {
                 r.setGroup(new ReferenceValue(line.getGroup().getCode(), line.getGroup().getName()));
             }
             return r;
+        }
+    }
+
+    /** Summary cho 1 group trong plan — FE dùng để render section BATCH_FORMULA / FREE_GROUP. */
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    public static class PlanGroupSummary {
+        private UUID id;
+        private UUID groupId;
+        private String groupCode;
+        private String groupName;
+        /** FREE_GROUP | BATCH_FORMULA */
+        private String groupType;
+        /** FREE_GROUP: target qty; BATCH_FORMULA: số cối. */
+        private int plannedQty;
+        /** Trọng lượng 1 cối (gram) — chỉ có giá trị với BATCH_FORMULA. */
+        private Integer batchWeightGrams;
+
+        public static PlanGroupSummary from(ProductionPlanGroup ppg) {
+            PlanGroupSummary s = new PlanGroupSummary();
+            s.setId(ppg.getId());
+            s.setPlannedQty(ppg.getPlannedQty());
+            if (ppg.getGroup() != null) {
+                s.setGroupId(ppg.getGroup().getId());
+                s.setGroupCode(ppg.getGroup().getCode());
+                s.setGroupName(ppg.getGroup().getName());
+                s.setGroupType(ppg.getGroup().getGroupType());
+                s.setBatchWeightGrams(ppg.getGroup().getBatchWeightGrams());
+            }
+            return s;
         }
     }
 

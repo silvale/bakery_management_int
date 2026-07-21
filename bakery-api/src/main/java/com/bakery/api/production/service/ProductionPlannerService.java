@@ -18,9 +18,11 @@ import com.bakery.api.production.entity.ItemGroup;
 import com.bakery.api.production.entity.ProductionGroup;
 import com.bakery.api.production.entity.ProductionGroupItem;
 import com.bakery.api.production.entity.ProductionPlan;
+import com.bakery.api.production.entity.ProductionPlanGroup;
 import com.bakery.api.production.entity.ProductionPlanLine;
 import com.bakery.api.production.entity.ProductionThresholdRule;
 import com.bakery.api.production.repository.ProductionGroupRepository;
+import com.bakery.api.production.repository.ProductionPlanGroupRepository;
 import com.bakery.api.production.repository.ProductionPlanLineRepository;
 import com.bakery.api.production.repository.ProductionPlanRepository;
 import com.bakery.api.production.repository.ProductionThresholdRuleRepository;
@@ -55,6 +57,7 @@ public class ProductionPlannerService {
 
     private final ProductionPlanRepository planRepository;
     private final ProductionPlanLineRepository lineRepository;
+    private final ProductionPlanGroupRepository planGroupRepository;
     private final ProductionThresholdRuleRepository ruleRepository;
     private final ProductionGroupRepository groupRepository;
     private final DailyReportLineRepository reportLineRepository;
@@ -82,9 +85,11 @@ public class ProductionPlannerService {
         plan.setDayType(dayType);
         plan.setApprovalStatus(ApprovalStatus.DRAFT);
 
-        plan.getLines().addAll(buildLinesFromScratch(plan, dayType));
+        List<ProductionGroup> activeGroups = groupRepository.findByActiveTrue();
+        plan.getLines().addAll(buildLinesFromScratch(plan, dayType, activeGroups));
         ProductionPlan saved = planRepository.save(plan);
         initPlanLines(saved);
+        createPlanGroups(saved, activeGroups, dayType);
         return saved;
     }
 
@@ -167,7 +172,60 @@ public class ProductionPlannerService {
         plan.getLines().addAll(lines);
         ProductionPlan savedDraft = planRepository.save(plan);
         initPlanLines(savedDraft);
+
+        // ── Tạo ProductionPlanGroup records cho FREE_GROUP và BATCH_FORMULA ──
+        createPlanGroups(savedDraft, activeGroups, dayType);
+
         return savedDraft;
+    }
+
+    /**
+     * Tạo ProductionPlanGroup cho mỗi group có lines trong plan.
+     * FREE_GROUP: plannedQty = resolved target weekday/weekend.
+     * BATCH_FORMULA: plannedQty = số cối gợi ý (từ buildBatchFormulaLines).
+     * Admin có thể override sau thông qua updateGroupPlannedQty().
+     */
+    private void createPlanGroups(ProductionPlan plan, List<ProductionGroup> groups, DayType dayType) {
+        // Lấy batch qty đã tính từ lines (BATCH_FORMULA lines có suggestedQty = số cái; cần tính ngược ra cối)
+        // Đơn giản hơn: lưu plannedQty mặc định theo logic của từng group type
+        for (ProductionGroup group : groups) {
+            // Kiểm tra group có lines trong plan không
+            boolean hasLines = plan.getLines().stream()
+                    .anyMatch(l -> l.getGroup() != null && l.getGroup().getId().equals(group.getId()));
+            if (!hasLines) continue;
+
+            ProductionPlanGroup ppg = new ProductionPlanGroup();
+            ppg.setPlan(plan);
+            ppg.setGroup(group);
+
+            if ("FREE_GROUP".equals(group.getGroupType())) {
+                int target = dayType == DayType.WEEKDAY
+                        ? (group.getTargetWeekday() != null ? group.getTargetWeekday() : 0)
+                        : (group.getTargetWeekend() != null ? group.getTargetWeekend() : 0);
+                ppg.setPlannedQty(Math.max(1, target));
+            } else if ("BATCH_FORMULA".equals(group.getGroupType())) {
+                // Lấy suggestedQty từ lines để tính ngược số cối
+                // (buildBatchFormulaLines đã set suggestedQty = default_qty_per_batch * batches)
+                // Dùng batches đã tính: lấy từ ruleNote hoặc default 1
+                int batches = extractBatchesFromLines(plan, group);
+                ppg.setPlannedQty(Math.max(1, batches));
+            }
+            planGroupRepository.save(ppg);
+        }
+    }
+
+    /** Đọc số cối từ ruleNote của BATCH_FORMULA line (format: "... X cối ..."). */
+    private int extractBatchesFromLines(ProductionPlan plan, ProductionGroup group) {
+        return plan.getLines().stream()
+                .filter(l -> l.getGroup() != null && l.getGroup().getId().equals(group.getId()))
+                .map(l -> l.getRuleNote())
+                .filter(note -> note != null)
+                .map(note -> {
+                    var m = java.util.regex.Pattern.compile("(\\d+) cối").matcher(note);
+                    return m.find() ? Integer.parseInt(m.group(1)) : 1;
+                })
+                .findFirst()
+                .orElse(1);
     }
 
     // ── Pattern 1: SIMPLE ────────────────────────────────────────────────────
@@ -328,6 +386,20 @@ public class ProductionPlannerService {
             Item item = gi.getItem();
             BigDecimal remaining = remainingByItem.getOrDefault(item.getId(), BigDecimal.ZERO);
 
+            // Tính defaultQtyPerBatch: BY_COUNT dùng config cứng, BY_WEIGHT tính từ batch_weight / grams_per_unit
+            int defaultQty;
+            if ("BY_COUNT".equals(gi.getConfigType()) && gi.getDefaultQtyPerBatch() != null) {
+                defaultQty = gi.getDefaultQtyPerBatch();
+            } else if (gi.getGramsPerUnit() != null && gi.getGramsPerUnit().compareTo(BigDecimal.ZERO) > 0) {
+                defaultQty = BigDecimal.valueOf(batchWeight)
+                        .divideToIntegralValue(gi.getGramsPerUnit())
+                        .intValue();
+                // Override bằng config nếu admin đã set
+                if (gi.getDefaultQtyPerBatch() != null) defaultQty = gi.getDefaultQtyPerBatch();
+            } else {
+                defaultQty = 0;
+            }
+
             ProductionPlanLine line = new ProductionPlanLine();
             line.setPlan(plan);
             line.setItem(item);
@@ -335,8 +407,9 @@ public class ProductionPlannerService {
             line.setGroup(group);
             line.setQtyRemaining(remaining);
             line.setGramsPerUnit(gi.getGramsPerUnit());
-            // suggestedQty = null — nhân viên quyết định phân bổ theo cối
-            line.setSuggestedQty(null);
+            line.setDefaultQtyPerBatch(defaultQty > 0 ? defaultQty : null);
+            // suggestedQty = defaultQtyPerBatch × số cối gợi ý
+            line.setSuggestedQty(batches > 0 && defaultQty > 0 ? batches * defaultQty : null);
             line.setRuleNote(String.format(
                     "Nhóm %s: còn %.1f cối, gợi ý làm %d cối (%dkg). Nhân viên phân bổ size.",
                     group.getName(), remainingBatches, batches, batches * batchWeight / 1000));
@@ -367,6 +440,8 @@ public class ProductionPlannerService {
         // (plan.getLines().clear() không flush ngay, gây duplicate key khi insert batch)
         lineRepository.deleteAllByPlanId(plan.getId());
         plan.getLines().clear(); // sync in-memory collection
+        // Xóa plan groups cũ để tạo lại
+        planGroupRepository.findByPlanId(plan.getId()).forEach(planGroupRepository::delete);
 
         LocalDate planDate = plan.getPlanDate();
         DayType dayType = resolveDayType(planDate);
@@ -375,9 +450,11 @@ public class ProductionPlannerService {
         plan.setRejectedReason(null);
 
         // Tạo lại lines với tồn kho = 0 (giống generateForDate)
-        plan.getLines().addAll(buildLinesFromScratch(plan, dayType));
+        List<ProductionGroup> activeGroups = groupRepository.findByActiveTrue();
+        plan.getLines().addAll(buildLinesFromScratch(plan, dayType, activeGroups));
         ProductionPlan saved = planRepository.save(plan);
         initPlanLines(saved);
+        createPlanGroups(saved, activeGroups, dayType);
         return saved;
     }
 
@@ -387,11 +464,11 @@ public class ProductionPlannerService {
      * Tạo toàn bộ lines cho plan từ đầu, giả sử tồn kho = 0.
      * Dùng chung cho generateForDate() và regenerateRejected().
      */
-    private List<ProductionPlanLine> buildLinesFromScratch(ProductionPlan plan, DayType dayType) {
+    private List<ProductionPlanLine> buildLinesFromScratch(
+            ProductionPlan plan, DayType dayType, List<ProductionGroup> activeGroups) {
         Map<UUID, BigDecimal> emptyRemaining = Map.of();
         List<ProductionPlanLine> lines = new ArrayList<>();
         Set<UUID> groupedItemIds = new HashSet<>();
-        List<ProductionGroup> activeGroups = groupRepository.findByActiveTrue();
         for (ProductionGroup group : activeGroups) {
             group.getItems().forEach(gi -> groupedItemIds.add(gi.getItem().getId()));
         }

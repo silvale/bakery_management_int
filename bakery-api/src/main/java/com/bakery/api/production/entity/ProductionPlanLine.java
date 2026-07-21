@@ -61,6 +61,13 @@ public class ProductionPlanLine extends BaseEntity {
     @Column(name = "grams_per_unit", precision = 8, scale = 2)
     private BigDecimal gramsPerUnit;
 
+    /**
+     * Số lượng default mỗi cối — chỉ dùng cho BATCH_FORMULA.
+     * FE dùng để tính adjustedQty = defaultQtyPerBatch × num_batches khi admin đổi số cối.
+     */
+    @Column(name = "default_qty_per_batch")
+    private Integer defaultQtyPerBatch;
+
     /** Ghi chú rule đã khớp — dùng để hiển thị lý do gợi ý cho manager. */
     @Column(name = "rule_note", length = 500)
     private String ruleNote;

@@ -109,6 +109,8 @@ public class ProductionGroupService {
                 gi.setGroup(e);
                 gi.setItem(item);
                 gi.setGramsPerUnit(ir.gramsPerUnit());
+                gi.setConfigType(ir.configType() != null ? ir.configType() : "BY_WEIGHT");
+                gi.setDefaultQtyPerBatch(ir.defaultQtyPerBatch());
                 gi.setSortOrder(ir.sortOrder());
                 e.getItems().add(gi);
             }

@@ -123,8 +123,8 @@ public class ProductionRequestService
 
     /**
      * Approve toàn bộ phiếu SX trong ngày một lần.
-     * Chỉ approve phiếu mà TẤT CẢ lines đã COMPLETED (bếp đã điền số thực tế).
-     * Bỏ qua các phiếu đã APPROVED/REJECTED hoặc còn line chưa xong.
+     * Approve tất cả phiếu DRAFT/PENDING_APPROVAL — bếp sẽ bắt đầu sản xuất sau khi được approve.
+     * Bỏ qua các phiếu đã APPROVED/REJECTED.
      */
     @org.springframework.transaction.annotation.Transactional
     public List<ProductionRequestResponse> approveAll(java.time.LocalDate date) {
@@ -133,9 +133,6 @@ public class ProductionRequestService
         return repository.findByProductionDate(date).stream()
                 .filter(e -> e.getApprovalStatus() == ApprovalStatus.DRAFT
                         || e.getApprovalStatus() == ApprovalStatus.PENDING_APPROVAL)
-                .filter(e -> !e.getLines().isEmpty()
-                        && e.getLines().stream()
-                                .allMatch(l -> l.getLineStatus() == ProductionLineStatus.COMPLETED))
                 .map(e -> {
                     e.setApprovalStatus(ApprovalStatus.APPROVED);
                     e.setApprovedAt(now);
