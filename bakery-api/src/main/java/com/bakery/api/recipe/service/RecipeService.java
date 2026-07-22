@@ -143,11 +143,14 @@ public class RecipeService
             return toResponse(recipe); // idempotent
         }
 
-        // Deactivate recipe cũ
+        // Deactivate recipe cũ — dùng entity-level save (không phải bulk @Modifying query)
+        // để Envers capture được thay đổi vào recipe_HIS.
         if (recipe.getProduct() != null) {
-            recipeRepository.deactivateAllByProduct(recipe.getProduct().getId());
+            recipeRepository.findByProductIdAndActiveTrue(recipe.getProduct().getId())
+                    .ifPresent(old -> { old.setActive(false); recipeRepository.save(old); });
         } else {
-            recipeRepository.deactivateAllBySemiProduct(recipe.getSemiProduct().getId());
+            recipeRepository.findBySemiProductIdAndActiveTrue(recipe.getSemiProduct().getId())
+                    .ifPresent(old -> { old.setActive(false); recipeRepository.save(old); });
         }
 
         recipe.setActive(true);

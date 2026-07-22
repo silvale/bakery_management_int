@@ -70,6 +70,7 @@ public class DailyReportService {
     private final WarehouseRepository warehouseRepository;
     private final BakeryActorResolver actorResolver;
     private final ProductionPlannerService productionPlannerService;
+    private final com.bakery.framework.repository.CommandRequestRepository commandRequestRepository;
 
     // ── Get / Create ─────────────────────────────────────────────
 
@@ -285,6 +286,22 @@ public class DailyReportService {
         report.setFinalizedBy(actorResolver.currentUserId());
         report.setUpdatedAt(Instant.now());
         DailyReport saved = reportRepository.save(report);
+
+        // Log finalize activity
+        try {
+            commandRequestRepository.save(com.bakery.framework.entity.CommandRequest.builder()
+                    .entityName("DailyReport")
+                    .entityId(saved.getId())
+                    .action(com.bakery.framework.entity.CommandAction.FINALIZE)
+                    .actor(actorResolver.currentUserId())
+                    .actorName(actorResolver.currentUsername())
+                    .entityLabel("Báo cáo ngày " + date)
+                    .status(com.bakery.framework.entity.CommandStatus.SUCCESS)
+                    .createdAt(Instant.now())
+                    .build());
+        } catch (Exception ex) {
+            log.warn("Lỗi log FINALIZE: {}", ex.getMessage());
+        }
 
         // ── Bước 5: Cập nhật tồn kho SHOP ────────────────────────
         try {

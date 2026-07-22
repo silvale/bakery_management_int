@@ -28,7 +28,6 @@ import com.bakery.api.recipe.dto.RecipeLineRequest;
 import com.bakery.api.recipe.entity.Recipe;
 import com.bakery.api.recipe.entity.RecipeLine;
 import com.bakery.api.recipe.repository.RecipeRepository;
-import com.bakery.api.recipe.service.RecipeCostService;
 import com.bakery.api.recipe.service.RecipeService;
 import com.bakery.framework.entity.ApprovalStatus;
 import com.bakery.framework.exception.ResourceNotFoundException;
@@ -66,7 +65,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     private final IngredientPriceRepository ingredientPriceRepository;
     private final RecipeRepository recipeRepository;
     private final RecipeService recipeService;
-    private final RecipeCostService recipeCostService;
+    private final ItemCostHelper itemCostHelper;
     private final ItemGroupRepository itemGroupRepository;
     private final ProductExpiryConfigRepository expiryConfigRepository;
     private final BakeryActorResolver actorResolver;
@@ -91,6 +90,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     @Override protected BakeryActorResolver getActorResolver() { return actorResolver; }
     @Override protected CommandRequestRepository getCommandRequestRepository() { return commandRequestRepository; }
     @Override protected String getEntityName() { return "Item"; }
+    @Override protected String entityLabel(com.bakery.api.master.entity.Item e) { return e.getName() != null ? e.getName() : e.getCode(); }
 
     // ── Override findAll — xử lý discriminator spec ───────────────────────────
 
@@ -327,8 +327,14 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         }
     }
 
-    /** Khi Item được APPROVE → tự động APPROVE + ACTIVATE recipe PENDING mới nhất,
-     *  sau đó tính lại unit_cost từ công thức và persist. */
+    /**
+     * Khi Item được APPROVE → tự động APPROVE + ACTIVATE recipe PENDING mới nhất,
+     * sau đó tính lại unit_cost trong transaction REQUIRES_NEW riêng biệt.
+     *
+     * <p>Cost recalculation chạy qua {@link ItemCostHelper} với REQUIRES_NEW để
+     * tránh "rollback-only trap": nếu RecipeCostService ném exception, chỉ
+     * transaction phụ bị rollback, approve() vẫn commit thành công.
+     */
     @Override
     protected void afterApprove(Item item) {
         if (item instanceof Product prod) {
@@ -336,38 +342,19 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                     .findFirstByProductIdAndApprovalStatusOrderByVersionDesc(
                             prod.getId(), ApprovalStatus.PENDING_APPROVAL)
                     .ifPresent(recipe -> {
-                        recipeRepository.deactivateAllByProduct(prod.getId());
+                        deactivateCurrentRecipeByProduct(prod.getId());
                         activateRecipe(recipe);
                     });
-            recalculateAndPersistCost(item);
+            itemCostHelper.recalculateAndPersist(item.getId());
         } else if (item instanceof SemiProduct sp) {
             recipeRepository
                     .findFirstBySemiProductIdAndApprovalStatusOrderByVersionDesc(
                             sp.getId(), ApprovalStatus.PENDING_APPROVAL)
                     .ifPresent(recipe -> {
-                        recipeRepository.deactivateAllBySemiProduct(sp.getId());
+                        deactivateCurrentRecipeBySemiProduct(sp.getId());
                         activateRecipe(recipe);
                     });
-            recalculateAndPersistCost(item);
-        }
-    }
-
-    /**
-     * Tính lại unit_cost cho PRODUCT / SEMI_PRODUCT qua RecipeCostService.
-     * Nếu công thức chưa đủ dữ liệu (MISSING ingredient price) thì cost = null để
-     * tránh lưu giá sai; log warning để admin biết.
-     */
-    private void recalculateAndPersistCost(Item item) {
-        try {
-            RecipeCostService.CostResult result = recipeCostService.calculate(item.getId());
-            // Chỉ lưu khi đủ dữ liệu; nếu MISSING thì giữ nguyên giá trị cũ
-            if (result.complete()) {
-                item.setUnitCost(result.totalCostPerUnit());
-                repository.save(item);
-            }
-        } catch (Exception ex) {
-            // Không có active recipe hoặc lỗi tính toán — bỏ qua, không chặn approve
-            // Admin tự tính lại sau khi đủ dữ liệu công thức
+            itemCostHelper.recalculateAndPersist(item.getId());
         }
     }
 
@@ -445,6 +432,10 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
     private void replaceRecipeLines(Recipe recipe, ItemRequest req) {
         recipe.setNote(req.recipeNote());
+        // Force dirty Recipe header — nếu chỉ lines thay đổi, Hibernate không detect
+        // Recipe là dirty (lines là @NotAudited) → không có UPDATE SQL → Envers bỏ sót.
+        // Set updatedAt thủ công để trigger dirty check.
+        recipe.setUpdatedAt(java.time.Instant.now());
         recipe.getLines().clear();
         applyRecipeLines(recipe, req.recipeLines());
         recipeRepository.save(recipe);
@@ -454,6 +445,29 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         recipe.setApprovalStatus(ApprovalStatus.APPROVED);
         recipe.setActive(true);
         recipeRepository.save(recipe);
+    }
+
+    /**
+     * Deactivate recipe đang active của 1 product — dùng entity-level save thay vì
+     * bulk @Modifying @Query để Envers capture được thay đổi vào recipe_HIS.
+     */
+    private void deactivateCurrentRecipeByProduct(UUID productId) {
+        recipeRepository.findByProductIdAndActiveTrue(productId)
+                .ifPresent(r -> {
+                    r.setActive(false);
+                    recipeRepository.save(r);
+                });
+    }
+
+    /**
+     * Deactivate recipe đang active của 1 semi-product — tương tự deactivateCurrentRecipeByProduct.
+     */
+    private void deactivateCurrentRecipeBySemiProduct(UUID semiProductId) {
+        recipeRepository.findBySemiProductIdAndActiveTrue(semiProductId)
+                .ifPresent(r -> {
+                    r.setActive(false);
+                    recipeRepository.save(r);
+                });
     }
 
     private void applyRecipeLines(Recipe recipe, List<RecipeLineRequest> lineRequests) {

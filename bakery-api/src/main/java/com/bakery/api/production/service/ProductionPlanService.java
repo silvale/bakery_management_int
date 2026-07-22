@@ -171,15 +171,39 @@ public class ProductionPlanService {
     public ProductionPlanResponse updateGroupPlannedQty(UUID planId, UUID groupId, int plannedQty) {
         ProductionPlan plan = getById(planId);
         assertDraft(plan);
-        if (plannedQty < 0) throw new IllegalArgumentException("plannedQty phải >= 0.");
 
         ProductionPlanGroup ppg = planGroupRepository.findByPlanIdAndGroupId(planId, groupId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "ProductionPlanGroup for plan " + planId + " group " + groupId));
+
+        boolean isBatchFormula = "BATCH_FORMULA".equals(ppg.getGroup().getGroupType());
+        if (isBatchFormula && plannedQty < 1) {
+            throw new IllegalArgumentException("Số cối phải >= 1 với nhóm BATCH_FORMULA.");
+        }
+        if (!isBatchFormula && plannedQty < 0) {
+            throw new IllegalArgumentException("plannedQty phải >= 0.");
+        }
+
         ppg.setPlannedQty(plannedQty);
         planGroupRepository.save(ppg);
 
-        log.info("updateGroupPlannedQty: plan={} group={} plannedQty={}", planId, groupId, plannedQty);
+        // Với BATCH_FORMULA: cập nhật lại suggestedQty trên từng line theo số cối mới.
+        // Trước đây bị miss — line vẫn giữ suggestedQty cũ từ lúc generate.
+        if (isBatchFormula) {
+            List<ProductionPlanLine> lines = lineRepository
+                    .findByPlanIdAndGroupIdOrderBySortOrderAsc(planId, groupId);
+            for (ProductionPlanLine line : lines) {
+                Integer defaultQty = line.getDefaultQtyPerBatch();
+                line.setSuggestedQty(defaultQty != null ? plannedQty * defaultQty : null);
+                line.setRuleNote(String.format(
+                        "Nhóm %s: %d cối (điều chỉnh thủ công). Nhân viên phân bổ size.",
+                        ppg.getGroup().getName(), plannedQty));
+                lineRepository.save(line);
+            }
+        }
+
+        log.info("updateGroupPlannedQty: plan={} group={} plannedQty={} isBatchFormula={}",
+                planId, groupId, plannedQty, isBatchFormula);
         return buildResponse(plan);
     }
 

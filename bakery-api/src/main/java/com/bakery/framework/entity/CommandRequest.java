@@ -47,11 +47,19 @@ public class CommandRequest {
     @Column(name = "action", nullable = false, length = 20)
     private CommandAction action;
 
-    /** Username / actor who triggered the command */
+    /** userId (UUID string) — kept for backward compat */
     @Column(name = "actor", length = 100)
     private String actor;
 
-    /** Free-text note (e.g. rejection reason) */
+    /** Username (human-readable) of the actor */
+    @Column(name = "actor_name", length = 100)
+    private String actorName;
+
+    /** Human-readable label of the affected entity (e.g. item name, order code) */
+    @Column(name = "entity_label", length = 255)
+    private String entityLabel;
+
+    /** Free-text note (e.g. rejection reason, detail) */
     @Column(name = "note", length = 500)
     private String note;
 

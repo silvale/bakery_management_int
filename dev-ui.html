@@ -115,6 +115,7 @@ tr:hover td{background:#f8fafc}
     <div class="nav-label">Hệ thống</div>
     <div class="nav-item" data-screen="USERS" onclick="nav('users')">👤 Tài khoản</div>
     <div class="nav-item" data-screen="ROLES" onclick="nav('roles')">🔐 Phân quyền</div>
+    <div class="nav-item" data-screen="ACTIVITY_LOG" onclick="nav('activity-log')">📜 Nhật ký hoạt động</div>
   </div>
 
 <!-- Login Overlay -->
@@ -341,14 +342,14 @@ const PAGE_TITLES={'items-list':'Danh sách sản phẩm','item-form':'Tạo / S
   'prod-requests':'Phiếu sản xuất','delivery-records':'Giao nhận bếp → shop','prod-adjustments':'Điều chỉnh SX',
   'stock-summary':'Tồn kho','inventory-requests':'Phiếu kho',
   'daily-report':'Báo cáo ngày','huy-banh':'Hủy bánh','pos-sales':'POS Sales',
-  'users':'Tài khoản người dùng','roles':'Phân quyền (Roles)'};
+  'users':'Tài khoản người dùng','roles':'Phân quyền (Roles)','activity-log':'Nhật ký hoạt động'};
 const PAGE_FNS={'items-list':pageItemsList,'item-form':pageItemForm,'suppliers':pageSuppliers,
   'product-mapping':pageProductMapping,'item-groups':pageItemGroups,
   'sx-config':pageSxConfig,'prod-groups':pageProdGroups,
   'threshold-rules':pageThresholdRules,'prod-plans':pageProdPlans,'prod-requests':pageProdRequests,
   'delivery-records':pageDeliveryRecords,'prod-adjustments':pageProdAdjustments,'stock-summary':pageStockSummary,
   'inventory-requests':pageInventoryRequests,'daily-report':pageDailyReport,'huy-banh':pageHuyBanh,'pos-sales':pagePosSales,
-  'users':showUsers,'roles':showRoles};
+  'users':showUsers,'roles':showRoles,'activity-log':showActivityLog};
 
 function nav(page,data){
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
@@ -3611,6 +3612,120 @@ async function loadUsers(){
       <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${u.username}')">🗑</button>
     </td>
   </tr>`).join('')}</tbody></table>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ACTIVITY LOG (Nhật ký hoạt động)
+// ══════════════════════════════════════════════════════════════════════════════
+const ACTION_LABELS={
+  CREATE:'Tạo mới',UPDATE:'Cập nhật',DELETE:'Xoá',APPROVE:'Duyệt',REJECT:'Từ chối',
+  COMPLETE:'Hoàn thành',FINALIZE:'Chốt báo cáo',UPLOAD:'Upload',GENERATE:'Tạo tự động',
+  LOGIN:'Đăng nhập',LOGOUT:'Đăng xuất'
+};
+const ACTION_COLORS={
+  CREATE:'#22c55e',UPDATE:'#3b82f6',DELETE:'#ef4444',APPROVE:'#10b981',REJECT:'#f97316',
+  COMPLETE:'#8b5cf6',FINALIZE:'#0ea5e9',UPLOAD:'#6366f1',GENERATE:'#a855f7',
+  LOGIN:'#14b8a6',LOGOUT:'#94a3b8'
+};
+
+let _alPage=0, _alFilters={};
+async function showActivityLog(){
+  const content=document.getElementById('content');
+  content.innerHTML=`
+  <div class="card" style="margin-bottom:12px">
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div class="field" style="margin:0;flex:1;min-width:140px"><label>Người dùng</label>
+        <input id="al-actor" placeholder="Tìm theo username..." oninput="alFilter()"></div>
+      <div class="field" style="margin:0;width:160px"><label>Hành động</label>
+        <select id="al-action" onchange="alFilter()">
+          <option value="">Tất cả</option>
+          ${Object.entries(ACTION_LABELS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}
+        </select></div>
+      <div class="field" style="margin:0;flex:1;min-width:140px"><label>Màn hình / Entity</label>
+        <input id="al-entity" placeholder="Ví dụ: Item, DailyReport..." oninput="alFilter()"></div>
+      <div class="field" style="margin:0;flex:1;min-width:140px"><label>Tên đối tượng</label>
+        <input id="al-label" placeholder="Tìm tên mục..." oninput="alFilter()"></div>
+      <div class="field" style="margin:0;width:155px"><label>Từ ngày</label>
+        <input type="datetime-local" id="al-from" onchange="alFilter()"></div>
+      <div class="field" style="margin:0;width:155px"><label>Đến ngày</label>
+        <input type="datetime-local" id="al-to" onchange="alFilter()"></div>
+      <button class="btn btn-ghost btn-sm" onclick="alClear()" style="align-self:flex-end">✕ Xoá lọc</button>
+      <button class="btn btn-primary btn-sm" onclick="alLoad(0)" style="align-self:flex-end">🔍 Tìm</button>
+    </div>
+  </div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div id="al-summary" style="font-size:13px;color:#64748b"></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-ghost btn-sm" id="al-prev" onclick="alLoad(_alPage-1)" disabled>← Trước</button>
+        <span id="al-page-info" style="font-size:12px;color:#94a3b8"></span>
+        <button class="btn btn-ghost btn-sm" id="al-next" onclick="alLoad(_alPage+1)" disabled>Tiếp →</button>
+      </div>
+    </div>
+    <div id="al-table"><div class="empty">Đang tải...</div></div>
+  </div>`;
+  alLoad(0);
+}
+function alFilter(){_alPage=0;}
+function alClear(){
+  document.getElementById('al-actor').value='';
+  document.getElementById('al-action').value='';
+  document.getElementById('al-entity').value='';
+  document.getElementById('al-label').value='';
+  document.getElementById('al-from').value='';
+  document.getElementById('al-to').value='';
+  alLoad(0);
+}
+async function alLoad(page){
+  if(page<0)return;
+  _alPage=page;
+  const actor=document.getElementById('al-actor')?.value||'';
+  const action=document.getElementById('al-action')?.value||'';
+  const entity=document.getElementById('al-entity')?.value||'';
+  const label=document.getElementById('al-label')?.value||'';
+  const from=document.getElementById('al-from')?.value||'';
+  const to=document.getElementById('al-to')?.value||'';
+  const params=new URLSearchParams({page,size:50});
+  if(actor)params.set('actorName',actor);
+  if(action)params.set('action',action);
+  if(entity)params.set('entityName',entity);
+  if(label)params.set('entityLabel',label);
+  if(from)params.set('from',new Date(from).toISOString());
+  if(to)params.set('to',new Date(to).toISOString());
+  const data=await api('GET',`/api/v1/activity-log?${params}`);
+  const el=document.getElementById('al-table');if(!el)return;
+  const rows=data?.content??[];
+  const total=data?.totalElements??0;
+  const totalPages=data?.totalPages??1;
+  const cur=data?.number??0;
+  document.getElementById('al-summary').textContent=`${total} bản ghi`;
+  document.getElementById('al-page-info').textContent=`Trang ${cur+1} / ${totalPages}`;
+  document.getElementById('al-prev').disabled=cur<=0;
+  document.getElementById('al-next').disabled=cur>=totalPages-1;
+  if(!rows.length){el.innerHTML='<div class="empty">Không có bản ghi nào</div>';return;}
+  el.innerHTML=`<table>
+    <thead><tr>
+      <th style="width:148px">Thời gian</th>
+      <th style="width:120px">Người dùng</th>
+      <th style="width:110px">Hành động</th>
+      <th style="width:130px">Màn hình</th>
+      <th>Đối tượng</th>
+      <th>Chi tiết / Ghi chú</th>
+    </tr></thead>
+    <tbody>${rows.map(r=>{
+      const d=new Date(r.createdAt);
+      const ts=d.toLocaleDateString('vi-VN')+' '+d.toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      const color=ACTION_COLORS[r.action]||'#94a3b8';
+      const lbl=ACTION_LABELS[r.action]||r.action||'—';
+      return`<tr>
+        <td style="font-size:12px;white-space:nowrap;color:#64748b">${ts}</td>
+        <td><strong style="font-size:13px">${r.actorName||'—'}</strong></td>
+        <td><span style="display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:${color}22;color:${color}">${lbl}</span></td>
+        <td style="font-size:12px;color:#475569">${r.entityName||'—'}</td>
+        <td style="font-size:13px">${r.entityLabel||'—'}</td>
+        <td style="font-size:12px;color:#64748b;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.note||''}">${r.note||'—'}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

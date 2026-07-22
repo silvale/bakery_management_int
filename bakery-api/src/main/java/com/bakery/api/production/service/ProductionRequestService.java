@@ -36,6 +36,7 @@ import com.bakery.api.recipe.entity.Recipe;
 import com.bakery.api.recipe.entity.RecipeLine;
 import com.bakery.api.recipe.repository.RecipeLineRepository;
 import com.bakery.api.recipe.repository.RecipeRepository;
+import com.bakery.framework.entity.CommandAction;
 import com.bakery.framework.entity.AdjustmentSource;
 import com.bakery.framework.entity.AdjustmentType;
 import com.bakery.framework.entity.ApprovalStatus;
@@ -93,6 +94,7 @@ public class ProductionRequestService
     @Override protected BakeryActorResolver getActorResolver() { return actorResolver; }
     @Override protected CommandRequestRepository getCommandRequestRepository() { return commandRequestRepository; }
     @Override protected String getEntityName() { return "ProductionRequest"; }
+    @Override protected String entityLabel(com.bakery.api.production.entity.ProductionRequest e) { return e.getCode(); }
 
     /**
      * PR sinh từ plan được lưu với DRAFT (default BaseEntity).
@@ -530,7 +532,10 @@ public class ProductionRequestService
 
         line.setLineStatus(ProductionLineStatus.COMPLETED);
         line.setQtyProduced(qtyProduced);
-        return toResponse(repository.save(e));
+        ProductionRequest saved = repository.save(e);
+        log(CommandAction.COMPLETE, requestId, saved.getCode(),
+                line.getProduct() != null ? line.getProduct().getCode() + " × " + qtyProduced : null);
+        return toResponse(saved);
     }
 
     /**

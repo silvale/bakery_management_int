@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -109,7 +110,7 @@ public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
         beforeCreate(entity);
         E saved = getRepository().save(entity);
         afterCreate(saved);
-        log(CommandAction.CREATE, saved.getId(), null, CommandStatus.SUCCESS);
+        log(CommandAction.CREATE, saved.getId(), entityLabel(saved), null);
         return toResponse(saved);
     }
 
@@ -125,7 +126,7 @@ public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
         beforeUpdate(entity);
         E saved = getRepository().save(entity);
         afterUpdate(saved);
-        log(CommandAction.UPDATE, id, null, CommandStatus.SUCCESS);
+        log(CommandAction.UPDATE, id, entityLabel(saved), null);
         return toResponse(saved);
     }
 
@@ -134,11 +135,12 @@ public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
     public void delete(UUID id) {
         E entity = getRepository().findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(getEntityName(), id));
+        String label = entityLabel(entity);
         beforeDelete(entity);
         entity.setStatus(EntityStatus.INACTIVE);
         getRepository().save(entity);
         afterDelete(id);
-        log(CommandAction.DELETE, id, null, CommandStatus.SUCCESS);
+        log(CommandAction.DELETE, id, label, null);
     }
 
     // ── Approval ─────────────────────────────────────────────
@@ -153,10 +155,10 @@ public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
         }
         entity.setApprovalStatus(ApprovalStatus.APPROVED);
         entity.setApprovedAt(Instant.now());
-        entity.setApprovedBy(getActorResolver().currentUserId());
+        entity.setApprovedBy(getActorResolver().currentUsername());
         E saved = getRepository().save(entity);
         afterApprove(saved);
-        log(CommandAction.APPROVE, id, null, CommandStatus.SUCCESS);
+        log(CommandAction.APPROVE, id, entityLabel(saved), null);
         return toResponse(saved);
     }
 
@@ -172,7 +174,7 @@ public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
         entity.setRejectedReason(reason);
         E saved = getRepository().save(entity);
         afterReject(saved);
-        log(CommandAction.REJECT, id, reason, CommandStatus.SUCCESS);
+        log(CommandAction.REJECT, id, entityLabel(saved), reason);
         return toResponse(saved);
     }
 
@@ -190,18 +192,36 @@ public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
 
     // ── Internal logging ──────────────────────────────────────
 
-    private void log(CommandAction action, UUID entityId, String note, CommandStatus status) {
+    /**
+     * Injected via field injection để tránh vòng phụ thuộc trong constructor.
+     * Dùng REQUIRES_NEW — log chạy trong transaction riêng, không làm outer
+     * transaction bị rollback-only nếu flush Hibernate fail.
+     */
+    @Autowired
+    private CommandLogWriter commandLogWriter;
+
+    /**
+     * Override để cung cấp label đọc được cho entity (vd: item.getName(), order.getCode()).
+     * Mặc định trả về null — subclass nên override.
+     */
+    protected String entityLabel(E entity) {
+        return null;
+    }
+
+    protected void log(CommandAction action, UUID entityId, String entityLabel, String note) {
         try {
             CommandRequest cmd = CommandRequest.builder()
                     .entityName(getEntityName())
                     .entityId(entityId)
                     .action(action)
                     .actor(getActorResolver().currentUserId())
+                    .actorName(getActorResolver().currentUsername())
+                    .entityLabel(entityLabel)
                     .note(note)
-                    .status(status)
+                    .status(CommandStatus.SUCCESS)
                     .createdAt(Instant.now())
                     .build();
-            getCommandRequestRepository().save(cmd);
+            commandLogWriter.write(cmd);
         } catch (Exception ignored) {
             // Logging must never fail the main transaction
         }

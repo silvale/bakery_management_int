@@ -8,6 +8,10 @@ import com.bakery.api.auth.entity.RefreshToken;
 import com.bakery.api.auth.entity.UserAccount;
 import com.bakery.api.auth.repository.RefreshTokenRepository;
 import com.bakery.api.auth.repository.UserAccountRepository;
+import com.bakery.framework.entity.CommandAction;
+import com.bakery.framework.entity.CommandRequest;
+import com.bakery.framework.entity.CommandStatus;
+import com.bakery.framework.repository.CommandRequestRepository;
 import com.bakery.framework.security.JwtTokenService;
 import com.bakery.framework.security.properties.JwtProperties;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +30,7 @@ public class AuthService {
     private final JwtTokenService jwtTokenService;
     private final JwtProperties jwtProperties;
     private final PasswordEncoder passwordEncoder;
+    private final CommandRequestRepository commandRequestRepository;
 
     /**
      * Đăng nhập — trả về access token + refresh token.
@@ -36,6 +41,9 @@ public class AuthService {
                 .orElseThrow(() -> new IllegalArgumentException("Tên đăng nhập hoặc mật khẩu không đúng."));
 
         if (!passwordEncoder.matches(req.password(), account.getPasswordHash())) {
+            // Log failed login attempt
+            activityLog(CommandAction.LOGIN, req.username(), null, "FAIL",
+                    "Sai mật khẩu cho tài khoản: " + req.username(), CommandStatus.FAILED);
             throw new IllegalArgumentException("Tên đăng nhập hoặc mật khẩu không đúng.");
         }
 
@@ -55,6 +63,8 @@ public class AuthService {
         refreshTokenRepository.save(rt);
 
         log.info("Login: user={} role={}", account.getUsername(), roleCode);
+        activityLog(CommandAction.LOGIN, account.getUsername(), account.getId().toString(),
+                account.getUsername() + " (" + roleName + ")", null, CommandStatus.SUCCESS);
 
         return new LoginResponse(
                 account.getId(),
@@ -111,6 +121,29 @@ public class AuthService {
             rt.setRevoked(true);
             refreshTokenRepository.save(rt);
             log.info("Logout: userId={}", rt.getUserId());
+            // Resolve username for log
+            userAccountRepository.findById(rt.getUserId()).ifPresent(account ->
+                activityLog(CommandAction.LOGOUT, account.getUsername(), account.getId().toString(),
+                        account.getUsername(), null, CommandStatus.SUCCESS)
+            );
         });
+    }
+
+    // ── Internal helper ───────────────────────────────────────────
+
+    private void activityLog(CommandAction action, String actorName, String actorId,
+                             String entityLabel, String note, CommandStatus status) {
+        try {
+            commandRequestRepository.save(CommandRequest.builder()
+                    .entityName("Auth")
+                    .action(action)
+                    .actor(actorId)
+                    .actorName(actorName)
+                    .entityLabel(entityLabel)
+                    .note(note)
+                    .status(status)
+                    .createdAt(Instant.now())
+                    .build());
+        } catch (Exception ignored) {}
     }
 }

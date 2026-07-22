@@ -5,5 +5,11 @@ public enum CommandAction {
     UPDATE,
     DELETE,
     APPROVE,
-    REJECT
+    REJECT,
+    COMPLETE,
+    FINALIZE,
+    UPLOAD,
+    GENERATE,
+    LOGIN,
+    LOGOUT
 }
