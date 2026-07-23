@@ -116,17 +116,9 @@ public class ProductionPlanService {
         int requestCount = productionRequestService.generateFromPlan(saved).size();
         log.info("Approve plan {} → tạo {} phiếu SX DAILY", saved.getPlanDate(), requestCount);
 
-        // Tự động tạo phiếu TRANSFER MAIN→KITCHEN (PENDING_APPROVAL) dựa trên BOM
-        try {
-            var transfer = ingredientService.generateTransferRequest(saved.getId());
-            log.info("Approve plan {} → tạo phiếu xuất kho {} ({} NL)",
-                    saved.getPlanDate(), transfer.getCode(),
-                    transfer.getLines() != null ? transfer.getLines().size() : 0);
-        } catch (IllegalStateException ex) {
-            // BOM chưa setup hoặc không có NL cần xuất — không block approve
-            log.warn("Approve plan {} → bỏ qua tạo phiếu TRANSFER: {}", saved.getPlanDate(), ex.getMessage());
-        }
-
+        // NOTE: Không check/validate nguyên liệu tại đây.
+        // Phiếu TRANSFER MAIN→KITCHEN sẽ được tạo thủ công sau khi đã nhập đủ NL,
+        // hoặc tự động khi hoàn thành phiếu SX (completeLine).
         return ProductionPlanResponse.from(saved);
     }
 

@@ -88,28 +88,13 @@ public class ProductionPlanController {
     }
 
     /**
-     * Manager approve → bếp thấy ngay.
-     * Response bao gồm cả danh sách NL thiếu (nếu có) để UI cảnh báo.
+     * Manager approve → bếp thấy ngay, phiếu SX DAILY được tạo tự động.
+     * Không check nguyên liệu tại đây — NL chỉ được kiểm tra khi hoàn thành phiếu SX.
      */
     @PostMapping("/{id}/approve")
     @RequirePermission(screen = "PROD_PLANS", action = "APPROVE")
-    public java.util.Map<String, Object> approve(@PathVariable UUID id) {
-        ProductionPlanResponse plan = service.approve(id);
-
-        // Re-check NL ngay sau approve để phát hiện NL bị bỏ qua trong TRANSFER
-        java.util.Map<String, Object> nlCheck = ingredientService.checkIngredients(id);
-        @SuppressWarnings("unchecked")
-        java.util.List<?> shortage = (java.util.List<?>) nlCheck.get("shortage");
-
-        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
-        result.put("plan", plan);
-        result.put("nlWarning", shortage != null && !shortage.isEmpty());
-        result.put("nlShortage", shortage);
-        result.put("message", shortage != null && !shortage.isEmpty()
-                ? "Kế hoạch đã duyệt nhưng có " + shortage.size()
-                    + " NL thiếu tồn MAIN — chưa được đưa vào phiếu TRANSFER. Cần nhập kho trước."
-                : "Kế hoạch đã duyệt. Phiếu SX và TRANSFER đã được tạo tự động.");
-        return result;
+    public ProductionPlanResponse approve(@PathVariable UUID id) {
+        return service.approve(id);
     }
 
     /** Manager reject DRAFT. */

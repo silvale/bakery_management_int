@@ -11,6 +11,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.MultiValueMap;
+import lombok.extern.slf4j.Slf4j;
 
 import com.bakery.framework.entity.ApprovalStatus;
 import com.bakery.framework.entity.BaseEntity;
@@ -32,6 +33,7 @@ import com.bakery.framework.util.SpecificationBuilder;
  * @param <REQ> request DTO
  * @param <RES> response DTO
  */
+@Slf4j
 @Transactional(readOnly = true)
 public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
         implements BakeryAdminService<REQ, RES> {
@@ -157,7 +159,12 @@ public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
         entity.setApprovedAt(Instant.now());
         entity.setApprovedBy(getActorResolver().currentUsername());
         E saved = getRepository().save(entity);
-        afterApprove(saved);
+        try {
+            afterApprove(saved);
+        } catch (Exception ex) {
+            log.error("[{}] afterApprove() thất bại cho id={}: {}", getEntityName(), id, ex.getMessage(), ex);
+            throw ex;
+        }
         log(CommandAction.APPROVE, id, entityLabel(saved), null);
         return toResponse(saved);
     }

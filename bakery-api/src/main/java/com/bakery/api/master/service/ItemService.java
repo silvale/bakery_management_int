@@ -38,6 +38,7 @@ import com.bakery.framework.security.BakeryActorResolver;
 import com.bakery.framework.service.AbstractBakeryAdminService;
 import com.bakery.framework.util.SpecificationBuilder;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -56,6 +57,7 @@ import org.springframework.util.MultiValueMap;
  * <p>Recipe bundling (PRODUCT + SEMI_PRODUCT) được xử lý trong lifecycle hooks:
  * afterCreate → afterUpdate → afterApprove → beforeDelete.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, ItemResponse> {
@@ -345,7 +347,12 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                         deactivateCurrentRecipeByProduct(prod.getId());
                         activateRecipe(recipe);
                     });
-            itemCostHelper.recalculateAndPersist(item.getId());
+            // Tính cost trong REQUIRES_NEW riêng (không write → không deadlock với outer tx lock)
+            // Sau đó set trực tiếp lên managed entity — outer tx sẽ flush khi commit
+            itemCostHelper.calculateCost(item.getId()).ifPresent(cost -> {
+                prod.setUnitCost(cost);
+                log.debug("Cập nhật unit_cost={} cho Product {} (trong outer tx)", cost, prod.getId());
+            });
         } else if (item instanceof SemiProduct sp) {
             recipeRepository
                     .findFirstBySemiProductIdAndApprovalStatusOrderByVersionDesc(
@@ -354,7 +361,15 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                         deactivateCurrentRecipeBySemiProduct(sp.getId());
                         activateRecipe(recipe);
                     });
-            itemCostHelper.recalculateAndPersist(item.getId());
+            itemCostHelper.calculateCost(item.getId()).ifPresent(cost -> {
+                sp.setUnitCost(cost);
+                log.debug("Cập nhật unit_cost={} cho SemiProduct {} (trong outer tx)", cost, sp.getId());
+            });
+        } else if (item instanceof Ingredient ing && ing.getUnitCost() != null) {
+            // Khi approve ingredient có unitCost → tự động tạo IngredientPrice catalog entry.
+            // RecipeCostService đọc ingredient_price (không đọc item.unit_cost trực tiếp),
+            // nên phải sync để cost calculation dùng đúng giá mới.
+            upsertIngredientPrice(ing);
         }
     }
 
@@ -373,6 +388,36 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Tạo hoặc cập nhật IngredientPrice catalog cho nguyên liệu.
+     * Nếu đã có entry với effective_date = hôm nay → update giá, tránh tạo duplicate.
+     * Nếu chưa có → tạo mới với effective_date = today.
+     *
+     * <p>Được gọi tự động khi approve Ingredient có unitCost,
+     * để RecipeCostService (đọc từ ingredient_price) dùng đúng giá mới.
+     */
+    private void upsertIngredientPrice(Ingredient ing) {
+        java.time.LocalDate today = java.time.LocalDate.now();
+        java.math.BigDecimal price = ing.getUnitCost().setScale(2, java.math.RoundingMode.HALF_UP);
+        List<IngredientPrice> existing =
+                ingredientPriceRepository.findByItemIdOrderByEffectiveDateDesc(ing.getId());
+
+        // Nếu đã có entry hôm nay → update giá, tránh tạo duplicate cùng ngày
+        existing.stream()
+                .filter(p -> today.equals(p.getEffectiveDate()))
+                .findFirst()
+                .ifPresentOrElse(
+                        p -> { p.setPrice(price); ingredientPriceRepository.save(p); },
+                        () -> {
+                            IngredientPrice np = new IngredientPrice();
+                            np.setItem(ing);
+                            np.setPrice(price);
+                            np.setEffectiveDate(today);
+                            np.setApprovalStatus(ApprovalStatus.APPROVED);
+                            ingredientPriceRepository.save(np);
+                        });
+    }
 
     private void applyCommonFields(Item e, ItemRequest req) {
         e.setCode(req.code());

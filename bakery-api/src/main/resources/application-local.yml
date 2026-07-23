@@ -14,8 +14,8 @@ spring:
     password: bakery123
     hikari:
       pool-name: Hikari-Bakery-Local
-      maximum-pool-size: 5
-      minimum-idle: 1
+      maximum-pool-size: 20
+      minimum-idle: 2
 
 bakery:
   security:

@@ -46,26 +46,24 @@ public class EntityHistoryService {
     public <T> List<EntityRevision<T>> getHistory(Class<T> entityClass, Object id, int page, int size) {
         AuditReader reader = AuditReaderFactory.get(entityManager);
 
-        Long total = (Long) reader.createQuery()
+        // Đếm số revision MOD + DEL (bỏ qua ADD đầu tiên — không có ý nghĩa "thay đổi")
+        Long historyCount = (Long) reader.createQuery()
                 .forRevisionsOfEntity(entityClass, false, true)
                 .addProjection(AuditEntity.revisionNumber().count())
                 .add(AuditEntity.id().eq(id))
+                .add(AuditEntity.revisionType().ne(RevisionType.ADD))
                 .getSingleResult();
 
-        if (total == null || total == 0) return Collections.emptyList();
+        if (historyCount == null || historyCount == 0) return Collections.emptyList();
 
-        boolean hasInitialAdd = hasInitialAdd(reader, entityClass, id);
-        long historyCount = total - (hasInitialAdd ? 1 : 0);
-        if (historyCount <= 0) return Collections.emptyList();
-
-        int offset = (page * size) + (hasInitialAdd ? 1 : 0);
-
+        // Query DESC (mới nhất trước), pagination chuẩn — không dùng offset trick
         @SuppressWarnings("unchecked")
         List<Object[]> rows = reader.createQuery()
                 .forRevisionsOfEntity(entityClass, false, true)
                 .add(AuditEntity.id().eq(id))
+                .add(AuditEntity.revisionType().ne(RevisionType.ADD))
                 .addOrder(AuditEntity.revisionNumber().desc())
-                .setFirstResult(offset)
+                .setFirstResult(page * size)
                 .setMaxResults(size)
                 .getResultList();
 
@@ -122,20 +120,6 @@ public class EntityHistoryService {
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
-
-    private <T> boolean hasInitialAdd(AuditReader reader, Class<T> entityClass, Object id) {
-        @SuppressWarnings("unchecked")
-        List<Object[]> oldest = reader.createQuery()
-                .forRevisionsOfEntity(entityClass, false, true)
-                .add(AuditEntity.id().eq(id))
-                .addOrder(AuditEntity.revisionNumber().asc())
-                .setFirstResult(0)
-                .setMaxResults(1)
-                .getResultList();
-        if (oldest.isEmpty()) return false;
-        RevisionType type = (RevisionType) oldest.getFirst()[2];
-        return type == RevisionType.ADD;
-    }
 
     private <T> List<EntityRevision<T>> toRevisions(Class<T> entityClass, List<Object[]> rows, int startVersion) {
         List<EntityRevision<T>> result = new ArrayList<>();
