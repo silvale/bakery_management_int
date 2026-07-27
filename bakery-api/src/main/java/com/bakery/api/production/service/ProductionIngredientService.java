@@ -94,25 +94,30 @@ public class ProductionIngredientService {
         // Expand BOM → tổng NL cần theo từng item
         Map<UUID, IngredientNeed> needed = expandBom(plan);
 
-        // Tải tồn kho MAIN warehouse một lần
+        // Tải tồn kho MAIN + KITCHEN — available = tổng cả 2 kho
         Warehouse mainWarehouse = findMainWarehouse();
-        Map<UUID, BigDecimal> stockByItem = currentMainStock(mainWarehouse);
+        Map<UUID, BigDecimal> mainStock = currentMainStock(mainWarehouse);
+        Map<UUID, BigDecimal> kitchenStock = currentKitchenStock();
 
         List<Map<String, Object>> sufficient = new ArrayList<>();
         List<Map<String, Object>> shortage = new ArrayList<>();
 
         for (IngredientNeed need : needed.values()) {
-            BigDecimal available = stockByItem.getOrDefault(need.item.getId(), BigDecimal.ZERO);
+            BigDecimal inMain    = mainStock.getOrDefault(need.item.getId(), BigDecimal.ZERO);
+            BigDecimal inKitchen = kitchenStock.getOrDefault(need.item.getId(), BigDecimal.ZERO);
+            BigDecimal available = inMain.add(inKitchen);
             BigDecimal gap = available.subtract(need.totalQty);
 
             Map<String, Object> row = new LinkedHashMap<>();
-            row.put("itemId",    need.item.getId());
-            row.put("itemCode",  need.item.getCode());
-            row.put("itemName",  need.item.getName());
-            row.put("unit",      need.item.getUnit());
-            row.put("needed",    need.totalQty);
-            row.put("available", available);
-            row.put("shortage",  gap.negate().max(BigDecimal.ZERO)); // 0 nếu đủ
+            row.put("itemId",      need.item.getId());
+            row.put("itemCode",    need.item.getCode());
+            row.put("itemName",    need.item.getName());
+            row.put("unit",        need.item.getUnit());
+            row.put("needed",      need.totalQty);
+            row.put("inMain",      inMain);
+            row.put("inKitchen",   inKitchen);
+            row.put("available",   available);
+            row.put("shortage",    gap.negate().max(BigDecimal.ZERO)); // 0 nếu đủ
 
             if (gap.compareTo(BigDecimal.ZERO) >= 0) {
                 sufficient.add(row);
@@ -148,12 +153,14 @@ public class ProductionIngredientService {
 
         Map<UUID, IngredientNeed> needed = expandBom(plan);
         Warehouse mainWarehouse = findMainWarehouse();
-        Map<UUID, BigDecimal> stockByItem = currentMainStock(mainWarehouse);
+        Map<UUID, BigDecimal> mainStock = currentMainStock(mainWarehouse);
+        Map<UUID, BigDecimal> kitchenStock = currentKitchenStock();
 
-        // Lọc chỉ lấy những NL thiếu
+        // Lọc chỉ lấy những NL thiếu (so với tổng MAIN + KITCHEN)
         List<IngredientNeed> shortageItems = needed.values().stream()
                 .filter(need -> {
-                    BigDecimal available = stockByItem.getOrDefault(need.item.getId(), BigDecimal.ZERO);
+                    BigDecimal available = mainStock.getOrDefault(need.item.getId(), BigDecimal.ZERO)
+                            .add(kitchenStock.getOrDefault(need.item.getId(), BigDecimal.ZERO));
                     return available.subtract(need.totalQty).compareTo(BigDecimal.ZERO) < 0;
                 })
                 .toList();
@@ -181,8 +188,9 @@ public class ProductionIngredientService {
 
         int order = 1;
         for (IngredientNeed need : shortageItems) {
-            BigDecimal available = stockByItem.getOrDefault(need.item.getId(), BigDecimal.ZERO);
-            BigDecimal shortageQty = need.totalQty.subtract(available); // lượng cần nhập thêm
+            BigDecimal inMain    = mainStock.getOrDefault(need.item.getId(), BigDecimal.ZERO);
+            BigDecimal inKitchen = kitchenStock.getOrDefault(need.item.getId(), BigDecimal.ZERO);
+            BigDecimal shortageQty = need.totalQty.subtract(inMain).subtract(inKitchen); // lượng cần nhập thêm
 
             InventoryRequestLine line = new InventoryRequestLine();
             line.setInventoryRequest(saved);
@@ -190,7 +198,7 @@ public class ProductionIngredientService {
             line.setQuantity(shortageQty);
             line.setUnit(need.item.getUnit() != null ? need.item.getUnit() : "kg");
             line.setSortOrder(order++);
-            line.setNote("Cần " + need.totalQty + ", tồn " + available + " → nhập thêm " + shortageQty);
+            line.setNote("Cần " + need.totalQty + ", tồn MAIN " + inMain + " + BẾP " + inKitchen + " → nhập thêm " + shortageQty);
             line.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
             inventoryRequestLineRepository.save(line);
         }
@@ -224,18 +232,30 @@ public class ProductionIngredientService {
         Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
                 .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN."));
 
-        // Chỉ xuất những NL có đủ tồn MAIN — thiếu thì bỏ qua (cần mua trước)
-        Map<UUID, BigDecimal> mainStock = currentMainStock(mainWarehouse);
-        List<IngredientNeed> transferable = needed.values().stream()
-                .filter(need -> mainStock.getOrDefault(need.item.getId(), BigDecimal.ZERO)
-                        .compareTo(need.totalQty) >= 0)
-                .toList();
+        Map<UUID, BigDecimal> mainStock    = currentMainStock(mainWarehouse);
+        Map<UUID, BigDecimal> kitchenStock = currentKitchenStock();
 
-        List<String> skipped = needed.values().stream()
-                .filter(need -> mainStock.getOrDefault(need.item.getId(), BigDecimal.ZERO)
-                        .compareTo(need.totalQty) < 0)
-                .map(need -> need.item.getName())
-                .toList();
+        // Tính qty cần transfer = needed - kitchenStock (chỉ phần KITCHEN chưa có)
+        // Capped bởi tồn MAIN. NL KITCHEN đã đủ → skip.
+        List<IngredientNeed> transferable = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
+
+        for (IngredientNeed need : needed.values()) {
+            BigDecimal inKitchen = kitchenStock.getOrDefault(need.item.getId(), BigDecimal.ZERO);
+            BigDecimal deficit   = need.totalQty.subtract(inKitchen);
+            if (deficit.compareTo(BigDecimal.ZERO) <= 0) {
+                // KITCHEN đã đủ, không cần chuyển
+                continue;
+            }
+            BigDecimal inMain = mainStock.getOrDefault(need.item.getId(), BigDecimal.ZERO);
+            if (inMain.compareTo(BigDecimal.ZERO) <= 0) {
+                skipped.add(need.item.getName() + " (MAIN hết tồn)");
+                continue;
+            }
+            // Chỉ transfer tối đa tồn MAIN
+            BigDecimal transferQty = deficit.min(inMain);
+            transferable.add(new IngredientNeed(need.item, transferQty));
+        }
 
         if (!skipped.isEmpty()) {
             log.warn("generateTransferRequest: bỏ qua {} NL thiếu tồn MAIN: {}", skipped.size(), skipped);
@@ -243,7 +263,8 @@ public class ProductionIngredientService {
 
         if (transferable.isEmpty()) {
             throw new IllegalStateException(
-                    "Không có NL nào đủ tồn MAIN để xuất. Cần nhập kho trước: " + skipped);
+                    "Không có NL nào cần chuyển (KITCHEN đã đủ hoặc MAIN không có tồn)."
+                    + (skipped.isEmpty() ? "" : " NL thiếu MAIN: " + skipped));
         }
 
         // Tạo phiếu TRANSFER
@@ -255,7 +276,7 @@ public class ProductionIngredientService {
         request.setTargetWarehouse(kitchen);
         request.setNote("Xuất NL cho kế hoạch SX ngày " + plan.getPlanDate()
                 + " (plan #" + planId.toString().substring(0, 8) + ")"
-                + (skipped.isEmpty() ? "" : " [bỏ qua " + skipped.size() + " NL thiếu]"));
+                + (skipped.isEmpty() ? "" : " [bỏ qua " + skipped.size() + " NL thiếu MAIN]"));
         request.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
 
         // Auto-generate code: TR-YYYYMMDD-NNN
@@ -266,7 +287,7 @@ public class ProductionIngredientService {
 
         InventoryRequest saved = inventoryRequestRepository.save(request);
 
-        // Thêm lines chỉ cho NL đủ tồn MAIN
+        // Lines: qty đã trừ phần KITCHEN có sẵn
         int order = 1;
         for (IngredientNeed need : transferable) {
             InventoryRequestLine line = new InventoryRequestLine();
@@ -414,8 +435,18 @@ public class ProductionIngredientService {
     }
 
     private Map<UUID, BigDecimal> currentMainStock(Warehouse mainWarehouse) {
-        // Load tất cả lots trong kho MAIN và group theo item_id
         return stockLotRepository.findByWarehouseCode(mainWarehouse.getCode()).stream()
+                .filter(lot -> lot.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
+                .collect(Collectors.groupingBy(
+                        lot -> lot.getItem().getId(),
+                        Collectors.reducing(BigDecimal.ZERO,
+                                lot -> lot.getQtyRemaining(),
+                                BigDecimal::add)
+                ));
+    }
+
+    private Map<UUID, BigDecimal> currentKitchenStock() {
+        return stockLotRepository.findByWarehouseCode(KITCHEN_CODE).stream()
                 .filter(lot -> lot.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
                 .collect(Collectors.groupingBy(
                         lot -> lot.getItem().getId(),

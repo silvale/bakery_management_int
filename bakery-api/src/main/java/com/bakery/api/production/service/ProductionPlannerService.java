@@ -221,7 +221,8 @@ public class ProductionPlannerService {
                 .map(l -> l.getRuleNote())
                 .filter(note -> note != null)
                 .map(note -> {
-                    var m = java.util.regex.Pattern.compile("(\\d+) cối").matcher(note);
+                    // Phải dùng pattern cụ thể để tránh match "0 cối" từ "0.0 cối"
+                    var m = java.util.regex.Pattern.compile("gợi ý làm (\\d+) cối").matcher(note);
                     return m.find() ? Integer.parseInt(m.group(1)) : 1;
                 })
                 .findFirst()

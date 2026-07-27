@@ -3,10 +3,7 @@ package com.bakery.api.report.service;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import com.bakery.api.master.entity.ProductExpiryConfig;
@@ -189,7 +186,7 @@ public class DailyReportService {
                 ));
 
         // ── Bước 3: Load expiry config + tồn SHOP để tính cancel discrepancy ─
-        java.util.Map<UUID, Integer> shelfDaysByItem = expiryConfigRepository.findAll().stream()
+        Map<UUID, Integer> shelfDaysByItem = expiryConfigRepository.findAll().stream()
                 .filter(c -> c.getShelfDays() != null && c.getItem() != null)
                 .collect(Collectors.toMap(
                         c -> c.getItem().getId(),
@@ -199,8 +196,8 @@ public class DailyReportService {
         // Tồn SHOP trước khi NV huỷ = qty_system_cancel (nguồn đúng cho discrepancy)
         List<Warehouse> finShopWarehouses = warehouseRepository.findByWarehouseType(WarehouseType.SHOP);
         final UUID finShopWarehouseId = finShopWarehouses.isEmpty() ? null : finShopWarehouses.get(0).getId();
-        final java.util.Map<UUID, BigDecimal> shopStockByItem = finShopWarehouseId == null
-                ? java.util.Collections.emptyMap()
+        final Map<UUID, BigDecimal> shopStockByItem = finShopWarehouseId == null
+                ? Collections.emptyMap()
                 : stockLotRepository.findAll().stream()
                         .filter(l -> finShopWarehouseId.equals(
                                 l.getWarehouse() != null ? l.getWarehouse().getId() : null)
@@ -376,8 +373,8 @@ public class DailyReportService {
         List<Warehouse> shopWarehouses = warehouseRepository.findByWarehouseType(WarehouseType.SHOP);
         final UUID shopWarehouseId = shopWarehouses.isEmpty() ? null : shopWarehouses.get(0).getId();
         // itemId → tổng qty_remaining trong SHOP
-        java.util.Map<UUID, BigDecimal> shopStockByItem = shopWarehouseId == null
-                ? java.util.Collections.emptyMap()
+        Map<UUID, BigDecimal> shopStockByItem = shopWarehouseId == null
+                ? Collections.emptyMap()
                 : stockLotRepository.findAll().stream()
                         .filter(l -> shopWarehouseId.equals(
                                 l.getWarehouse() != null ? l.getWarehouse().getId() : null)
@@ -394,7 +391,7 @@ public class DailyReportService {
                 .findByProductionRequestLine_ProductionRequest_ProductionDateBetween(lookback, reportDate);
 
         // group: itemId → set production dates (chỉ lấy records có product)
-        java.util.Map<UUID, java.util.Set<LocalDate>> prodDatesByItem = deliveries.stream()
+        Map<UUID, Set<LocalDate>> prodDatesByItem = deliveries.stream()
                 .filter(dr -> dr.getProductionRequestLine() != null
                         && dr.getProductionRequestLine().getProduct() != null)
                 .collect(Collectors.groupingBy(
@@ -407,7 +404,7 @@ public class DailyReportService {
         if (prodDatesByItem.isEmpty()) return List.of();
 
         // Load expiry configs cho tất cả items một lần
-        java.util.Map<UUID, Integer> shelfDaysByItem = expiryConfigRepository.findAll().stream()
+        Map<UUID, Integer> shelfDaysByItem = expiryConfigRepository.findAll().stream()
                 .filter(c -> c.getShelfDays() != null && c.getItem() != null)
                 .collect(Collectors.toMap(
                         c -> c.getItem().getId(),
@@ -415,14 +412,14 @@ public class DailyReportService {
                         (a, b) -> a));
 
         // Load today's report lines một lần
-        java.util.Map<UUID, DailyReportLine> lineByItem = lineRepository
+        Map<UUID, DailyReportLine> lineByItem = lineRepository
                 .findByDailyReportIdWithItem(reportId).stream()
                 .filter(l -> l.getItem() != null)
                 .collect(Collectors.toMap(l -> l.getItem().getId(), l -> l, (a, b) -> a));
 
-        List<Map<String, Object>> result = new java.util.ArrayList<>();
+        List<Map<String, Object>> result = new ArrayList<>();
 
-        for (java.util.Map.Entry<UUID, java.util.Set<LocalDate>> entry : prodDatesByItem.entrySet()) {
+        for (Map.Entry<UUID, Set<LocalDate>> entry : prodDatesByItem.entrySet()) {
             UUID itemId = entry.getKey();
             Integer shelfDays = shelfDaysByItem.get(itemId);
             if (shelfDays == null) continue; // không có config → không quản lý HSD
@@ -441,7 +438,7 @@ public class DailyReportService {
             // Lấy item info từ line hoặc repository
             DailyReportLine line = lineByItem.get(itemId);
 
-            Map<String, Object> row = new java.util.LinkedHashMap<>();
+            Map<String, Object> row = new LinkedHashMap<>();
             row.put("itemId", itemId);
 
             // EX_CODEs hết hạn: lọc theo dayChar khớp ngày SX đang hết hạn
@@ -523,7 +520,7 @@ public class DailyReportService {
         }
 
         // Sort: shelf_days tăng dần (bánh tươi trước), rồi theo tên
-        result.sort(java.util.Comparator
+        result.sort(Comparator
                 .<Map<String, Object>, Integer>comparing(r -> (Integer) r.get("shelfDays"))
                 .thenComparing(r -> String.valueOf(r.getOrDefault("itemName", ""))));
 

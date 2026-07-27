@@ -655,6 +655,7 @@
     let _token = sessionStorage.getItem('bk_token') || '';
     let _currentUser = null;
     let allItems = [], allWarehouses = [], allSuppliers = [], allItemGroups = [], mainStockItems = [];
+    let warehouseStockQtyMap = {}; // itemId -> qty (tồn kho kho xuất đang chọn)
     let allUnits = []; // loaded from code_value WHERE group_key='UNIT'
     const PAGE_SIZE = 20;
 
@@ -874,7 +875,7 @@
       return allItems.filter(filter || (() => true))
         .map(i => `<option value="${i.id}">[${i.itemType?.[0]}] ${i.code} — ${i.name}</option>`).join('');
     }
-    function whOpts() { return allWarehouses.map(w => `<option value="${w.id}">${w.code} — ${w.name}</option>`).join('') }
+    function whOpts() { return allWarehouses.map(w => `<option value="${w.id}" data-code="${w.code}">${w.code} — ${w.name}</option>`).join('') }
     function supOpts() { return allSuppliers.map(s => `<option value="${s.id}">${s.code} — ${s.name}</option>`).join('') }
 
     // ── Custom Autocomplete (contains/like search + infinite scroll) ─────────────
@@ -945,11 +946,21 @@
 
     // Load tồn kho MAIN (để filter khi tạo TRANSFER)
     async function loadMainStock() {
+      return loadWarehouseStock('MAIN');
+    }
+    async function loadWarehouseStock(warehouseCode) {
+      if (!warehouseCode) { mainStockItems = []; warehouseStockQtyMap = {}; renderIRLines(); return; }
       try {
-        const rows = await api('GET', '/api/v1/stock-lots/summary?warehouseCode=MAIN');
-        const ids = new Set((rows ?? []).filter(r => r.qtyRemaining > 0).map(r => r.itemId));
-        mainStockItems = allItems.filter(x => ids.has(x.id));
-      } catch (_) { mainStockItems = [...allItems]; }
+        const rows = await api('GET', `/api/v1/stock-lots/summary?warehouseCode=${encodeURIComponent(warehouseCode)}`);
+        const filtered = (rows ?? []).filter(r => (r.totalQtyRemaining ?? 0) > 0);
+        const inStockCodes = new Set(filtered.map(r => r.item?.key));
+        const qtyByCode = {};
+        filtered.forEach(r => { if (r.item?.key) qtyByCode[r.item.key] = r.totalQtyRemaining; });
+        mainStockItems = allItems.filter(x => inStockCodes.has(x.code));
+        warehouseStockQtyMap = {};
+        mainStockItems.forEach(x => { if (qtyByCode[x.code] != null) warehouseStockQtyMap[x.id] = qtyByCode[x.code]; });
+      } catch (_) { mainStockItems = [...allItems]; warehouseStockQtyMap = {}; }
+      renderIRLines();
     }
 
     // ══════════════════════════════════════════════════════════════════════════════
@@ -2426,12 +2437,15 @@
       const { allSufficient, sufficient = [], shortage = [], planDate } = res;
 
       function nlRow(r, isShortage) {
-        const pct = r.available > 0 ? (r.needed / r.available * 100).toFixed(0) : '—';
+        const inMain    = r.inMain    ?? r.available ?? 0;
+        const inKitchen = r.inKitchen ?? 0;
+        const pct = r.needed > 0 ? Math.min((r.available / r.needed * 100), 100).toFixed(0) : '100';
         return `<tr>
       <td><strong>${r.itemCode}</strong></td>
       <td>${r.itemName}</td>
       <td style="text-align:right">${fmt(r.needed)} ${r.unit}</td>
-      <td style="text-align:right">${fmt(r.available)} ${r.unit}</td>
+      <td style="text-align:right">${fmt(inMain)} ${r.unit}</td>
+      <td style="text-align:right">${fmt(inKitchen)} ${r.unit}</td>
       ${isShortage
             ? `<td style="text-align:right;color:#dc2626;font-weight:600">⚠️ Thiếu ${fmt(r.shortage)} ${r.unit}</td>`
             : `<td style="text-align:right;color:#059669">✓ Đủ (${pct}%)</td>`}
@@ -2441,14 +2455,14 @@
       const shortageTable = shortage.length ? `
     <div style="margin-top:12px">
       <div style="color:#dc2626;font-weight:600;margin-bottom:6px">⚠️ Thiếu ${shortage.length} nguyên liệu — cần nhập kho MAIN trước khi xuất:</div>
-      <table><thead><tr><th>Mã</th><th>Tên NL</th><th>Cần</th><th>Tồn MAIN</th><th>Tình trạng</th></tr></thead>
+      <table><thead><tr><th>Mã</th><th>Tên NL</th><th>Cần</th><th>Tồn MAIN</th><th>Tồn Bếp</th><th>Tình trạng</th></tr></thead>
       <tbody>${shortage.map(r => nlRow(r, true)).join('')}</tbody></table>
     </div>`: '';
 
       const sufficientTable = sufficient.length ? `
     <div style="margin-top:12px">
       <div style="color:#059669;font-weight:600;margin-bottom:6px">✅ ${sufficient.length} nguyên liệu đủ:</div>
-      <table><thead><tr><th>Mã</th><th>Tên NL</th><th>Cần</th><th>Tồn MAIN</th><th>Tình trạng</th></tr></thead>
+      <table><thead><tr><th>Mã</th><th>Tên NL</th><th>Cần</th><th>Tồn MAIN</th><th>Tồn Bếp</th><th>Tình trạng</th></tr></thead>
       <tbody>${sufficient.map(r => nlRow(r, false)).join('')}</tbody></table>
     </div>`: '';
 
@@ -3243,7 +3257,7 @@
         <div class="field" id="ir-sup-wrap"><label>Nhà cung cấp</label>
           <select id="ir-sup"><option value="">-- Chọn NCC --</option>${supOpts()}</select></div>
         <div class="field" id="ir-src-wrap" style="display:none"><label>Kho xuất</label>
-          <select id="ir-src"><option value="">-- Chọn kho --</option>${whOpts()}</select></div>
+          <select id="ir-src" onchange="loadWarehouseStock(this.options[this.selectedIndex]?.dataset?.code)"><option value="">-- Chọn kho --</option>${whOpts()}</select></div>
         <div class="field"><label>Kho nhận *</label>
           <select id="ir-tgt"><option value="">-- Chọn kho --</option>${whOpts()}</select></div>
         <div class="field form-full"><label>Ghi chú</label><textarea id="ir-note" rows="2"></textarea></div>
@@ -3275,27 +3289,43 @@
       document.getElementById('ir-sup-wrap').style.display = t === 'PURCHASE' ? '' : 'none';
       document.getElementById('ir-src-wrap').style.display = t === 'TRANSFER' ? '' : 'none';
       document.getElementById('ir-cost-hdr').style.display = t === 'PURCHASE' ? '' : 'none';
-      if (t === 'TRANSFER') { loadMainStock().then(() => renderIRLines()); } else { renderIRLines(); }
+      if (t === 'TRANSFER') {
+        mainStockItems = []; renderIRLines(); // reset — chờ user chọn kho xuất
+      } else { renderIRLines(); }
     }
     function renderIRLines() {
       const isPurchase = document.getElementById('ir-type')?.value === 'PURCHASE';
       const pool = isPurchase ? allItems : mainStockItems.length ? mainStockItems : allItems;
       const el = document.getElementById('ir-lines'); if (!el) return;
-      el.innerHTML = irLines.map((l, i) => `
-    <div style="display:grid;grid-template-columns:1fr 80px 70px ${isPurchase ? '90px' : ''} 50px 32px;gap:5px;margin-bottom:5px;align-items:center">
+      el.innerHTML = irLines.map((l, i) => {
+        const stockQty = !isPurchase && l.itemId ? warehouseStockQtyMap[l.itemId] : null;
+        const stockLabel = stockQty != null
+          ? `<small id="ir-stock-lbl-${i}" style="color:#64748b;font-size:10px;white-space:nowrap">Tồn: ${fmt(stockQty)}</small>`
+          : `<small id="ir-stock-lbl-${i}" style="color:#64748b;font-size:10px"></small>`;
+        return `
+    <div style="display:grid;grid-template-columns:1fr 90px 70px ${isPurchase ? '90px' : ''} 50px 32px;gap:5px;margin-bottom:6px;align-items:start">
       ${acHtml('acir' + i, pool, l.itemId, 'Tìm nguyên liệu / sản phẩm...')}
-      <input type="number" step="0.001" value="${l.qty ?? ''}" onchange="irLines[${i}].qty=this.value" placeholder="Qty">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <input id="ir-qty-${i}" type="number" step="0.001" value="${l.qty ?? ''}" oninput="irLines[${i}].qty=+this.value" placeholder="Qty" style="width:100%;box-sizing:border-box">
+        ${stockLabel}
+      </div>
       <select id="ir-unit-${i}" onchange="irLines[${i}].unit=this.value">${unitSelectHtml(l.unit)}</select>
-      ${isPurchase ? `<input type="number" step="0.01" value="${l.cost ?? ''}" onchange="irLines[${i}].cost=this.value" placeholder="Đơn giá">` : ''}
-      <input type="number" value="${l.sort || i + 1}" onchange="irLines[${i}].sort=+this.value">
+      ${isPurchase ? `<input type="number" step="0.01" value="${l.cost ?? ''}" oninput="irLines[${i}].cost=this.value" placeholder="Đơn giá">` : ''}
+      <input type="number" value="${l.sort || i + 1}" oninput="irLines[${i}].sort=+this.value">
       <button class="btn btn-danger btn-sm" onclick="irLines.splice(${i},1);renderIRLines()">✕</button>
-    </div>`).join('');
+    </div>`;
+      }).join('');
       irLines.forEach((_, i) => acOn('acir' + i, item => {
         irLines[i].itemId = item.id;
-        if (!irLines[i].unit) {
-          const u = document.getElementById('ir-unit-' + i);
-          const val = (item.unit || '').toUpperCase();
-          irLines[i].unit = val; if (u) u.value = val;
+        // Luôn set unit khi chọn item
+        const u = document.getElementById('ir-unit-' + i);
+        const val = (item.unit || '').toUpperCase();
+        irLines[i].unit = val; if (u) u.value = val;
+        // Hiển thị tồn kho ngay tại chỗ (không re-render)
+        const lblEl = document.getElementById('ir-stock-lbl-' + i);
+        if (lblEl && !isPurchase) {
+          const stockQty = warehouseStockQtyMap[item.id];
+          lblEl.textContent = stockQty != null ? `Tồn: ${fmt(stockQty)}` : '';
         }
       }));
     }
