@@ -369,16 +369,14 @@ public class ProductionPlannerService {
 
         int batchWeight = group.getBatchWeightGrams() != null ? group.getBatchWeightGrams() : 1;
 
-        // Số cối gợi ý: làm đủ để tổng tồn kho + làm mới >= 2 cối
-        // Logic đơn giản: gợi ý 2 cối nếu còn < 1 cối, 1 cối nếu còn < 2 cối
+        // Số cối gợi ý: mặc định 1 cối khi tồn còn dưới ngưỡng.
+        // Admin tự điều chỉnh số cối thực tế — không tự ý gợi ý 2 cối.
         int batches;
         double remainingBatches = totalRemainingGrams.doubleValue() / batchWeight;
-        if (remainingBatches < 1.0) {
-            batches = 2;
-        } else if (remainingBatches < 2.0) {
-            batches = 1;
+        if (remainingBatches < 2.0) {
+            batches = 1; // Cần sản xuất — gợi ý 1 cối, admin tự tăng nếu cần
         } else {
-            batches = 0; // đủ rồi
+            batches = 0; // Đủ rồi, không cần sản xuất
         }
 
         List<ProductionPlanLine> lines = new ArrayList<>();
