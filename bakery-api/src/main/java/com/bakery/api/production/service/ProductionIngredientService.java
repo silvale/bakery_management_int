@@ -23,6 +23,7 @@ import com.bakery.api.master.repository.WarehouseRepository;
 import com.bakery.api.master.repository.ItemLookupRepository;
 import com.bakery.api.production.entity.ProductionGroup;
 import com.bakery.api.production.entity.ProductionPlan;
+import com.bakery.api.production.entity.ProductionPlanGroup;
 import com.bakery.api.production.entity.ProductionPlanLine;
 import com.bakery.api.production.entity.ProductionRequest;
 import com.bakery.api.production.entity.ProductionRequestLine;
@@ -81,9 +82,11 @@ public class ProductionIngredientService {
     /**
      * Kiểm tra nguyên liệu cho kế hoạch sản xuất.
      *
-     * @return Map với 2 keys:
-     *   "sufficient" → List của items đủ hàng
-     *   "shortage"   → List của items thiếu hàng (cần nhập thêm)
+     * @return Map với các keys:
+     *   "sufficient"   → List items đủ hàng (raw ingredients)
+     *   "shortage"     → List items thiếu hàng (raw ingredients)
+     *   "semiNeeds"    → List BTP cần sản xuất (so với tồn KITCHEN)
+     *   "allSufficient"→ true nếu không có raw ingredient nào thiếu
      *   Mỗi item chứa: itemId, itemCode, itemName, unit, needed, available, shortage
      */
     @Transactional(readOnly = true)
@@ -91,7 +94,7 @@ public class ProductionIngredientService {
         ProductionPlan plan = planRepository.findById(planId)
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionPlan", planId));
 
-        // Expand BOM → tổng NL cần theo từng item
+        // Expand BOM → tổng raw ingredient cần theo từng item
         Map<UUID, IngredientNeed> needed = expandBom(plan);
 
         // Tải tồn kho MAIN + KITCHEN — available = tổng cả 2 kho
@@ -130,13 +133,17 @@ public class ProductionIngredientService {
         shortage.sort((a, b) -> ((BigDecimal) b.get("shortage")).compareTo((BigDecimal) a.get("shortage")));
         sufficient.sort((a, b) -> String.valueOf(a.get("itemName")).compareTo(String.valueOf(b.get("itemName"))));
 
-        return Map.of(
-                "planId",      planId,
-                "planDate",    plan.getPlanDate(),
-                "sufficient",  sufficient,
-                "shortage",    shortage,
-                "allSufficient", shortage.isEmpty()
-        );
+        // ── BTP (SEMI_PRODUCT) needs — so với tồn KITCHEN ─────────────────
+        List<Map<String, Object>> semiNeeds = buildSemiNeeds(plan, kitchenStock);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("planId",       planId);
+        result.put("planDate",     plan.getPlanDate());
+        result.put("sufficient",   sufficient);
+        result.put("shortage",     shortage);
+        result.put("allSufficient", shortage.isEmpty());
+        result.put("semiNeeds",    semiNeeds);
+        return result;
     }
 
     /**
@@ -623,6 +630,136 @@ public class ProductionIngredientService {
         log.info("generateSemiTransfer: tạo phiếu {} ({} NL) cho phiếu BTP {}",
                 saved.getCode(), toTransfer.size(), pr.getCode());
         return saved;
+    }
+
+    /**
+     * Tính BTP (SEMI_PRODUCT) cần sản xuất từ base recipe của các nhóm FREE_GROUP/BATCH_FORMULA,
+     * rồi so sánh với tồn KITCHEN để xác định còn thiếu bao nhiêu.
+     *
+     * <ul>
+     *   <li><b>FREE_GROUP</b>: base_recipe × plannedQty (số cái target).</li>
+     *   <li><b>BATCH_FORMULA</b>: base_recipe × plannedQty (số cối).</li>
+     * </ul>
+     *
+     * @param kitchenStock tồn KITCHEN đã load (tái dụng từ checkIngredients, tránh query lại)
+     * @return danh sách BTP cần, mỗi row: itemId, itemCode, itemName, unit, needed, inKitchen, shortage
+     */
+    private List<Map<String, Object>> buildSemiNeeds(ProductionPlan plan, Map<UUID, BigDecimal> kitchenStock) {
+        Map<UUID, IngredientNeed> semiNeeded = computeSemiNeeds(plan);
+        if (semiNeeded.isEmpty()) return List.of();
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (IngredientNeed semiNeed : semiNeeded.values()) {
+            BigDecimal inKitchen = kitchenStock.getOrDefault(semiNeed.item.getId(), BigDecimal.ZERO);
+            BigDecimal gap = inKitchen.subtract(semiNeed.totalQty);
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("itemId",    semiNeed.item.getId());
+            row.put("itemCode",  semiNeed.item.getCode());
+            row.put("itemName",  semiNeed.item.getName());
+            row.put("unit",      semiNeed.item.getUnit());
+            row.put("needed",    semiNeed.totalQty);
+            row.put("inKitchen", inKitchen);
+            row.put("shortage",  gap.negate().max(BigDecimal.ZERO));
+            rows.add(row);
+        }
+
+        // Sort: thiếu nhiều nhất lên trên; đủ thì theo tên
+        rows.sort((a, b) -> {
+            int bySh = ((BigDecimal) b.get("shortage")).compareTo((BigDecimal) a.get("shortage"));
+            if (bySh != 0) return bySh;
+            return String.valueOf(a.get("itemName")).compareTo(String.valueOf(b.get("itemName")));
+        });
+        return rows;
+    }
+
+    /**
+     * Tính BTP (SEMI_PRODUCT) cần sản xuất cho từng nhóm FREE_GROUP/BATCH_FORMULA.
+     *
+     * <p>Có 2 cách setup base_recipe:
+     * <ol>
+     *   <li><b>Base recipe thuộc về SemiProduct</b> ({@code recipe.semiProduct != null}):
+     *       Recipe đó MÔ TẢ cách làm 1 đơn vị BTP (ví dụ: "Cot Pana" recipe mô tả làm 1 cái Cot Pana).
+     *       → BTP cần = SemiProduct đó × multiplier (1 BTP per piece/cối).
+     *   </li>
+     *   <li><b>Base recipe thuộc về Product / không có owner</b>: recipe có các dòng SEMI_PRODUCT.
+     *       → Scan recipe lines, lấy SEMI_PRODUCT lines × multiplier.
+     *   </li>
+     * </ol>
+     *
+     * <p>Multiplier:
+     * <ul>
+     *   <li>FREE_GROUP: plannedQty (số cái target)</li>
+     *   <li>BATCH_FORMULA: plannedQty (số cối)</li>
+     * </ul>
+     * Mỗi nhóm chỉ tính 1 lần.
+     */
+    private Map<UUID, IngredientNeed> computeSemiNeeds(ProductionPlan plan) {
+        List<ProductionPlanLine> lines =
+                planLineRepository.findByPlanIdOrderBySortOrderAsc(plan.getId());
+        Map<UUID, IngredientNeed> result = new LinkedHashMap<>();
+        java.util.Set<UUID> processedGroupIds = new java.util.HashSet<>();
+
+        Map<UUID, Integer> plannedQtyByGroupId = planGroupRepository.findByPlanId(plan.getId()).stream()
+                .collect(Collectors.toMap(
+                        ppg -> ppg.getGroup().getId(),
+                        ProductionPlanGroup::getPlannedQty));
+
+        for (ProductionPlanLine planLine : lines) {
+            ProductionGroup group = planLine.getGroup();
+            if (group == null || group.getBaseRecipe() == null) continue;
+            String gt = group.getGroupType();
+            if (!"FREE_GROUP".equals(gt) && !"BATCH_FORMULA".equals(gt)) continue;
+            if (!processedGroupIds.add(group.getId())) continue;
+
+            BigDecimal multiplier;
+            if (plannedQtyByGroupId.containsKey(group.getId())) {
+                multiplier = BigDecimal.valueOf(plannedQtyByGroupId.get(group.getId()));
+            } else {
+                multiplier = resolveGroupTargetQty(group, plan.getPlanDate());
+            }
+            if (multiplier.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            Recipe baseRecipe = group.getBaseRecipe();
+
+            // ── Trường hợp 1: base_recipe thuộc về SemiProduct ──────────────────
+            // Ví dụ: nhóm Pana dùng recipe "Cot Pana" (recipe.semiProduct = PANA_COT).
+            // Recipe này MÔ TẢ cách làm 1 đơn vị Cot Pana.
+            // → FREE_GROUP 40 cái = cần 40 Cot Pana; BATCH_FORMULA 1 cối = cần 1 Cối bắp.
+            if (baseRecipe.getSemiProduct() != null) {
+                SemiProduct semi = baseRecipe.getSemiProduct();
+                result.merge(semi.getId(),
+                        new IngredientNeed(semi, multiplier),
+                        (existing, newNeed) -> {
+                            existing.totalQty = existing.totalQty.add(newNeed.totalQty);
+                            return existing;
+                        });
+                log.debug("computeSemiNeeds: nhóm {} ({}) cần {} {} '{}' (base recipe = recipe của BTP)",
+                        group.getCode(), gt, multiplier, semi.getUnit(), semi.getName());
+                continue;
+            }
+
+            // ── Trường hợp 2: base_recipe có dòng SEMI_PRODUCT ──────────────────
+            // Ví dụ: recipe của group liệt kê "Cot Pana" là nguyên liệu → lấy dòng đó.
+            List<RecipeLine> recipeLines = recipeLineRepository
+                    .findByRecipeIdOrderBySortOrderAsc(baseRecipe.getId());
+            for (RecipeLine rl : recipeLines) {
+                if (rl.getItem() == null || !(rl.getItem() instanceof SemiProduct semi)) continue;
+
+                BigDecimal conv = resolveConversionFactor(rl.getUnit(), semi.getUnit());
+                BigDecimal needed = rl.getQuantity().multiply(multiplier).multiply(conv);
+
+                result.merge(semi.getId(),
+                        new IngredientNeed(semi, needed),
+                        (existing, newNeed) -> {
+                            existing.totalQty = existing.totalQty.add(newNeed.totalQty);
+                            return existing;
+                        });
+                log.debug("computeSemiNeeds: nhóm {} ({}) cần {} {} '{}' (từ dòng recipe)",
+                        group.getCode(), gt, needed, semi.getUnit(), semi.getName());
+            }
+        }
+        return result;
     }
 
     /** Mutable holder cho tổng nguyên liệu cần. */

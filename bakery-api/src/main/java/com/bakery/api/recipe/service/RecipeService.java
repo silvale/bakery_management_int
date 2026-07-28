@@ -25,6 +25,7 @@ import com.bakery.framework.repository.CommandRequestRepository;
 import com.bakery.framework.security.BakeryActorResolver;
 import com.bakery.framework.service.AbstractBakeryAdminService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,9 +35,11 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>Flow:
  * 1. Tạo recipe → PENDING_APPROVAL, is_active=false, version tự tăng
  * 2. Approve → APPROVED (is_active vẫn false)
- * 3. Activate → is_active=true, tự deactivate recipe cũ cùng SP
+ * 3. Activate → is_active=true, tự deactivate recipe cũ cùng SP,
+ *    sau đó tự động tính lại {@code unit_cost} cho item liên quan.
  * 4. Clone → bản sao mới PENDING_APPROVAL, parentRecipeId = gốc, version tự tăng
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class RecipeService
@@ -46,6 +49,7 @@ public class RecipeService
     private final ItemLookupRepository itemRepository;
     private final CommandRequestRepository commandRequestRepository;
     private final BakeryActorResolver actorResolver;
+    private final RecipeCostService recipeCostService;
 
     // ── Framework wiring ─────────────────────────────────────────
 
@@ -128,8 +132,15 @@ public class RecipeService
     // ── Business actions ─────────────────────────────────────────
 
     /**
-     * Activate recipe: set is_active=true và tự deactivate recipe cũ cùng SP.
-     * Chỉ recipe đã APPROVED mới được activate.
+     * Activate recipe: set is_active=true, tự deactivate recipe cũ cùng SP,
+     * rồi tính lại {@code unit_cost} cho item liên quan dựa trên công thức mới.
+     *
+     * <p>Cost recalculation chạy trong cùng transaction nhờ Hibernate AUTO flush:
+     * trước khi {@link RecipeCostService#calculate} query DB, Hibernate flush các
+     * entity bẩn (recipe cũ=inactive, recipe mới=active) → query thấy đúng trạng thái.
+     * Không cần REQUIRES_NEW vì không có lock conflict trên row item.
+     *
+     * <p>Chỉ recipe đã APPROVED mới được activate.
      */
     @Transactional
     public RecipeResponse activate(UUID recipeId) {
@@ -154,7 +165,34 @@ public class RecipeService
         }
 
         recipe.setActive(true);
-        return toResponse(recipeRepository.save(recipe));
+        Recipe saved = recipeRepository.save(recipe);
+
+        // ── Tính lại unit_cost sau khi công thức thay đổi ──────────────────────
+        // Hibernate AUTO flush sẽ push recipe state vào DB trước khi query bên dưới chạy,
+        // nên RecipeCostService sẽ đọc đúng recipe mới active.
+        UUID itemId = recipe.getProduct() != null
+                ? recipe.getProduct().getId()
+                : recipe.getSemiProduct().getId();
+        try {
+            RecipeCostService.CostResult costResult = recipeCostService.calculate(itemId);
+            if (costResult.complete()) {
+                Item item = itemRepository.findById(itemId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Item", itemId));
+                item.setUnitCost(costResult.totalCostPerUnit());
+                itemRepository.save(item);
+                log.info("Cập nhật unit_cost={} cho item '{}' sau khi activate recipe v{}",
+                        costResult.totalCostPerUnit(), item.getCode(), saved.getVersion());
+            } else {
+                log.warn("Không tính đủ cost cho item {} sau khi activate recipe {} " +
+                        "(một số NL chưa có giá — unit_cost giữ nguyên).", itemId, recipeId);
+            }
+        } catch (Exception ex) {
+            // Không chặn activate nếu tính cost lỗi (e.g., missing sub-recipe)
+            log.warn("Không thể tính lại unit_cost sau khi activate recipe {}: {}",
+                    recipeId, ex.getMessage());
+        }
+
+        return toResponse(saved);
     }
 
     /**

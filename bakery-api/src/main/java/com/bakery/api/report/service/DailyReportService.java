@@ -461,15 +461,18 @@ public class DailyReportService {
                         .orElse(null);
             }
             final String finalGroupCode = groupCode;
-            List<String> expiringExCodes = productMappingRepository.findByItemId(itemId).stream()
+            List<String> allMappings = productMappingRepository.findByItemId(itemId).stream()
                     .map(ProductMapping::getExCode)
+                    .sorted()
+                    .toList();
+            row.put("allExCodes", allMappings);
+
+            List<String> expiringExCodes = allMappings.stream()
                     .filter(ec -> {
                         if (finalGroupCode == null) return false;
-                        // EX_CODE khớp nếu dayChar match với ít nhất 1 ngày SX đang hết hạn
                         return expiringDates.stream().anyMatch(pd ->
                                 ExCodeDecoder.matchesProductionDate(ec, finalGroupCode, pd));
                     })
-                    .sorted()
                     .toList();
             row.put("expiringExCodes", expiringExCodes);
 

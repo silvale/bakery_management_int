@@ -1632,13 +1632,13 @@
           <div class="field"><label>Ngưỡng tồn % <small style="color:#94a3b8">(tuỳ chọn)</small></label>
             <input id="pg-thresh" type="number" min="1" max="100" placeholder="50 = chỉ SX khi còn &lt;50% target"></div>
         </div>
-        <div class="field" style="margin-top:8px">
-          <label>Công thức base <small style="color:#94a3b8">(dùng để tính NL khi chưa phân bổ từng flavor)</small></label>
-          <select id="pg-base-recipe">
-            <option value="">-- Không có --</option>
-            ${allRecipes.map(r => `<option value="${r.id}">${r.product?.name ?? r.semiProduct?.name ?? r.id}</option>`).join('')}
-          </select>
-        </div>
+      </div>
+      <div class="field form-full" style="margin-top:8px">
+        <label>Công thức base <small style="color:#94a3b8">(dùng để tính NL)</small></label>
+        <select id="pg-base-recipe">
+          <option value="">-- Không có --</option>
+          ${allRecipes.map(r => `<option value="${r.id}">${r.product?.name ?? r.semiProduct?.name ?? r.id}</option>`).join('')}
+        </select>
       </div>
       <div id="pg-batch" class="form-full" style="display:none">
         <div class="field" style="max-width:200px"><label>Trọng lượng cối (gram)</label><input id="pg-bw" type="number" placeholder="10000"></div>
@@ -1784,6 +1784,7 @@
           : `<tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Target WD</td><td><strong>${g.targetWeekday ?? '—'}</strong></td></tr>
            <tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Target WE</td><td><strong>${g.targetWeekend ?? '—'}</strong></td></tr>
            <tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Ngưỡng tồn</td><td>${g.thresholdPercent != null ? `<span style="background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:12px;font-size:12px">SX khi còn &lt;${g.thresholdPercent}% target</span>` : '<span style="color:#94a3b8">Luôn SX đủ target</span>'}</td></tr>`}
+        ${g.baseRecipeName ? `<tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Công thức Base</td><td><strong>${g.baseRecipeName}</strong></td></tr>` : ''}
         ${g.note ? `<tr><td style="color:#94a3b8;padding:2px 12px 2px 0">Ghi chú</td><td>${g.note}</td></tr>` : ''}
       </table></div>
     <div style="flex:1;min-width:260px">
@@ -2434,7 +2435,7 @@
       try { res = await api('GET', `/api/v1/production/plans/${planId}/ingredient-check`); }
       catch (e) { panel.innerHTML = `<div class="card"><div class="empty" style="color:#dc2626">Lỗi: ${e.message ?? e}</div></div>`; return; }
 
-      const { allSufficient, sufficient = [], shortage = [], planDate } = res;
+      const { allSufficient, sufficient = [], shortage = [], semiNeeds = [], planDate } = res;
 
       function nlRow(r, isShortage) {
         const inMain    = r.inMain    ?? r.available ?? 0;
@@ -2452,6 +2453,19 @@
     </tr>`;
       }
 
+      function semiRow(r) {
+        const hasSh = r.shortage > 0;
+        return `<tr>
+      <td><strong>${r.itemCode}</strong></td>
+      <td>${r.itemName}</td>
+      <td style="text-align:right">${fmt(r.needed)} ${r.unit ?? ''}</td>
+      <td style="text-align:right">${fmt(r.inKitchen)} ${r.unit ?? ''}</td>
+      <td style="text-align:right;${hasSh ? 'color:#dc2626;font-weight:600' : 'color:#059669'}">
+        ${hasSh ? `⚠️ Cần làm thêm ${fmt(r.shortage)} ${r.unit ?? ''}` : '✓ Đủ'}
+      </td>
+    </tr>`;
+      }
+
       const shortageTable = shortage.length ? `
     <div style="margin-top:12px">
       <div style="color:#dc2626;font-weight:600;margin-bottom:6px">⚠️ Thiếu ${shortage.length} nguyên liệu — cần nhập kho MAIN trước khi xuất:</div>
@@ -2465,6 +2479,16 @@
       <table><thead><tr><th>Mã</th><th>Tên NL</th><th>Cần</th><th>Tồn MAIN</th><th>Tồn Bếp</th><th>Tình trạng</th></tr></thead>
       <tbody>${sufficient.map(r => nlRow(r, false)).join('')}</tbody></table>
     </div>`: '';
+
+      const semiNeedsShortage = semiNeeds.filter(r => r.shortage > 0).length;
+      const semiTable = semiNeeds.length ? `
+    <div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:14px">
+      <div style="font-weight:600;margin-bottom:6px;color:#7c3aed">
+        🧪 BTP cần sản xuất (${semiNeedsShortage > 0 ? `<span style="color:#dc2626">${semiNeedsShortage} loại chưa đủ</span>` : '<span style="color:#059669">đủ hết</span>'})
+      </div>
+      <table><thead><tr><th>Mã</th><th>Tên BTP</th><th>Cần</th><th>Tồn Bếp</th><th>Tình trạng</th></tr></thead>
+      <tbody>${semiNeeds.map(r => semiRow(r)).join('')}</tbody></table>
+    </div>` : '';
 
       const banner = allSufficient
         ? `<div style="background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:10px 14px;color:#15803d;font-weight:600">
@@ -2492,6 +2516,7 @@
       panel.innerHTML = `<div class="card" style="margin-top:0">
     <div class="card-title">🔬 Kiểm tra Nguyên Liệu — Kế hoạch ${planDate}</div>
     ${banner}
+    ${semiTable}
     ${shortageTable}
     ${sufficientTable}
     ${actionBtns}
@@ -3835,21 +3860,24 @@
           return `SX ${d} + ${r.shelfDays}ngày → HSD ${exp.toISOString().slice(0, 10)}`;
         }).join(', ');
         const exCodes = (r.expiringExCodes ?? []).map(ec => `<code style="background:#fee2e2;color:#991b1b;padding:1px 5px;border-radius:3px;font-size:11px;margin:1px;display:inline-block">${ec}</code>`).join(' ');
+        const allExCodeBadges = (r.allExCodes ?? []).map(ec =>
+          `<code style="font-size:10px;color:#64748b;background:#f1f5f9;padding:1px 4px;border-radius:3px;margin:1px;display:inline-block">${ec}</code>`
+        ).join(' ');
         return `<tr>
         <td>
           <strong>${r.itemName}</strong><br>
-          <small style="color:#94a3b8">${r.itemCode}</small>
+          ${allExCodeBadges || `<small style="color:#94a3b8">${r.itemCode}</small>`}
           ${expiryDates ? `<br><small style="color:#dc2626;font-size:10px">${expiryDates}</small>` : ''}
         </td>
         <td>${exCodes || '<span style="color:#94a3b8;font-size:11px">—</span>'}</td>
         <td style="text-align:right;color:#2563eb">${r.qtyReceived != null ? fmt(r.qtyReceived) : '—'}</td>
-        <td style="text-align:right;color:#7c3aed">${r.qtyRemainingActual != null ? `<strong>${fmt(r.qtyRemainingActual)}</strong>` : '<span style="color:#f59e0b">chưa nhập</span>'}</td>
+        <td style="text-align:right;color:#7c3aed">${r.qtySystemCancel != null ? `<strong style="color:#7c3aed">${fmt(r.qtySystemCancel)}</strong>` : r.qtyRemainingActual != null ? `<strong>${fmt(r.qtyRemainingActual)}</strong>` : '<span style="color:#f59e0b">chưa nhập</span>'}</td>
         <td style="text-align:right">
           ${isFinalized
             ? `<span style="color:#dc2626;font-weight:700">${r.qtyCancelled != null ? fmt(r.qtyCancelled) : '—'}</span>`
             : `<input type="number" id="huy-inp-${r.itemId}" min="0" step="0.001"
-                value="${r.qtyCancelled != null ? r.qtyCancelled : r.qtyRemainingActual != null ? r.qtyRemainingActual : ''}"
-                placeholder="${r.qtyRemainingActual != null ? r.qtyRemainingActual : '0'}"
+                value="${r.qtyCancelled != null ? r.qtyCancelled : r.qtySystemCancel != null ? r.qtySystemCancel : r.qtyRemainingActual != null ? r.qtyRemainingActual : ''}"
+                placeholder="${r.qtySystemCancel != null ? r.qtySystemCancel : r.qtyRemainingActual != null ? r.qtyRemainingActual : '0'}"
                 style="width:90px;border:1px solid #fca5a5;border-radius:4px;padding:3px 8px;font-size:13px;text-align:right"
                 onblur="saveHuyBanh('${r.itemId}')"
                 onkeydown="if(event.key==='Enter'){this.blur()}">`
@@ -3908,7 +3936,8 @@
       </div>
       <div id="pos-list"><div class="empty">Đang tải...</div></div>
     </div>
-  </div>`;
+  </div>
+  <div id="pos-cancel-section"></div>`;
       loadPOS();
     }
     async function uploadPOS() {
@@ -3918,7 +3947,54 @@
       if (!date) { toast('Chọn ngày bán', 'err'); return; }
       const fd = new FormData(); fd.append('file', file); fd.append('saleDate', date);
       const result = await apiForm('/api/v1/pos-sales/upload', fd);
-      toast(`Upload thành công: ${result?.imported ?? 0} dòng`); loadPOS();
+      toast(`Upload thành công: ${result?.imported ?? 0} dòng`);
+      loadPOS();
+      loadPosCancelSection(date);
+    }
+    async function loadPosCancelSection(date) {
+      const el = document.getElementById('pos-cancel-section'); if (!el) return;
+      el.innerHTML = '<div class="empty">Đang tải danh sách hủy...</div>';
+      try {
+        const report = await api('GET', `/api/v1/daily-reports/by-date?reportDate=${date}`).catch(() => null);
+        if (!report?.id) { el.innerHTML = ''; return; }
+        const rows = await api('GET', `/api/v1/daily-reports/${report.id}/cancel-list`);
+        if (!rows?.length) { el.innerHTML = ''; return; }
+        el.innerHTML = renderPosCancelTable(date, rows);
+      } catch (_) { el.innerHTML = ''; }
+    }
+    function renderPosCancelTable(date, rows) {
+      const total = rows.reduce((s, r) => s + (+(r.qtySystemCancel ?? 0)), 0);
+      return `<div class="card" style="border-left:4px solid #dc2626">
+    <div class="card-title" style="color:#dc2626">🗑 Danh sách bánh cần hủy — ${date}</div>
+    ${total > 0 ? `<div style="font-size:13px;color:#64748b;margin-bottom:10px">Tổng dự kiến hủy: <strong style="color:#dc2626">${fmt(total)}</strong></div>` : ''}
+    <table style="width:100%;font-size:13px;border-collapse:collapse">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 8px;background:#fef2f2;color:#dc2626">Sản phẩm</th>
+        <th style="padding:6px 8px;background:#fef2f2;color:#dc2626">EX_CODE cần hủy</th>
+        <th style="text-align:right;padding:6px 8px;background:#fef2f2;color:#7c3aed">Dự kiến hủy (HT)</th>
+        <th style="padding:6px 8px;background:#fef2f2;color:#64748b;font-size:11px">HSD</th>
+      </tr></thead>
+      <tbody>${rows.map(r => {
+        const expiryDates = (r.expiringProductionDates ?? []).map(d => {
+          const exp = new Date(d); exp.setDate(exp.getDate() + (r.shelfDays ?? 0));
+          return exp.toISOString().slice(0, 10);
+        }).join(', ');
+        const exCodes = (r.expiringExCodes ?? []).map(ec =>
+          `<code style="background:#fee2e2;color:#991b1b;padding:1px 5px;border-radius:3px;font-size:11px;margin:1px;display:inline-block">${ec}</code>`
+        ).join(' ');
+        const allExBadges = (r.allExCodes ?? []).map(ec =>
+          `<code style="font-size:10px;color:#64748b;background:#f1f5f9;padding:1px 4px;border-radius:3px;margin:1px;display:inline-block">${ec}</code>`
+        ).join(' ');
+        return `<tr style="border-bottom:1px solid #f1f5f9">
+          <td style="padding:6px 8px"><strong>${r.itemName}</strong><br>${allExBadges || `<small style="color:#94a3b8">${r.itemCode}</small>`}</td>
+          <td style="padding:6px 8px">${exCodes || '<span style="color:#94a3b8;font-size:11px">—</span>'}</td>
+          <td style="text-align:right;padding:6px 8px;font-weight:700;color:#7c3aed">${r.qtySystemCancel != null ? fmt(r.qtySystemCancel) : '<span style="color:#94a3b8">—</span>'}</td>
+          <td style="padding:6px 8px;font-size:11px;color:#dc2626">${expiryDates || '—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    <div style="margin-top:8px;font-size:11px;color:#94a3b8">💡 Vào tab <strong>Hủy bánh</strong> để nhập số lượng hủy thực tế.</div>
+  </div>`;
     }
     async function loadPOS() {
       const date = document.getElementById('pos-filter-date')?.value || new Date().toISOString().slice(0, 10);
