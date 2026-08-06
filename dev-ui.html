@@ -592,7 +592,6 @@
     <div class="nav-group">
       <div class="nav-label">Báo cáo</div>
       <div class="nav-item" data-screen="DAILY_REPORT" onclick="nav('daily-report')">📊 Báo cáo ngày</div>
-      <div class="nav-item" data-screen="HUY_BANH" onclick="nav('huy-banh')">🗑 Hủy bánh</div>
       <div class="nav-item" data-screen="POS_SALES" onclick="nav('pos-sales')">🏪 POS Sales</div>
     </div>
     <div class="nav-group">
@@ -834,7 +833,7 @@
       'sx-config': 'Cấu hình sản xuất', 'prod-groups': 'Production Groups', 'threshold-rules': 'Threshold Rules', 'prod-plans': 'Kế hoạch sản xuất',
       'prod-requests': 'Phiếu sản xuất', 'delivery-records': 'Giao nhận bếp → shop', 'prod-adjustments': 'Điều chỉnh SX',
       'stock-summary': 'Tồn kho', 'inventory-requests': 'Phiếu kho',
-      'daily-report': 'Báo cáo ngày', 'huy-banh': 'Hủy bánh', 'pos-sales': 'POS Sales',
+      'daily-report': 'Báo cáo ngày', 'pos-sales': 'POS Sales',
       'users': 'Tài khoản người dùng', 'roles': 'Phân quyền (Roles)', 'activity-log': 'Nhật ký hoạt động'
     };
     const PAGE_FNS = {
@@ -843,7 +842,7 @@
       'sx-config': pageSxConfig, 'prod-groups': pageProdGroups,
       'threshold-rules': pageThresholdRules, 'prod-plans': pageProdPlans, 'prod-requests': pageProdRequests,
       'delivery-records': pageDeliveryRecords, 'prod-adjustments': pageProdAdjustments, 'stock-summary': pageStockSummary,
-      'inventory-requests': pageInventoryRequests, 'daily-report': pageDailyReport, 'huy-banh': pageHuyBanh, 'pos-sales': pagePosSales,
+      'inventory-requests': pageInventoryRequests, 'daily-report': pageDailyReport, 'pos-sales': pagePosSales,
       'users': showUsers, 'roles': showRoles, 'activity-log': showActivityLog
     };
 
@@ -3214,7 +3213,7 @@
       let ok = 0, fail = 0;
       for (const r of filled) {
         try {
-          await api('POST', `/api/v1/daily-reports/${report.id}/remaining?itemId=${r.itemId}&qtyRemainingActual=${+r.remaining}${r.note ? `&note=${encodeURIComponent(r.note)}` : ''}`)
+          await api('POST', `/api/v1/daily-reports/${report.id}/submit-line?itemId=${r.itemId}&qtyRemainingActual=${+r.remaining}${r.note ? `&note=${encodeURIComponent(r.note)}` : ''}`)
           ok++;
         } catch (e) { fail++; }
       }
@@ -3468,41 +3467,27 @@
       const el = document.getElementById('dr-detail');
       el.innerHTML = '<div class="empty">Đang tải...</div>';
 
-      // Yesterday date
-      const d = new Date(date); d.setDate(d.getDate() - 1);
-      const yesterday = d.toISOString().slice(0, 10);
-
       try {
-        // 1. Tạo/lấy report hôm nay (idempotent)
         const report = await api('POST', `/api/v1/daily-reports/init?reportDate=${date}`);
         if (!report?.id) { el.innerHTML = '<div class="empty">Không thể tạo báo cáo</div>'; return; }
         _drReportId = report.id;
 
-        // 2. Load parallel: delivery records + today lines + yesterday report + POS sales
-        const [drData, todayLines, ydReport, posData] = await Promise.all([
+        // Load parallel: delivery records + today lines + POS sales + cancel list
+        const [drData, todayLines, posData, cancelRows] = await Promise.all([
           api('GET', `/api/v1/delivery-records?date=${date}`),
           api('GET', `/api/v1/daily-reports/${report.id}/lines`),
-          api('GET', `/api/v1/daily-reports/by-date?reportDate=${yesterday}`).catch(() => null),
-          api('GET', `/api/v1/pos-sales?saleDate=${date}`).catch(() => [])
+          api('GET', `/api/v1/pos-sales?saleDate=${date}`).catch(() => []),
+          api('GET', `/api/v1/daily-reports/${report.id}/cancel-list`).catch(() => [])
         ]);
 
-        // 3. Yesterday closing (qtyRemainingActual) by itemId
-        let ydRemaining = {};
-        if (ydReport?.id) {
-          try {
-            const ydLines = await api('GET', `/api/v1/daily-reports/${ydReport.id}/lines`);
-            (ydLines ?? []).forEach(l => { if (l.item?.id) ydRemaining[l.item.id] = l.qtyRemainingActual });
-          } catch (_) { }
-        }
-
-        // 4. POS data → qtySold by itemId (backend đã resolve exCode→itemId)
+        // POS data → qtySold by itemId
         const posByItemId = {};
         (posData ?? []).forEach(ps => {
           if (!ps.itemId) return;
           posByItemId[ps.itemId] = (posByItemId[ps.itemId] ?? 0) + (+(ps.qtySold ?? 0));
         });
 
-        // 5. Delivery records → qtyProduced + qtyReceived by productCode
+        // Delivery records → qtyProduced + qtyReceived by productCode
         const drByCode = {};
         (drData ?? []).forEach(dr => {
           const code = dr.productCode; if (!code) return;
@@ -3511,78 +3496,171 @@
           drByCode[code].qtyReceived += +(dr.qtyReceived ?? 0);
         });
 
-        // 6. Today lines → qtyRemainingActual + qtySoldPos by itemId
+        // Today lines → full data map by itemId
         const lineByItemId = {};
         (todayLines ?? []).forEach(l => { if (l.item?.id) lineByItemId[l.item.id] = l });
 
-        // 7. Merge: union of all PRODUCT items from DR + lines
         const products = (allItems ?? []).filter(i => i.itemType === 'PRODUCT');
-        // items from delivery records (by code) — map to id via allItems
         const codeToId = {};
         products.forEach(i => { if (i.code) codeToId[i.code] = i.id });
 
+        // Set of itemIds in cancel list — to show qtyCancelled input for these
+        const cancelItemIds = new Set((cancelRows ?? []).map(r => r.itemId));
+
         const seen = new Set();
         const rows = [];
-        // from delivery records
         Object.entries(drByCode).forEach(([code, dr]) => {
-          const itemId = codeToId[code];
-          if (!itemId) return;
-          if (seen.has(itemId)) return; seen.add(itemId);
+          const itemId = codeToId[code]; if (!itemId || seen.has(itemId)) return; seen.add(itemId);
           const item = products.find(i => i.id === itemId);
           const line = lineByItemId[itemId];
-          // qtySoldPos: ưu tiên line (đã finalize) rồi mới lấy từ POS raw
           const qtySoldPos = line?.qtySoldPos ?? posByItemId[itemId] ?? null;
           rows.push({
             itemId, itemCode: code, itemName: item?.name ?? dr.productName ?? code,
-            ydRemaining: ydRemaining[itemId] ?? null,
-            qtyProduced: dr.qtyProduced,
-            qtyReceived: dr.qtyReceived,
-            qtyRemainingActual: line?.qtyRemainingActual ?? null,
-            qtySoldPos,
-            qtySoldImplied: line?.qtySoldImplied ?? null,
-            discrepancyPos: line?.discrepancyPos ?? null,
-            note: line?.note ?? ''
+            qtyProduced: dr.qtyProduced, qtyReceived: dr.qtyReceived,
+            qtySoldPos, line: line ?? null,
+            needsCancel: cancelItemIds.has(itemId)
           });
         });
-        // from today lines (may have items not in DR yet)
         (todayLines ?? []).forEach(l => {
           const id = l.item?.id; if (!id || seen.has(id)) return; seen.add(id);
-          const qtySoldPos = l.qtySoldPos ?? posByItemId[id] ?? null;
           rows.push({
             itemId: id, itemCode: l.item?.key ?? '', itemName: l.item?.name ?? l.item?.key ?? '?',
-            ydRemaining: ydRemaining[id] ?? null,
             qtyProduced: null, qtyReceived: null,
-            qtyRemainingActual: l.qtyRemainingActual,
-            qtySoldPos,
-            qtySoldImplied: l.qtySoldImplied,
-            discrepancyPos: l.discrepancyPos,
-            note: l.note ?? ''
+            qtySoldPos: l.qtySoldPos ?? posByItemId[id] ?? null,
+            line: l, needsCancel: cancelItemIds.has(id)
           });
         });
 
-        renderDR(report, rows);
-        // Load cancel list sau khi render xong
-        loadCancelList(report);
+        renderDR(report, rows, cancelRows ?? []);
       } catch (e) { el.innerHTML = `<div class="empty" style="color:#dc2626">Lỗi: ${e.message}</div>`; }
     }
 
-    function renderDR(report, rows) {
+    function renderDR(report, rows, cancelRows) {
       const el = document.getElementById('dr-detail'); if (!el) return;
       const isDraft = report.status === 'DRAFT';
       const isFinalized = report.status === 'FINALIZED';
 
       if (!rows.length) {
-        el.innerHTML = `
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><strong>Báo cáo ${report.reportDate}</strong> <span style="margin-left:8px">${badge(report.status)}</span></div>
-      </div>
+        el.innerHTML = `<div class="card">
+      <div><strong>Báo cáo ${report.reportDate}</strong> <span style="margin-left:8px">${badge(report.status)}</span></div>
       <div class="empty" style="margin-top:16px">Chưa có dữ liệu SX / giao nhận cho ngày này</div>
     </div>`;
         return;
       }
 
-      const discColor = v => v == null ? '#374151' : Math.abs(v) > 0 ? '#dc2626' : '#059669';
+      const disc = v => v == null ? '' : Math.abs(+v) > 0 ? 'color:#dc2626;font-weight:600' : 'color:#059669';
+      const fmtDisc = (v, pos) => {
+        if (v == null) return '<span style="color:#94a3b8">—</span>';
+        const n = +v;
+        if (n === 0) return '<span style="color:#059669">✓</span>';
+        const sign = n > 0 ? '▲' : '▼';
+        const color = n > 0 ? (pos ? '#059669' : '#dc2626') : (pos ? '#dc2626' : '#f59e0b');
+        return `<span style="color:${color};font-weight:600">${sign}${fmt(Math.abs(n))}</span>`;
+      };
+
+      let tableHtml;
+      if (isFinalized) {
+        // 9-cột đầy đủ với highlight discrepancy
+        tableHtml = `<div style="overflow-x:auto"><table style="width:100%;font-size:12px;border-collapse:collapse">
+      <thead><tr style="background:#f8fafc">
+        <th style="min-width:130px;padding:6px 8px;text-align:left;border-bottom:2px solid #e2e8f0">Sản phẩm</th>
+        <th style="padding:6px 4px;text-align:right;color:#64748b;border-bottom:2px solid #e2e8f0" title="Tồn đầu ngày (từ hôm qua)">Tồn đầu</th>
+        <th style="padding:6px 4px;text-align:right;color:#059669;border-bottom:2px solid #e2e8f0">Ra bánh</th>
+        <th style="padding:6px 4px;text-align:right;color:#2563eb;border-bottom:2px solid #e2e8f0">Thực nhận</th>
+        <th style="padding:6px 4px;text-align:right;color:#b45309;border-bottom:2px solid #e2e8f0" title="Từ máy POS">Bán POS</th>
+        <th style="padding:6px 4px;text-align:right;color:#0891b2;border-bottom:2px solid #e2e8f0" title="Tồn đầu + Nhận − Còn lại">Bán tính</th>
+        <th style="padding:6px 4px;text-align:right;color:#dc2626;border-bottom:2px solid #e2e8f0" title="Hệ thống tính — SHOP stock lô hết HSD">Hủy HT</th>
+        <th style="padding:6px 4px;text-align:right;color:#ef4444;border-bottom:2px solid #e2e8f0" title="NV nhập thực tế">Hủy NV</th>
+        <th style="padding:6px 4px;text-align:right;color:#7c3aed;border-bottom:2px solid #e2e8f0" title="Tồn đầu + Nhận − Bán POS − Hủy HT">Còn HT</th>
+        <th style="padding:6px 4px;text-align:right;color:#5b21b6;border-bottom:2px solid #e2e8f0" title="NV đếm thực tế">Còn TT</th>
+      </tr></thead>
+      <tbody>
+      ${rows.map(r => {
+        const l = r.line ?? {};
+        const opening = l.qtyRemainingOpening;
+        const produced = r.qtyProduced ?? l.qtyProduced;
+        const received = r.qtyReceived ?? l.qtyReceived;
+        const soldPos = l.qtySoldPos ?? r.qtySoldPos;
+        const soldImplied = l.qtySoldImplied;
+        const sysCancel = l.qtySystemCancel;
+        const nvCancel = l.qtyCancelled;
+        const sysRemaining = l.qtySystemRemaining;
+        const ttRemaining = l.qtyRemainingActual;
+        const discPos = l.discrepancyPos;
+        const discCancel = l.discrepancyCancel;
+        const discRem = l.discrepancyRemaining;
+        const hasDiscPos = discPos != null && Math.abs(+discPos) > 0;
+        const hasDiscCancel = discCancel != null && Math.abs(+discCancel) > 0;
+        const hasDiscRem = discRem != null && Math.abs(+discRem) > 0;
+        return `<tr style="border-bottom:1px solid #f1f5f9">
+          <td style="padding:5px 8px"><strong>${r.itemName}</strong><br><small style="color:#94a3b8">${r.itemCode}</small></td>
+          <td style="padding:5px 4px;text-align:right;color:#64748b">${opening != null ? fmt(opening) : '—'}</td>
+          <td style="padding:5px 4px;text-align:right;color:#059669">${produced != null ? fmt(produced) : '—'}</td>
+          <td style="padding:5px 4px;text-align:right;color:#2563eb">${received != null ? fmt(received) : '—'}</td>
+          <td style="padding:5px 4px;text-align:right;background:${hasDiscPos ? '#fff7ed' : ''}">${soldPos != null ? `<span style="color:#b45309;font-weight:600">${fmt(soldPos)}</span>` : '—'}</td>
+          <td style="padding:5px 4px;text-align:right;background:${hasDiscPos ? '#fff7ed' : ''}">${soldImplied != null ? `<span style="color:#0891b2">${fmt(soldImplied)}</span>` : '—'}${hasDiscPos ? `<br><small>${fmtDisc(discPos, false)}</small>` : ''}</td>
+          <td style="padding:5px 4px;text-align:right;background:${hasDiscCancel ? '#fef2f2' : ''}">${sysCancel != null && +sysCancel > 0 ? `<span style="color:#dc2626">${fmt(sysCancel)}</span>` : '<span style="color:#94a3b8">—</span>'}</td>
+          <td style="padding:5px 4px;text-align:right;background:${hasDiscCancel ? '#fef2f2' : ''}">${nvCancel != null ? `<span style="color:#ef4444;font-weight:600">${fmt(nvCancel)}</span>` : '—'}${hasDiscCancel ? `<br><small>${fmtDisc(discCancel, false)}</small>` : ''}</td>
+          <td style="padding:5px 4px;text-align:right;background:${hasDiscRem ? '#fef2f2' : ''}">${sysRemaining != null ? `<span style="color:#7c3aed">${fmt(sysRemaining)}</span>` : '—'}</td>
+          <td style="padding:5px 4px;text-align:right;background:${hasDiscRem ? '#fef2f2' : ''}">${ttRemaining != null ? `<span style="color:#5b21b6;font-weight:600">${fmt(ttRemaining)}</span>` : '—'}${hasDiscRem ? `<br><small>${fmtDisc(discRem, true)}</small>` : ''}</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table></div>
+      <div style="margin-top:8px;font-size:11px;color:#64748b">
+        🟠 nền cam = lệch Bán POS vs tính &nbsp;|&nbsp; 🔴 nền đỏ = lệch Hủy hoặc Còn lại
+      </div>`;
+      } else {
+        // Draft: bảng nhập 2 ô (còn lại + hủy)
+        tableHtml = `<div style="overflow-x:auto"><table style="width:100%;font-size:13px">
+      <thead><tr>
+        <th style="min-width:130px">Sản phẩm</th>
+        <th style="text-align:right;color:#059669">Ra bánh</th>
+        <th style="text-align:right;color:#2563eb">Thực nhận</th>
+        <th style="text-align:right;color:#b45309" title="Từ máy POS">Bán POS</th>
+        <th style="text-align:right;color:#7c3aed">Còn lại *</th>
+        <th style="text-align:right;color:#dc2626" title="Chỉ hiển thị cho bánh có hạn">Đã hủy *</th>
+      </tr></thead>
+      <tbody>
+      ${rows.map(r => {
+        const l = r.line ?? {};
+        const produced = r.qtyProduced ?? l.qtyProduced;
+        const received = r.qtyReceived ?? l.qtyReceived;
+        const soldPos = l.qtySoldPos ?? r.qtySoldPos;
+        const qtyRem = l.qtyRemainingActual;
+        const qtyCan = l.qtyCancelled;
+        return `<tr>
+          <td><strong>${r.itemName}</strong><br><small style="color:#94a3b8">${r.itemCode}</small></td>
+          <td style="text-align:right;color:#059669">${produced != null ? fmt(produced) : '—'}</td>
+          <td style="text-align:right;color:#2563eb">${received != null ? fmt(received) : '—'}</td>
+          <td style="text-align:right;color:#b45309">${soldPos != null ? fmt(soldPos) : '<span style="color:#cbd5e1">—</span>'}</td>
+          <td style="text-align:right">
+            <input type="number" id="dr-rem-${r.itemId}" min="0" step="0.001"
+              value="${qtyRem ?? ''}" placeholder="0"
+              style="width:72px;border:1px solid #d1d5db;border-radius:4px;padding:2px 6px;font-size:13px;text-align:right"
+              onblur="saveDRLine('${r.itemId}')"
+              onkeydown="if(event.key==='Enter'){this.blur()}">
+          </td>
+          <td style="text-align:right">
+            ${r.needsCancel
+              ? `<input type="number" id="dr-can-${r.itemId}" min="0" step="0.001"
+                  value="${qtyCan ?? ''}" placeholder="0"
+                  style="width:72px;border:1px solid #fca5a5;border-radius:4px;padding:2px 6px;font-size:13px;text-align:right"
+                  onblur="saveDRLine('${r.itemId}')"
+                  onkeydown="if(event.key==='Enter'){this.blur()}">`
+              : '<span style="color:#94a3b8;font-size:11px">—</span>'
+            }
+          </td>
+        </tr>`;
+      }).join('')}
+      </tbody></table></div>
+      <div style="margin-top:8px;font-size:12px;color:#64748b">
+        💡 Nhập "Còn lại" + "Đã hủy" rồi nhấn Enter hoặc click ra ngoài để lưu.
+      </div>`;
+      }
+
+      // Cancel list reference card
+      const cancelHtml = cancelRows.length ? renderCancelRefCard(cancelRows, report.status) : '';
+
       el.innerHTML = `
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -3593,65 +3671,80 @@
       </div>
       ${isDraft ? `<button class="btn btn-success" onclick="finalizeDR('${report.id}')">✅ Chốt báo cáo</button>` : ''}
     </div>
+    ${tableHtml}
+  </div>
+  ${cancelHtml}`;
+    }
+
+    function renderCancelRefCard(rows, status) {
+      // Read-only reference card showing which EX_CODEs staff should physically cancel
+      const isFinalized = status === 'FINALIZED';
+      return `<div class="card" style="margin-top:12px;border-left:4px solid #dc2626">
+    <div style="margin-bottom:10px">
+      <strong style="color:#dc2626">🗑 Danh sách bánh cần hủy</strong>
+      <span style="margin-left:10px;font-size:12px;color:#64748b">EX_CODE theo từng lô — NV dựa vào đây để hủy đúng mã</span>
+    </div>
     <div style="overflow-x:auto">
-    <table style="width:100%;font-size:13px">
-      <thead><tr>
-        <th style="min-width:140px">Sản phẩm</th>
-        <th style="text-align:right;color:#64748b">Tồn hôm qua</th>
-        <th style="text-align:right;color:#059669">Bếp SX</th>
-        <th style="text-align:right;color:#2563eb">Nhận trong ngày</th>
-        <th style="text-align:right;color:#dc2626" title="Bếp SX − Nhận trong ngày">Lệch SX/Nhận</th>
-        <th style="text-align:right;color:#7c3aed">Còn lại</th>
-        <th style="text-align:right;color:#0891b2" title="Nhận trong ngày − Còn lại">Bán dự tính</th>
-        <th style="text-align:right;color:#b45309" title="Từ máy POS">Bán thực (POS)</th>
-        <th style="text-align:right" title="Bán dự tính − Bán thực POS">Lệch POS</th>
+    <table style="width:100%;font-size:13px;border-collapse:collapse">
+      <thead><tr style="background:#fef2f2">
+        <th style="padding:5px 8px;text-align:left;color:#dc2626">Sản phẩm</th>
+        <th style="padding:5px 8px;color:#991b1b">Mã lô cần hủy (EX_CODE)</th>
+        <th style="padding:5px 8px;text-align:right;color:#64748b">HSD lô</th>
+        <th style="padding:5px 8px;text-align:right;color:#7c3aed" title="Tồn SHOP ước tính cần hủy">Dự kiến hủy (HT)</th>
+        ${isFinalized ? `<th style="padding:5px 8px;text-align:right;color:#ef4444">NV hủy thực</th>
+        <th style="padding:5px 8px;text-align:right">Lệch</th>` : ''}
       </tr></thead>
       <tbody>
       ${rows.map(r => {
-        const lechSX = r.qtyProduced != null && r.qtyReceived != null ? r.qtyProduced - r.qtyReceived : null;
-        const banDuTinh = r.qtyReceived != null && r.qtyRemainingActual != null ? r.qtyReceived - r.qtyRemainingActual : null;
-        const lechPOS = banDuTinh != null && r.qtySoldPos != null ? banDuTinh - r.qtySoldPos : null;
-        return `<tr>
-        <td><strong>${r.itemName}</strong><br><small style="color:#94a3b8">${r.itemCode}</small></td>
-        <td style="text-align:right;color:#64748b">${r.ydRemaining != null ? fmt(r.ydRemaining) : '<span style="color:#cbd5e1">—</span>'}</td>
-        <td style="text-align:right;color:#059669">${r.qtyProduced != null ? fmt(r.qtyProduced) : '—'}</td>
-        <td style="text-align:right;color:#2563eb">${r.qtyReceived != null ? fmt(r.qtyReceived) : '—'}</td>
-        <td style="text-align:right;font-weight:600;color:${lechSX == null ? '#94a3b8' : Math.abs(lechSX) > 0 ? '#dc2626' : '#059669'}">${lechSX != null ? fmt(lechSX) : '—'}</td>
-        <td style="text-align:right">
-          ${isFinalized
-            ? `<span style="color:#7c3aed;font-weight:600">${r.qtyRemainingActual != null ? fmt(r.qtyRemainingActual) : '—'}</span>`
-            : `<input type="number" id="dr-rem-${r.itemId}" min="0" step="0.001"
-                value="${r.qtyRemainingActual ?? ''}"
-                placeholder="0"
-                style="width:72px;border:1px solid #d1d5db;border-radius:4px;padding:2px 6px;font-size:13px;text-align:right"
-                onblur="saveDRRemaining('${r.itemId}')"
-                onkeydown="if(event.key==='Enter'){this.blur()}">`
-          }
-        </td>
-        <td style="text-align:right;color:#0891b2">${banDuTinh != null ? fmt(banDuTinh) : '—'}</td>
-        <td style="text-align:right;color:#b45309">${r.qtySoldPos != null ? fmt(r.qtySoldPos) : '<span style="color:#cbd5e1">—</span>'}</td>
-        <td style="text-align:right;font-weight:${lechPOS != null && Math.abs(lechPOS) > 0 ? '600' : '400'};color:${lechPOS == null ? '#94a3b8' : Math.abs(lechPOS) > 0 ? '#dc2626' : '#059669'}">${lechPOS != null ? fmt(lechPOS) : '—'}</td>
-      </tr>`;
+        const exCodes = (r.expiringExCodes ?? []).map(ec =>
+          `<code style="background:#fee2e2;color:#991b1b;padding:2px 6px;border-radius:3px;font-size:11px;margin:1px;display:inline-block">${ec}</code>`
+        ).join(' ');
+        const allExBadges = (r.allExCodes ?? []).map(ec =>
+          `<code style="font-size:10px;color:#64748b;background:#f1f5f9;padding:1px 4px;border-radius:3px;margin:1px;display:inline-block">${ec}</code>`
+        ).join(' ');
+        const expiryDateStr = (r.expiringProductionDates ?? []).map(d => {
+          const exp = new Date(d); exp.setDate(exp.getDate() + (r.shelfDays ?? 0));
+          return exp.toISOString().slice(0, 10);
+        }).join(', ');
+        const diff = r.discrepancyCancelQty;
+        const diffCell = diff == null ? '—'
+          : +diff === 0 ? '<span style="color:#059669">✓</span>'
+          : +diff < 0 ? `<span style="color:#dc2626;font-weight:600">▼${fmt(Math.abs(+diff))}</span>`
+          : `<span style="color:#f59e0b;font-weight:600">▲${fmt(+diff)}</span>`;
+        return `<tr style="border-bottom:1px solid #fef2f2">
+          <td style="padding:5px 8px">
+            <strong>${r.itemName}</strong><br>
+            ${allExBadges || `<small style="color:#94a3b8">${r.itemCode}</small>`}
+          </td>
+          <td style="padding:5px 8px">${exCodes || '<span style="color:#94a3b8;font-size:11px">—</span>'}</td>
+          <td style="padding:5px 8px;text-align:right;color:#dc2626;font-size:11px">${expiryDateStr || '—'}</td>
+          <td style="padding:5px 8px;text-align:right;color:#7c3aed;font-weight:600">${r.qtySystemCancel != null && +r.qtySystemCancel > 0 ? fmt(r.qtySystemCancel) : '—'}</td>
+          ${isFinalized ? `<td style="padding:5px 8px;text-align:right;color:#ef4444;font-weight:600">${r.qtyCancelled != null ? fmt(r.qtyCancelled) : '—'}</td>
+          <td style="padding:5px 8px;text-align:right">${diffCell}</td>` : ''}
+        </tr>`;
       }).join('')}
       </tbody>
     </table>
     </div>
-    <div style="margin-top:8px;font-size:12px;color:#64748b">
-      💡 "Còn lại" do nhân viên nhập ở màn hình Kho Bếp. Bấm <strong>Chốt báo cáo</strong> để tổng hợp chính thức.
-    </div>
-  </div>
-  <div id="dr-cancel-section"></div>`;
+  </div>`;
     }
 
-    async function saveDRRemaining(itemId) {
+    async function saveDRLine(itemId) {
       if (!_drReportId) return;
-      const inp = document.getElementById(`dr-rem-${itemId}`);
-      const val = (inp?.value ?? '').trim();
-      if (val === '') return; // blur khi chưa nhập → bỏ qua
+      const remInp = document.getElementById(`dr-rem-${itemId}`);
+      const canInp = document.getElementById(`dr-can-${itemId}`);
+      const rem = (remInp?.value ?? '').trim();
+      if (rem === '') return;
+      const can = (canInp?.value ?? '').trim();
       try {
-        await api('POST', `/api/v1/daily-reports/${_drReportId}/remaining?itemId=${itemId}&qtyRemainingActual=${+val}`);
-        inp.style.borderColor = '#059669';
-      } catch (e) { }
+        let url = `/api/v1/daily-reports/${_drReportId}/submit-line?itemId=${itemId}&qtyRemainingActual=${+rem}`;
+        if (can !== '') url += `&qtyCancelled=${+can}`;
+        await api('POST', url);
+        if (remInp) remInp.style.borderColor = '#059669';
+        if (canInp && can !== '') canInp.style.borderColor = '#059669';
+      } catch (e) {
+        if (remInp) remInp.style.borderColor = '#dc2626';
+      }
     }
 
     async function finalizeDR(id) {
@@ -3659,259 +3752,12 @@
       try {
         await api('POST', `/api/v1/daily-reports/${id}/finalize`);
         toast('✅ Đã chốt báo cáo! Đang mở kế hoạch sản xuất ngày mai...');
-        // Tự động sang màn hình Kế hoạch ngày với ngày mai
         setTimeout(() => nav('prod-plans'), 1200);
       } catch (e) { }
     }
 
-    async function loadCancelList(report) {
-      const el = document.getElementById('dr-cancel-section');
-      if (!el) return;
-      el.innerHTML = '<div class="empty" style="padding:8px">Đang tải danh sách hủy...</div>';
-      try {
-        const rows = await api('GET', `/api/v1/daily-reports/${report.id}/cancel-list`);
-        renderCancelList(report, rows ?? []);
-      } catch (e) {
-        el.innerHTML = `<div class="empty" style="color:#dc2626;padding:8px">Lỗi tải danh sách hủy: ${e.message}</div>`;
-      }
-    }
-
-    function renderCancelList(report, rows) {
-      const el = document.getElementById('dr-cancel-section');
-      if (!el) return;
-      const isDraft = report.status === 'DRAFT';
-      const isFinalized = report.status === 'FINALIZED';
-
-      if (!rows.length) {
-        el.innerHTML = `<div class="card" style="margin-top:12px">
-      <strong style="color:#dc2626">🗑 Hủy bánh hôm nay</strong>
-      <div class="empty" style="margin-top:8px">Không có sản phẩm nào cấu hình shelf_days = 0</div>
-    </div>`;
-        return;
-      }
-
-      const totalCancel = rows.reduce((s, r) => s + (+(r.qtyCancelled ?? 0)), 0);
-
-      el.innerHTML = `<div class="card" style="margin-top:12px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div>
-        <strong style="color:#dc2626;font-size:15px">🗑 Hủy bánh hôm nay</strong>
-        <span style="margin-left:10px;font-size:12px;color:#64748b">Bánh tươi trong ngày (shelf_days = 0) — phải hủy cuối ngày</span>
-      </div>
-      ${totalCancel > 0 ? `<span style="font-size:13px;color:#dc2626;font-weight:600">Tổng hủy: ${fmt(totalCancel)}</span>` : ''}
-    </div>
-    <div style="overflow-x:auto">
-    <table style="width:100%;font-size:13px">
-      <thead><tr>
-        <th style="min-width:140px">Sản phẩm</th>
-        <th style="color:#dc2626;font-size:11px">Mã cần hủy (EX_CODE)</th>
-        <th style="text-align:right;color:#2563eb">Nhận trong ngày</th>
-        <th style="text-align:right;color:#7c3aed">Tồn cuối ngày<br><small style="font-weight:400;color:#94a3b8">(HT dự kiến hủy)</small></th>
-        <th style="text-align:right;color:#dc2626">NV nhập hủy</th>
-        <th style="text-align:right;color:#64748b;font-size:11px">Lệch hủy<br><small style="font-weight:400">(NV − HT)</small></th>
-      </tr></thead>
-      <tbody>
-      ${rows.map(r => {
-        const diff = r.discrepancyCancelQty != null ? +r.discrepancyCancelQty
-          : (r.qtyCancelled != null && r.qtyRemainingActual != null ? +r.qtyCancelled - +r.qtyRemainingActual : null);
-        const diffCell = diff == null ? '<span style="color:#94a3b8">—</span>'
-          : diff === 0 ? '<span style="color:#059669;font-size:11px">✓ Khớp</span>'
-            : diff < 0 ? `<span style="color:#dc2626;font-weight:600" title="Hủy ít hơn HT ${fmt(Math.abs(diff))}">▼ ${fmt(Math.abs(diff))}</span>`
-              : `<span style="color:#f59e0b;font-weight:600" title="Hủy nhiều hơn HT ${fmt(diff)}">▲ ${fmt(diff)}</span>`;
-        const exCodes = (r.expiringExCodes ?? []).map(ec => `<code style="background:#fee2e2;color:#991b1b;padding:1px 5px;border-radius:3px;font-size:11px;margin:1px;display:inline-block">${ec}</code>`).join(' ');
-        return `<tr>
-        <td><strong>${r.itemName}</strong><br><small style="color:#94a3b8">${r.itemCode}</small></td>
-        <td>${exCodes || '<span style="color:#94a3b8;font-size:11px">—</span>'}</td>
-        <td style="text-align:right;color:#2563eb">${r.qtyReceived != null ? fmt(r.qtyReceived) : '—'}</td>
-        <td style="text-align:right;color:#7c3aed">${r.qtyRemainingActual != null ? fmt(r.qtyRemainingActual) : '<span style="color:#f59e0b">chưa nhập</span>'}</td>
-        <td style="text-align:right">
-          ${isFinalized
-            ? `<span style="color:#dc2626;font-weight:600">${r.qtyCancelled != null ? fmt(r.qtyCancelled) : '—'}</span>`
-            : `<input type="number" id="dr-cancel-${r.itemId}" min="0" step="0.001"
-                value="${r.qtyCancelled != null ? r.qtyCancelled : r.qtyRemainingActual != null ? r.qtyRemainingActual : ''}"
-                placeholder="${r.qtyRemainingActual != null ? r.qtyRemainingActual : '0'}"
-                style="width:80px;border:1px solid #fca5a5;border-radius:4px;padding:2px 6px;font-size:13px;text-align:right"
-                onblur="saveDRCancel('${r.itemId}')"
-                onkeydown="if(event.key==='Enter'){this.blur()}">`
-          }
-        </td>
-        <td style="text-align:right">${diffCell}</td>
-      </tr>`;
-      }).join('')}
-      </tbody>
-    </table>
-    </div>
-    ${isDraft ? `<div style="margin-top:8px;font-size:12px;color:#64748b">
-      💡 Số hủy mặc định = Còn lại cuối ngày. Nhân viên điều chỉnh nếu thực tế khác.
-    </div>`: ''}
-  </div>`;
-    }
-
-    async function saveDRCancel(itemId) {
-      if (!_drReportId) return;
-      const inp = document.getElementById(`dr-cancel-${itemId}`);
-      const val = (inp?.value ?? '').trim();
-      if (val === '') return;
-      try {
-        await api('POST', `/api/v1/daily-reports/${_drReportId}/cancel?itemId=${itemId}&qtyCancelled=${+val}`);
-        inp.style.borderColor = '#059669';
-      } catch (e) { }
-    }
-
-    // Kept for legacy compat
     async function initDR() { loadDR(); }
     async function updateDRRemaining() { }
-
-    // ══════════════════════════════════════════════════════════════════════════════
-    // HỦY BÁNH
-    // ══════════════════════════════════════════════════════════════════════════════
-
-    let _huyReportId = null;
-
-    async function pageHuyBanh() {
-      const today = new Date().toISOString().slice(0, 10);
-      document.getElementById('content').innerHTML = `
-  <div class="card">
-    <div style="display:flex;gap:10px;align-items:center">
-      <div class="field" style="margin:0"><label>Ngày</label>
-        <input type="date" id="huy-date" value="${today}" onchange="loadHuyBanh()"></div>
-      <button class="btn btn-ghost btn-sm" onclick="shiftHuyDate(-1)" style="margin-top:18px">◀</button>
-      <button class="btn btn-ghost btn-sm" onclick="shiftHuyDate(1)" style="margin-top:18px">▶</button>
-      <button class="btn btn-ghost btn-sm" onclick="loadHuyBanh()" style="margin-top:18px">🔄</button>
-    </div>
-  </div>
-  <div id="huy-detail"><div class="empty">Chọn ngày để xem danh sách hủy</div></div>`;
-      loadHuyBanh();
-    }
-
-    function shiftHuyDate(delta) {
-      const inp = document.getElementById('huy-date'); if (!inp) return;
-      const d = new Date(inp.value); d.setDate(d.getDate() + delta);
-      inp.value = d.toISOString().slice(0, 10);
-      loadHuyBanh();
-    }
-
-    async function loadHuyBanh() {
-      const date = document.getElementById('huy-date')?.value;
-      if (!date) return;
-      const el = document.getElementById('huy-detail');
-      el.innerHTML = '<div class="empty">Đang tải...</div>';
-      try {
-        // Lấy report của ngày đó (không tạo mới nếu chưa có)
-        const reportResp = await api('GET', `/api/v1/daily-reports/by-date?reportDate=${date}`).catch(() => null);
-        if (!reportResp?.id) {
-          el.innerHTML = `<div class="card"><div class="empty">Chưa có báo cáo ngày ${date}. Vào <strong>Báo cáo ngày</strong> để tạo trước.</div></div>`;
-          return;
-        }
-        _huyReportId = reportResp.id;
-        const rows = await api('GET', `/api/v1/daily-reports/${reportResp.id}/cancel-list`);
-        renderHuyBanh(reportResp, rows ?? []);
-      } catch (e) {
-        el.innerHTML = `<div class="empty" style="color:#dc2626">Lỗi: ${e.message}</div>`;
-      }
-    }
-
-    function renderHuyBanh(report, rows) {
-      const el = document.getElementById('huy-detail'); if (!el) return;
-      const isDraft = report.status === 'DRAFT';
-      const isFinalized = report.status === 'FINALIZED';
-
-      const totalCancelled = rows.reduce((s, r) => s + (+(r.qtyCancelled ?? 0)), 0);
-      const pendingInput = rows.filter(r => r.qtyRemainingActual != null && r.qtyCancelled == null).length;
-
-      el.innerHTML = `<div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <div>
-        <strong style="font-size:15px;color:#dc2626">🗑 Hủy bánh — ${report.reportDate}</strong>
-        <span style="margin-left:10px">${badge(report.status)}</span>
-      </div>
-      <div style="display:flex;gap:12px;align-items:center">
-        ${totalCancelled > 0 ? `<span style="font-size:13px;color:#dc2626;font-weight:600">Tổng hủy: ${fmt(totalCancelled)}</span>` : ''}
-        ${pendingInput > 0 && isDraft ? `<span style="font-size:12px;color:#f59e0b">⚠️ ${pendingInput} item chưa nhập hủy</span>` : ''}
-      </div>
-    </div>
-
-    ${!rows.length ? `<div class="empty">Không có sản phẩm nào cấu hình shelf_days = 0.<br>
-      Vào <strong>Sản phẩm → Cấu hình hạn sử dụng</strong> để thiết lập.</div>`: `
-    <div style="overflow-x:auto">
-    <table style="width:100%;font-size:13px">
-      <thead><tr>
-        <th style="min-width:160px">Sản phẩm</th>
-        <th style="color:#dc2626;font-size:11px">Mã cần hủy (EX_CODE)</th>
-        <th style="text-align:right;color:#2563eb">Nhận trong ngày</th>
-        <th style="text-align:right;color:#7c3aed">Tồn cuối ngày<br><small style="font-weight:400;color:#94a3b8">(HT dự kiến hủy)</small></th>
-        <th style="text-align:right;color:#dc2626">NV nhập hủy</th>
-        <th style="text-align:right;color:#64748b;font-size:11px">Lệch hủy<br><small style="font-weight:400">(NV − HT)</small></th>
-        <th style="text-align:center;color:#64748b">Trạng thái</th>
-      </tr></thead>
-      <tbody>
-      ${rows.map(r => {
-        const diff = r.discrepancyCancelQty != null ? +r.discrepancyCancelQty
-          : (r.qtyCancelled != null && r.qtyRemainingActual != null ? +r.qtyCancelled - +r.qtyRemainingActual : null);
-        const diffCell = diff == null ? '<span style="color:#94a3b8">—</span>'
-          : diff === 0 ? '<span style="color:#059669;font-size:12px">✓ Khớp</span>'
-            : diff < 0 ? `<span style="color:#dc2626;font-weight:600;font-size:12px" title="Hủy ít hơn HT ${fmt(Math.abs(diff))}">▼ ${fmt(Math.abs(diff))}</span>`
-              : `<span style="color:#f59e0b;font-weight:600;font-size:12px" title="Hủy nhiều hơn HT ${fmt(diff)}">▲ ${fmt(diff)}</span>`;
-        const statusTag = r.qtyCancelled != null
-          ? (diff === 0 ? `<span style="color:#059669;font-size:11px">✓ Đã nhập</span>` : `<span style="color:#f59e0b;font-size:11px">⚠️ Lệch</span>`)
-          : (r.qtyRemainingActual != null ? `<span style="color:#f59e0b;font-size:11px">Chưa nhập hủy</span>` : `<span style="color:#94a3b8;font-size:11px">Chưa có tồn</span>`);
-        const expiryDates = (r.expiringProductionDates ?? []).map(d => {
-          const exp = new Date(d); exp.setDate(exp.getDate() + (r.shelfDays ?? 0));
-          return `SX ${d} + ${r.shelfDays}ngày → HSD ${exp.toISOString().slice(0, 10)}`;
-        }).join(', ');
-        const exCodes = (r.expiringExCodes ?? []).map(ec => `<code style="background:#fee2e2;color:#991b1b;padding:1px 5px;border-radius:3px;font-size:11px;margin:1px;display:inline-block">${ec}</code>`).join(' ');
-        const allExCodeBadges = (r.allExCodes ?? []).map(ec =>
-          `<code style="font-size:10px;color:#64748b;background:#f1f5f9;padding:1px 4px;border-radius:3px;margin:1px;display:inline-block">${ec}</code>`
-        ).join(' ');
-        return `<tr>
-        <td>
-          <strong>${r.itemName}</strong><br>
-          ${allExCodeBadges || `<small style="color:#94a3b8">${r.itemCode}</small>`}
-          ${expiryDates ? `<br><small style="color:#dc2626;font-size:10px">${expiryDates}</small>` : ''}
-        </td>
-        <td>${exCodes || '<span style="color:#94a3b8;font-size:11px">—</span>'}</td>
-        <td style="text-align:right;color:#2563eb">${r.qtyReceived != null ? fmt(r.qtyReceived) : '—'}</td>
-        <td style="text-align:right;color:#7c3aed">${r.qtySystemCancel != null ? `<strong style="color:#7c3aed">${fmt(r.qtySystemCancel)}</strong>` : r.qtyRemainingActual != null ? `<strong>${fmt(r.qtyRemainingActual)}</strong>` : '<span style="color:#f59e0b">chưa nhập</span>'}</td>
-        <td style="text-align:right">
-          ${isFinalized
-            ? `<span style="color:#dc2626;font-weight:700">${r.qtyCancelled != null ? fmt(r.qtyCancelled) : '—'}</span>`
-            : `<input type="number" id="huy-inp-${r.itemId}" min="0" step="0.001"
-                value="${r.qtyCancelled != null ? r.qtyCancelled : r.qtySystemCancel != null ? r.qtySystemCancel : r.qtyRemainingActual != null ? r.qtyRemainingActual : ''}"
-                placeholder="${r.qtySystemCancel != null ? r.qtySystemCancel : r.qtyRemainingActual != null ? r.qtyRemainingActual : '0'}"
-                style="width:90px;border:1px solid #fca5a5;border-radius:4px;padding:3px 8px;font-size:13px;text-align:right"
-                onblur="saveHuyBanh('${r.itemId}')"
-                onkeydown="if(event.key==='Enter'){this.blur()}">`
-          }
-        </td>
-        <td style="text-align:right">${diffCell}</td>
-        <td style="text-align:center">${statusTag}</td>
-      </tr>`;
-      }).join('')}
-      </tbody>
-    </table>
-    </div>
-    ${isDraft ? `<div style="margin-top:10px;font-size:12px;color:#64748b">
-      💡 Số hủy tự điền = Còn lại cuối ngày. Nhân viên điều chỉnh nếu thực tế khác rồi nhấn Enter hoặc click ra ngoài để lưu.
-    </div>`: ''}
-    `}
-  </div>`;
-    }
-
-    async function saveHuyBanh(itemId) {
-      if (!_huyReportId) return;
-      const inp = document.getElementById(`huy-inp-${itemId}`);
-      const val = (inp?.value ?? '').trim();
-      if (val === '') return;
-      try {
-        await api('POST', `/api/v1/daily-reports/${_huyReportId}/cancel?itemId=${itemId}&qtyCancelled=${+val}`);
-        inp.style.borderColor = '#059669';
-        // Refresh tổng hủy
-        const rows = await api('GET', `/api/v1/daily-reports/${_huyReportId}/cancel-list`);
-        const total = rows.reduce((s, r) => s + (+(r.qtyCancelled ?? 0)), 0);
-        const el = document.querySelector('#huy-detail .card strong[style*="dc2626"]:last-of-type');
-        // Just update the input border — full re-render on next load
-      } catch (e) { inp.style.borderColor = '#dc2626'; }
-    }
 
     // ══════════════════════════════════════════════════════════════════════════════
     // POS SALES
@@ -3993,7 +3839,7 @@
         </tr>`;
       }).join('')}</tbody>
     </table>
-    <div style="margin-top:8px;font-size:11px;color:#94a3b8">💡 Vào tab <strong>Hủy bánh</strong> để nhập số lượng hủy thực tế.</div>
+    <div style="margin-top:8px;font-size:11px;color:#94a3b8">💡 Vào <strong>Báo cáo ngày</strong> để nhập số còn lại và số đã hủy thực tế.</div>
   </div>`;
     }
     async function loadPOS() {

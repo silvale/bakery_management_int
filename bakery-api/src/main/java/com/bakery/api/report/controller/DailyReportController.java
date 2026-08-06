@@ -29,10 +29,13 @@ import com.bakery.framework.security.RequirePermission;
  *   → Xem header report
  *
  * GET  /api/v1/daily-reports/{id}/lines
- *   → Xem chi tiết từng sản phẩm
+ *   → Xem chi tiết từng sản phẩm (9 cột)
  *
- * POST /api/v1/daily-reports/{id}/remaining
- *   → Nhân viên nhập số bánh còn lại (qty_remaining_actual) theo từng item
+ * GET  /api/v1/daily-reports/{id}/cancel-list
+ *   → Danh sách bánh cần hủy (kèm EX_CODE từng lô)
+ *
+ * POST /api/v1/daily-reports/{id}/submit-line
+ *   → Nhân viên nhập 2 ô: số còn lại + số đã hủy (cùng lúc)
  *
  * POST /api/v1/daily-reports/{id}/finalize
  *   → [ADMIN] Chốt báo cáo: tổng hợp DeliveryRecord + POS + tính discrepancy
@@ -64,41 +67,30 @@ public class DailyReportController {
                         "key", l.getItem().getCode() != null ? l.getItem().getCode() : "",
                         "name", l.getItem().getName() != null ? l.getItem().getName() : ""));
             }
+            // 9 cột báo cáo
+            m.put("qtyRemainingOpening", l.getQtyRemainingOpening());
             m.put("qtyProduced",         l.getQtyProduced());
             m.put("qtyReceived",         l.getQtyReceived());
-            m.put("qtyRemainingActual",  l.getQtyRemainingActual());
-            m.put("qtySoldImplied",      l.getQtySoldImplied());
             m.put("qtySoldPos",          l.getQtySoldPos());
-            m.put("discrepancyKitchen",  l.getDiscrepancyKitchen());
-            m.put("discrepancyPos",      l.getDiscrepancyPos());
-            m.put("qtyCancelled",        l.getQtyCancelled());
-            m.put("discrepancyCancel",   l.getDiscrepancyCancel());
-            m.put("sellingPrice",        l.getSellingPrice());
-            m.put("note",                l.getNote() != null ? l.getNote() : "");
+            m.put("qtySoldImplied",      l.getQtySoldImplied());  // = opening + received - remaining
+            m.put("qtySystemCancel",     l.getQtySystemCancel());
+            m.put("qtyCancelled",        l.getQtyCancelled());    // NV nhập
+            m.put("qtySystemRemaining",  l.getQtySystemRemaining());
+            m.put("qtyRemainingActual",  l.getQtyRemainingActual()); // NV nhập
+            // discrepancies
+            m.put("discrepancyKitchen",   l.getDiscrepancyKitchen());
+            m.put("discrepancyPos",       l.getDiscrepancyPos());
+            m.put("discrepancyCancel",    l.getDiscrepancyCancel());
+            m.put("discrepancyRemaining", l.getDiscrepancyRemaining());
+            m.put("sellingPrice",         l.getSellingPrice());
+            m.put("note",                 l.getNote() != null ? l.getNote() : "");
             return m;
         }).toList();
     }
 
     /**
-     * Nhân viên nhập số bánh còn lại cuối ngày — độc lập với POS, bất cứ lúc nào.
-     *
-     * @param itemId             ID sản phẩm
-     * @param qtyRemainingActual số bánh còn lại thực tế tại cửa hàng
-     */
-    @PostMapping("/{id}/remaining")
-    @RequirePermission(screen = "DAILY_REPORT", action = "CREATE")
-    public ResponseEntity<Void> updateRemaining(
-            @PathVariable UUID id,
-            @RequestParam UUID itemId,
-            @RequestParam BigDecimal qtyRemainingActual,
-            @RequestParam(required = false) String note) {
-        service.updateRemainingQty(id, itemId, qtyRemainingActual, note);
-        return ResponseEntity.noContent().build();
-    }
-
-    /**
-     * Danh sách bánh cần hủy hôm nay.
-     * Lọc tất cả sản phẩm có shelf_days = 0 + trạng thái remaining/cancelled hiện tại.
+     * Danh sách bánh cần hủy hôm nay — hiển thị EX_CODE theo từng lô.
+     * Gọi sau khi upload POS để NV biết hủy đúng mã bánh.
      */
     @GetMapping("/{id}/cancel-list")
     public List<Map<String, Object>> getCancelList(@PathVariable UUID id) {
@@ -106,18 +98,23 @@ public class DailyReportController {
     }
 
     /**
-     * Nhân viên nhập số bánh đã hủy cuối ngày.
+     * Nhân viên nhập 2 ô cuối ngày: số còn lại + số đã hủy.
+     * Có thể gọi nhiều lần (upsert), nhận một hoặc cả hai giá trị.
      *
-     * @param itemId       ID sản phẩm
-     * @param qtyCancelled số bánh đã hủy
+     * @param itemId             ID sản phẩm
+     * @param qtyRemainingActual số bánh còn lại thực tế
+     * @param qtyCancelled       số bánh đã hủy (null nếu sản phẩm không cần hủy)
+     * @param note               ghi chú tuỳ chọn
      */
-    @PostMapping("/{id}/cancel")
+    @PostMapping("/{id}/submit-line")
     @RequirePermission(screen = "DAILY_REPORT", action = "CREATE")
-    public ResponseEntity<Void> updateCancelled(
+    public ResponseEntity<Void> submitLine(
             @PathVariable UUID id,
             @RequestParam UUID itemId,
-            @RequestParam BigDecimal qtyCancelled) {
-        service.updateCancelledQty(id, itemId, qtyCancelled);
+            @RequestParam BigDecimal qtyRemainingActual,
+            @RequestParam(required = false) BigDecimal qtyCancelled,
+            @RequestParam(required = false) String note) {
+        service.updateRemainingQty(id, itemId, qtyRemainingActual, qtyCancelled, note);
         return ResponseEntity.noContent().build();
     }
 

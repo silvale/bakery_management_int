@@ -14,9 +14,12 @@ import com.bakery.api.inventory.entity.InventoryRequest;
 import com.bakery.api.inventory.entity.InventoryRequestLine;
 import com.bakery.api.inventory.entity.StockLot;
 import com.bakery.api.inventory.entity.StockMovement;
+import com.bakery.api.inventory.repository.InventoryRequestLineRepository;
 import com.bakery.api.inventory.repository.InventoryRequestRepository;
 import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.inventory.repository.StockMovementRepository;
+import com.bakery.api.pricing.entity.IngredientPrice;
+import com.bakery.api.pricing.repository.IngredientPriceRepository;
 import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.repository.ItemLookupRepository;
 import com.bakery.api.master.repository.ProductExpiryConfigRepository;
@@ -52,6 +55,7 @@ public class InventoryRequestService
     private static final String REF_TYPE = "INVENTORY_REQUEST";
 
     private final InventoryRequestRepository repository;
+    private final InventoryRequestLineRepository lineRepository;
     private final WarehouseRepository warehouseRepository;
     private final SupplierRepository supplierRepository;
     private final ItemLookupRepository itemRepository;
@@ -59,6 +63,7 @@ public class InventoryRequestService
     private final StockMovementRepository stockMovementRepository;
     private final ProductExpiryConfigRepository expiryConfigRepository;
     private final UnitConversionRepository unitConversionRepository;
+    private final IngredientPriceRepository ingredientPriceRepository;
     private final CommandRequestRepository commandRequestRepository;
     private final BakeryActorResolver actorResolver;
 
@@ -274,7 +279,32 @@ public class InventoryRequestService
             movement.setRefType(REF_TYPE);
             movement.setNote("Nhập hàng từ phiếu " + e.getCode());
             stockMovementRepository.save(movement);
+
+            // Lưu lịch sử giá (nếu có unitCost)
+            if (line.getUnitCost() != null && line.getUnitCost().compareTo(BigDecimal.ZERO) > 0) {
+                IngredientPrice priceRecord = new IngredientPrice();
+                priceRecord.setItem(item);
+                priceRecord.setSupplier(e.getSupplier());
+                priceRecord.setPrice(line.getUnitCost());
+                priceRecord.setEffectiveDate(receivedDate);
+                priceRecord.setLotRef(e.getCode());
+                ingredientPriceRepository.save(priceRecord);
+            }
         }
+    }
+
+    /**
+     * Cập nhật đơn giá cho 1 line trong phiếu nhập.
+     * Chỉ cho phép khi phiếu chưa được duyệt.
+     */
+    public void updateLineCost(UUID requestId, UUID lineId, BigDecimal unitCost) {
+        InventoryRequestLine line = lineRepository.findById(lineId)
+                .orElseThrow(() -> new ResourceNotFoundException("InventoryRequestLine", lineId));
+        if (!line.getInventoryRequest().getId().equals(requestId)) {
+            throw new IllegalArgumentException("Line không thuộc phiếu này");
+        }
+        line.setUnitCost(unitCost);
+        lineRepository.save(line);
     }
 
     /**

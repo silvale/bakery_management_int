@@ -52,4 +52,11 @@ public class StockLot extends BaseEntity {
 
     @Column(name = "expiry_date")
     private LocalDate expiryDate;
+
+    /**
+     * EX_CODE của lô bánh thành phẩm tại kho SHOP.
+     * Lấy từ product_mapping theo item + ngày sản xuất khi shop confirm giao nhận.
+     */
+    @Column(name = "ex_code", length = 50)
+    private String exCode;
 }

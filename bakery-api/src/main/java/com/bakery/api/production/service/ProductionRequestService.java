@@ -28,6 +28,9 @@ import com.bakery.api.production.entity.DeliveryRecord;
 import com.bakery.api.production.entity.ProductionAdjustment;
 import com.bakery.api.production.entity.ProductionRequest;
 import com.bakery.api.production.entity.ProductionRequestLine;
+import com.bakery.api.master.entity.ProductMapping;
+import com.bakery.api.master.repository.ProductMappingRepository;
+import com.bakery.api.master.util.ExCodeDecoder;
 import com.bakery.api.master.repository.UnitConversionRepository;
 import com.bakery.api.production.repository.DeliveryRecordRepository;
 import com.bakery.api.production.repository.ProductionAdjustmentRepository;
@@ -85,6 +88,7 @@ public class ProductionRequestService
     private final ProductionAdjustmentRepository adjustmentRepository;
     private final CommandRequestRepository commandRequestRepository;
     private final UnitConversionRepository unitConversionRepository;
+    private final ProductMappingRepository productMappingRepository;
     private final BakeryActorResolver actorResolver;
 
     // ── Framework wiring ─────────────────────────────────────────
@@ -239,6 +243,7 @@ public class ProductionRequestService
         r.setConfirmedAt(dr.getConfirmedAt());
         r.setConfirmedBy(dr.getConfirmedBy());
         r.setNote(dr.getNote());
+        r.setAssignedExCode(dr.getExCode());
         // Enrich thông tin sản phẩm từ ProductionRequestLine
         if (dr.getProductionRequestLine() != null) {
             var line = dr.getProductionRequestLine();
@@ -593,6 +598,30 @@ public class ProductionRequestService
         dr.setNote(note);
         deliveryRecordRepository.save(dr);
 
+        // ── Tra EX_CODE từ product_mapping ────────────────────────────────
+        {
+            var line = dr.getProductionRequestLine();
+            var item = line != null ? line.getProduct() : null;
+            var productionDate = line != null ? line.getProductionRequest().getProductionDate() : null;
+            if (item != null && productionDate != null) {
+                String groupCode = item.getItemGroup() != null ? item.getItemGroup().getCode() : null;
+                if (groupCode != null) {
+                    String matchedExCode = productMappingRepository.findByItemId(item.getId()).stream()
+                            .map(ProductMapping::getExCode)
+                            .filter(ec -> ExCodeDecoder.matchesProductionDate(ec, groupCode, productionDate))
+                            .findFirst()
+                            .orElse(null);
+                    if (matchedExCode != null) {
+                        dr.setExCode(matchedExCode);
+                        deliveryRecordRepository.save(dr);
+                        log.info("confirmDelivery: gán EX_CODE {} cho delivery {}", matchedExCode, deliveryRecordId);
+                    } else {
+                        log.warn("confirmDelivery: không tìm thấy EX_CODE cho item={} ngày={}", item.getCode(), productionDate);
+                    }
+                }
+            }
+        }
+
         // ── Chuyển kho KITCHEN → SHOP ─────────────────────────────────────
         if (qtyReceived.compareTo(BigDecimal.ZERO) > 0) {
             var line = dr.getProductionRequestLine();
@@ -641,6 +670,7 @@ public class ProductionRequestService
                 shopLot.setUnitCost(kLot.getUnitCost());
                 shopLot.setReceivedDate(productionDate);
                 if (kLot.getExpiryDate() != null) shopLot.setExpiryDate(kLot.getExpiryDate());
+                shopLot.setExCode(dr.getExCode()); // gán EX_CODE đã tra ở trên
                 StockLot savedShopLot = stockLotRepository.save(shopLot);
 
                 StockMovement inMv = new StockMovement();

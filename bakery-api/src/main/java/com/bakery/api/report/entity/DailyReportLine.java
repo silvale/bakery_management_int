@@ -80,12 +80,37 @@ public class DailyReportLine {
     private BigDecimal qtyCancelled;
 
     /**
-     * Chênh lệch hủy: qty_cancelled (NV nhập) - qty_remaining_actual (hệ thống tính).
+     * Chênh lệch hủy: qty_cancelled (NV nhập) - qty_system_cancel (hệ thống tính).
      * Âm = NV hủy ít hơn hệ thống dự kiến, dương = NV hủy nhiều hơn.
      * Chỉ có giá trị sau FINALIZE với sản phẩm hết HSD.
      */
     @Column(name = "discrepancy_cancel", precision = 10, scale = 3)
     private BigDecimal discrepancyCancel;
+
+    /** Tồn đầu ngày = qty_remaining_actual của ngày hôm trước cùng item */
+    @Column(name = "qty_remaining_opening", precision = 10, scale = 3)
+    private BigDecimal qtyRemainingOpening;
+
+    /**
+     * Bánh Hủy Hệ Thống = tổng SHOP stock_lot còn lại của các lô hết HSD trong ngày.
+     * Tính tại thời điểm FINALIZE.
+     */
+    @Column(name = "qty_system_cancel", precision = 10, scale = 3)
+    private BigDecimal qtySystemCancel;
+
+    /**
+     * Còn lại Hệ Thống = qty_remaining_opening + qty_received - qty_sold_pos - qty_system_cancel.
+     * Dùng để so sánh với qty_remaining_actual (NV nhập).
+     */
+    @Column(name = "qty_system_remaining", precision = 10, scale = 3)
+    private BigDecimal qtySystemRemaining;
+
+    /**
+     * Chênh lệch còn lại = qty_remaining_actual - qty_system_remaining.
+     * Âm = NV còn ít hơn HT dự kiến (mất hàng), dương = NV còn nhiều hơn (thừa).
+     */
+    @Column(name = "discrepancy_remaining", precision = 10, scale = 3)
+    private BigDecimal discrepancyRemaining;
 
     /** Snapshot giá vốn tại thời điểm chốt */
     @Column(name = "unit_cost", precision = 15, scale = 2)

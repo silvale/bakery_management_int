@@ -68,18 +68,24 @@ public class DailyReportService {
     private final BakeryActorResolver actorResolver;
     private final ProductionPlannerService productionPlannerService;
     private final com.bakery.framework.repository.CommandRequestRepository commandRequestRepository;
+    private final CancelRecordService cancelRecordService;
 
     // ── Get / Create ─────────────────────────────────────────────
 
     @Transactional
     public DailyReport getOrCreateDraft(LocalDate date) {
-        return reportRepository.findByReportDate(date).orElseGet(() -> {
-            DailyReport report = new DailyReport();
-            report.setReportDate(date);
-            report.setStatus(DailyReportStatus.DRAFT);
-            report.setCreatedBy(actorResolver.currentUserId());
-            return reportRepository.save(report);
+        boolean[] isNew = {false};
+        DailyReport report = reportRepository.findByReportDate(date).orElseGet(() -> {
+            isNew[0] = true;
+            DailyReport r = new DailyReport();
+            r.setReportDate(date);
+            r.setStatus(DailyReportStatus.DRAFT);
+            r.setCreatedBy(actorResolver.currentUserId());
+            return reportRepository.save(r);
         });
+        // Refresh cancel records mỗi lần init (cập nhật qty_opening/received nếu có delivery mới)
+        cancelRecordService.generateForReport(report);
+        return report;
     }
 
     public DailyReport getById(UUID id) {
@@ -96,16 +102,17 @@ public class DailyReportService {
         return lineRepository.findByDailyReportIdWithItem(reportId);
     }
 
-    // ── Nhân viên nhập qty_remaining_actual ─────────────────────
+    // ── Nhân viên nhập qty_remaining_actual + qty_cancelled ─────
 
     /**
-     * Nhân viên nhập số bánh còn lại cuối ngày tại cửa hàng, theo từng item.
+     * Nhân viên nhập 2 ô cuối ngày: số còn lại + số đã hủy.
      * Có thể gọi bất kỳ lúc nào trước khi FINALIZED.
      * Tự upsert: tạo line nếu chưa có.
+     * qty_sold_implied sẽ được tính chính xác trong finalize() (cần opening stock).
      */
     @Transactional
     public DailyReportLine updateRemainingQty(UUID reportId, UUID itemId,
-            BigDecimal qtyRemainingActual, String note) {
+            BigDecimal qtyRemainingActual, BigDecimal qtyCancelled, String note) {
         DailyReport report = getById(reportId);
         assertNotFinalized(report);
 
@@ -119,13 +126,11 @@ public class DailyReportService {
                 });
 
         line.setQtyRemainingActual(qtyRemainingActual);
+        if (qtyCancelled != null) {
+            line.setQtyCancelled(qtyCancelled);
+        }
         line.setNote(note);
         line.setUpdatedAt(Instant.now());
-
-        // Tính qty_sold_implied nếu đã có qty_received
-        if (line.getQtyReceived() != null && qtyRemainingActual != null) {
-            line.setQtySoldImplied(line.getQtyReceived().subtract(qtyRemainingActual));
-        }
 
         return lineRepository.save(line);
     }
@@ -185,7 +190,7 @@ public class DailyReportService {
                         BigDecimal::add
                 ));
 
-        // ── Bước 3: Load expiry config + tồn SHOP để tính cancel discrepancy ─
+        // ── Bước 3: Load expiry config + tồn SHOP ───────────────────
         Map<UUID, Integer> shelfDaysByItem = expiryConfigRepository.findAll().stream()
                 .filter(c -> c.getShelfDays() != null && c.getItem() != null)
                 .collect(Collectors.toMap(
@@ -193,7 +198,7 @@ public class DailyReportService {
                         ProductExpiryConfig::getShelfDays,
                         (a, b) -> a));
 
-        // Tồn SHOP trước khi NV huỷ = qty_system_cancel (nguồn đúng cho discrepancy)
+        // Tồn SHOP trước khi NV huỷ = qty_system_cancel
         List<Warehouse> finShopWarehouses = warehouseRepository.findByWarehouseType(WarehouseType.SHOP);
         final UUID finShopWarehouseId = finShopWarehouses.isEmpty() ? null : finShopWarehouses.get(0).getId();
         final Map<UUID, BigDecimal> shopStockByItem = finShopWarehouseId == null
@@ -208,6 +213,18 @@ public class DailyReportService {
                                 l -> l.getItem().getId(),
                                 Collectors.reducing(BigDecimal.ZERO,
                                         l -> l.getQtyRemaining(), BigDecimal::add)));
+
+        // ── Bước 3b: Opening stock từ ngày hôm trước ─────────────
+        // qty_remaining_actual của ngày trước = qty_remaining_opening hôm nay
+        Map<UUID, BigDecimal> openingByItem = reportRepository.findByReportDate(date.minusDays(1))
+                .map(prevReport -> lineRepository.findByDailyReportIdWithItem(prevReport.getId())
+                        .stream()
+                        .filter(l -> l.getItem() != null && l.getQtyRemainingActual() != null)
+                        .collect(Collectors.toMap(
+                                l -> l.getItem().getId(),
+                                DailyReportLine::getQtyRemainingActual,
+                                (a, b) -> a)))
+                .orElse(Collections.emptyMap());
 
         // ── Bước 4: Upsert DailyReportLine cho từng item ─────────
         for (Map.Entry<UUID, BigDecimal[]> entry : byItem.entrySet()) {
@@ -227,25 +244,18 @@ public class DailyReportService {
             line.setQtyProduced(qtyProduced);
             line.setQtyReceived(qtyReceived);
 
+            // Opening stock (tồn đầu ngày từ ngày hôm trước)
+            BigDecimal qtyRemainingOpening = openingByItem.getOrDefault(itemId, BigDecimal.ZERO);
+            line.setQtyRemainingOpening(qtyRemainingOpening);
+
             // POS qty
             BigDecimal qtySoldPos = posByItem.getOrDefault(itemId, BigDecimal.ZERO);
             line.setQtySoldPos(qtySoldPos);
 
-            // qty_sold_implied (nếu nhân viên đã nhập qty_remaining)
-            if (line.getQtyRemainingActual() != null) {
-                line.setQtySoldImplied(qtyReceived.subtract(line.getQtyRemainingActual()));
-            }
-
-            // Discrepancies POS / kitchen
-            line.setDiscrepancyKitchen(qtyProduced.subtract(qtyReceived));
-            if (line.getQtySoldImplied() != null) {
-                line.setDiscrepancyPos(line.getQtySoldImplied().subtract(qtySoldPos));
-            }
-
-            // Cancel discrepancy: chỉ tính cho sản phẩm hết HSD hôm nay
+            // System cancel: tồn SHOP của items hết HSD hôm nay
+            BigDecimal qtySystemCancel = BigDecimal.ZERO;
             Integer shelfDays = shelfDaysByItem.get(itemId);
             if (shelfDays != null) {
-                // Kiểm tra có batch nào hết hạn hôm nay không
                 boolean hasExpiringBatch = deliveries.stream()
                         .filter(dr -> dr.getProductionRequestLine() != null
                                 && dr.getProductionRequestLine().getProduct() != null
@@ -255,16 +265,37 @@ public class DailyReportService {
                                     .getProductionRequest().getProductionDate();
                             return !pd.plusDays(shelfDays).isAfter(date);
                         });
-                if (hasExpiringBatch && line.getQtyCancelled() != null) {
-                    // discrepancy = NV huỷ thực tế - HT dự kiến (tồn SHOP trước khi huỷ)
-                    // Tải tồn SHOP cho item này tại thời điểm finalize
-                    BigDecimal shopStock = shopStockByItem != null
-                            ? shopStockByItem.getOrDefault(itemId, BigDecimal.ZERO)
-                            : BigDecimal.ZERO;
-                    if (shopStock.compareTo(BigDecimal.ZERO) > 0) {
-                        line.setDiscrepancyCancel(line.getQtyCancelled().subtract(shopStock));
-                    }
+                if (hasExpiringBatch) {
+                    qtySystemCancel = shopStockByItem.getOrDefault(itemId, BigDecimal.ZERO);
                 }
+            }
+            line.setQtySystemCancel(qtySystemCancel);
+
+            // Còn lại HT = opening + received - sold_pos - system_cancel
+            BigDecimal qtySystemRemaining = qtyRemainingOpening.add(qtyReceived)
+                    .subtract(qtySoldPos).subtract(qtySystemCancel);
+            line.setQtySystemRemaining(qtySystemRemaining);
+
+            // Chênh lệch bếp (qty_produced - qty_received)
+            line.setDiscrepancyKitchen(qtyProduced.subtract(qtyReceived));
+
+            // qty_sold_implied = opening + received - remaining (công thức mới)
+            // discrepancy_pos = sold_implied - sold_pos
+            if (line.getQtyRemainingActual() != null) {
+                BigDecimal qtySoldImplied = qtyRemainingOpening.add(qtyReceived)
+                        .subtract(line.getQtyRemainingActual());
+                line.setQtySoldImplied(qtySoldImplied);
+                line.setDiscrepancyPos(qtySoldImplied.subtract(qtySoldPos));
+            }
+
+            // discrepancy_remaining = remaining_actual - system_remaining
+            if (line.getQtyRemainingActual() != null) {
+                line.setDiscrepancyRemaining(line.getQtyRemainingActual().subtract(qtySystemRemaining));
+            }
+
+            // discrepancy_cancel = cancelled_nv - system_cancel
+            if (line.getQtyCancelled() != null && qtySystemCancel.compareTo(BigDecimal.ZERO) > 0) {
+                line.setDiscrepancyCancel(line.getQtyCancelled().subtract(qtySystemCancel));
             }
 
             // Snapshot giá bán mới nhất
@@ -317,32 +348,6 @@ public class DailyReportService {
         }
 
         return saved;
-    }
-
-    // ── Nhân viên nhập qty_cancelled ────────────────────────────
-
-    /**
-     * Nhân viên nhập số bánh đã hủy cuối ngày.
-     * Tự upsert line nếu chưa có.
-     */
-    @Transactional
-    public DailyReportLine updateCancelledQty(UUID reportId, UUID itemId,
-            BigDecimal qtyCancelled) {
-        DailyReport report = getById(reportId);
-        assertNotFinalized(report);
-
-        DailyReportLine line = lineRepository
-                .findByDailyReportIdAndItemId(reportId, itemId)
-                .orElseGet(() -> {
-                    DailyReportLine l = new DailyReportLine();
-                    l.setDailyReport(report);
-                    l.setItem(itemRepository.getReferenceById(itemId));
-                    return l;
-                });
-
-        line.setQtyCancelled(qtyCancelled);
-        line.setUpdatedAt(Instant.now());
-        return lineRepository.save(line);
     }
 
     /**

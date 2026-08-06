@@ -55,4 +55,11 @@ public class DeliveryRecord extends BaseEntity {
 
     @Column(name = "note", length = 500)
     private String note;
+
+    /**
+     * EX_CODE từ product_mapping khớp với item + ngày sản xuất.
+     * Được gán tự động khi shop bấm xác nhận giao nhận.
+     */
+    @Column(name = "ex_code", length = 50)
+    private String exCode;
 }

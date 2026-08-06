@@ -36,6 +36,8 @@ import com.bakery.api.recipe.entity.Recipe;
 import com.bakery.api.recipe.entity.RecipeLine;
 import com.bakery.api.recipe.repository.RecipeLineRepository;
 import com.bakery.api.recipe.repository.RecipeRepository;
+import com.bakery.api.pricing.entity.IngredientPrice;
+import com.bakery.api.pricing.repository.IngredientPriceRepository;
 import com.bakery.framework.entity.ApprovalStatus;
 import com.bakery.framework.entity.InventoryRequestType;
 import com.bakery.framework.entity.WarehouseType;
@@ -75,6 +77,7 @@ public class ProductionIngredientService {
     private final InventoryRequestRepository inventoryRequestRepository;
     private final InventoryRequestLineRepository inventoryRequestLineRepository;
     private final UnitConversionRepository unitConversionRepository;
+    private final IngredientPriceRepository ingredientPriceRepository;
     private final BakeryActorResolver actorResolver;
 
     // ── Public ───────────────────────────────────────────────────
@@ -193,6 +196,15 @@ public class ProductionIngredientService {
 
         InventoryRequest saved = inventoryRequestRepository.save(request);
 
+        // Pre-load giá mới nhất cho tất cả NL thiếu (1 query)
+        List<UUID> itemIds = shortageItems.stream().map(n -> n.item.getId()).toList();
+        Map<UUID, BigDecimal> latestPriceByItem = ingredientPriceRepository
+                .findLatestByItemIds(itemIds).stream()
+                .collect(Collectors.toMap(
+                        ip -> ip.getItem().getId(),
+                        IngredientPrice::getPrice,
+                        (a, b) -> a));
+
         int order = 1;
         for (IngredientNeed need : shortageItems) {
             BigDecimal inMain    = mainStock.getOrDefault(need.item.getId(), BigDecimal.ZERO);
@@ -204,6 +216,9 @@ public class ProductionIngredientService {
             line.setItem(need.item);
             line.setQuantity(shortageQty);
             line.setUnit(need.item.getUnit() != null ? need.item.getUnit() : "kg");
+            // Giá ưu tiên: ingredient_price history → fallback item.unitCost
+            BigDecimal unitCost = latestPriceByItem.getOrDefault(need.item.getId(), need.item.getUnitCost());
+            line.setUnitCost(unitCost);
             line.setSortOrder(order++);
             line.setNote("Cần " + need.totalQty + ", tồn MAIN " + inMain + " + BẾP " + inKitchen + " → nhập thêm " + shortageQty);
             line.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
@@ -358,9 +373,17 @@ public class ProductionIngredientService {
                         groupQty = resolveGroupTargetQty(group, plan.getPlanDate());
                     }
                     if (groupQty.compareTo(BigDecimal.ZERO) > 0) {
-                        log.debug("expandBom: nhóm {} ({}) dùng base_recipe × {}",
-                                group.getCode(), group.getGroupType(), groupQty);
-                        expandRecipe(group.getBaseRecipe(), groupQty, result);
+                        // Nếu base_recipe thuộc về SemiProduct → ưu tiên active recipe của SP đó
+                        // (tránh dùng phiên bản công thức cũ khi group.base_recipe_id chưa được cập nhật)
+                        Recipe baseRecipe = group.getBaseRecipe();
+                        if (baseRecipe.getSemiProduct() != null) {
+                            baseRecipe = recipeRepository
+                                    .findBySemiProductIdAndActiveTrue(baseRecipe.getSemiProduct().getId())
+                                    .orElse(baseRecipe);
+                        }
+                        log.debug("expandBom: nhóm {} ({}) dùng base_recipe {} × {}",
+                                group.getCode(), group.getGroupType(), baseRecipe.getProduct() != null ? baseRecipe.getProduct().getName() : "", groupQty);
+                        expandRecipe(baseRecipe, groupQty, result);
                     }
                 }
                 // Với group-level expand: không expand per-item — skip luôn

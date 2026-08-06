@@ -24,4 +24,6 @@ public class DeliveryRecordResponse {
     private Instant confirmedAt;
     private String confirmedBy;
     private String note;
+    /** EX_CODE được gán khi shop xác nhận giao nhận (tra từ product_mapping) */
+    private String assignedExCode;
 }
