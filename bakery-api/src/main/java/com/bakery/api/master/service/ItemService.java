@@ -735,8 +735,8 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                 setCell(row, 1, ing.getCode(), dataStyle);                                        // Mã
                 setCell(row, 2, ing.getName(), dataStyle);                                        // Tên
                 setCell(row, 3, ing.getUnit(), centerStyle);                                      // Đơn vị
-                setNumCell(row, 4, ing.getUnitSize(), numStyle);                                  // Unit Size
-                setCell(row, 5, ing.getBaseUnit(), centerStyle);                                  // Base Unit
+//                setNumCell(row, 4, ing.getUnitSize(), numStyle);                                  // Unit Size
+//                setCell(row, 5, ing.getBaseUnit(), centerStyle);                                  // Base Unit
                 setCell(row, 6, ing.getItemGroup() != null ? ing.getItemGroup().getName() : "", dataStyle); // Nhóm
                 setCell(row, 7, ing.getDefaultSupplier() != null ? ing.getDefaultSupplier().getName() : "", dataStyle); // NCC
                 setNumCell(row, 8, ing.getUnitCost(), numStyle);                                  // Giá vốn
