@@ -3,21 +3,38 @@
  */
 package com.bakery.api.master.service;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.apache.poi.ss.usermodel.BorderStyle;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
+import org.apache.poi.ss.usermodel.IndexedColors;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+
 import com.bakery.api.master.dto.ItemRequest;
 import com.bakery.api.master.dto.ItemResponse;
 import com.bakery.api.master.entity.Ingredient;
 import com.bakery.api.master.entity.Item;
+import com.bakery.api.master.entity.ItemPackaging;
 import com.bakery.api.master.entity.Product;
 import com.bakery.api.master.entity.ProductExpiryConfig;
 import com.bakery.api.master.entity.SemiProduct;
 import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.repository.ItemLookupRepository;
+import com.bakery.api.master.repository.ItemPackagingRepository;
 import com.bakery.api.master.repository.ProductExpiryConfigRepository;
 import com.bakery.api.master.repository.SupplierRepository;
 import com.bakery.api.pricing.entity.IngredientPrice;
@@ -70,6 +87,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     private final ItemCostHelper itemCostHelper;
     private final ItemGroupRepository itemGroupRepository;
     private final ProductExpiryConfigRepository expiryConfigRepository;
+    private final ItemPackagingRepository packagingRepository;
     private final BakeryActorResolver actorResolver;
     private final CommandRequestRepository commandRequestRepository;
 
@@ -207,8 +225,6 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         r.setName(item.getName());
         r.setUnit(item.getUnit());
         r.setSplittable(item.isSplittable());
-        r.setUnitSize(item.getUnitSize());
-        r.setBaseUnit(item.getBaseUnit());
         r.setUnitCost(item.getUnitCost());
         if (item.getItemGroup() != null) {
             r.setItemGroup(new ReferenceValue(
@@ -232,6 +248,21 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                         r.setLastPrice(p.getPrice());
                         r.setLastPriceDate(p.getEffectiveDate());
                     });
+            // Packagings — luôn query riêng (không batch vì thường chỉ vài dòng/item)
+            List<ItemResponse.PackagingResponse> packagings = packagingRepository
+                    .findByItemIdOrderByQtyPerPackAsc(ing.getId())
+                    .stream()
+                    .map(p -> {
+                        ItemResponse.PackagingResponse pr = new ItemResponse.PackagingResponse();
+                        pr.setId(p.getId());
+                        pr.setCode(p.getCode());
+                        pr.setName(p.getName());
+                        pr.setQtyPerPack(p.getQtyPerPack());
+                        pr.setDefault(p.isDefault());
+                        return pr;
+                    })
+                    .toList();
+            r.setPackagings(packagings);
 
         } else if (item instanceof SemiProduct) {
             r.setItemType("SEMI_PRODUCT");
@@ -418,8 +449,6 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         e.setName(req.name());
         e.setUnit(req.unit());
         e.setSplittable(req.splittable());
-        e.setUnitSize(req.unitSize());
-        e.setBaseUnit(req.baseUnit() != null ? req.baseUnit().toUpperCase() : null);
         if (req.itemGroupId() != null) {
             ItemGroup ig = itemGroupRepository.findById(req.itemGroupId())
                     .orElseThrow(() -> new ResourceNotFoundException("ItemGroup", req.itemGroupId()));
@@ -535,6 +564,229 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
     private boolean hasRecipeLines(ItemRequest req) {
         return req.recipeLines() != null && !req.recipeLines().isEmpty();
+    }
+
+    // ── Packaging management ──────────────────────────────────────────────────
+
+    /**
+     * Upsert toàn bộ packaging list cho 1 item.
+     * Xóa hết cũ rồi insert mới — đơn giản và an toàn vì packaging không có FK từ bảng khác.
+     *
+     * <p>Rule: đúng 1 entry có {@code isDefault=true}. Nếu không có entry nào là default,
+     * tự động set entry đầu tiên (sort by qtyPerPack asc) làm default.
+     */
+    @Transactional
+    public List<ItemResponse.PackagingResponse> upsertPackagings(
+            UUID itemId, List<PackagingRequest> requests) {
+        Item item = repository.findById(itemId)
+                .orElseThrow(() -> new ResourceNotFoundException("Item", itemId));
+
+        packagingRepository.deleteByItemId(itemId);
+
+        boolean hasDefault = requests.stream().anyMatch(PackagingRequest::isDefault);
+        List<ItemPackaging> saved = new java.util.ArrayList<>();
+        for (int i = 0; i < requests.size(); i++) {
+            PackagingRequest req = requests.get(i);
+            ItemPackaging p = new ItemPackaging();
+            p.setItem(item);
+            p.setCode(req.code().toUpperCase());
+            p.setName(req.name());
+            p.setQtyPerPack(req.qtyPerPack());
+            p.setDefault(!hasDefault && i == 0 || req.isDefault());
+            saved.add(packagingRepository.save(p));
+        }
+
+        return saved.stream().map(p -> {
+            ItemResponse.PackagingResponse r = new ItemResponse.PackagingResponse();
+            r.setId(p.getId());
+            r.setCode(p.getCode());
+            r.setName(p.getName());
+            r.setQtyPerPack(p.getQtyPerPack());
+            r.setDefault(p.isDefault());
+            return r;
+        }).toList();
+    }
+
+    /**
+     * Gợi ý packaging phù hợp nhất cho số lượng cần mua.
+     *
+     * <p>Rule: ưu tiên packaging nhỏ nhất mà 1 pack đủ cover {@code neededQty}.
+     * Nếu không có packaging nào đủ 1 pack → trả về packaging default (user tự tính số lượng).
+     *
+     * @param itemId    ID của ingredient
+     * @param neededQty số lượng cần mua (tính theo item.unit = canonical)
+     * @return packaging được suggest + số pack cần mua
+     */
+    @Transactional(readOnly = true)
+    public SuggestPackagingResponse suggestPackaging(UUID itemId, BigDecimal neededQty) {
+        List<ItemPackaging> packagings = packagingRepository
+                .findByItemIdOrderByQtyPerPackAsc(itemId);
+        if (packagings.isEmpty()) {
+            return null;
+        }
+
+        // Tìm packaging nhỏ nhất mà qtyPerPack >= neededQty (1 pack đủ cover)
+        ItemPackaging suggested = packagings.stream()
+                .filter(p -> p.getQtyPerPack().compareTo(neededQty) >= 0)
+                .findFirst()
+                // Fallback: packaging default nếu không có pack nào đủ
+                .orElseGet(() -> packagings.stream()
+                        .filter(ItemPackaging::isDefault)
+                        .findFirst()
+                        .orElse(packagings.get(0)));
+
+        // Số pack cần mua = ceil(neededQty / qtyPerPack)
+        BigDecimal packs = neededQty
+                .divide(suggested.getQtyPerPack(), 4, java.math.RoundingMode.CEILING)
+                .setScale(0, java.math.RoundingMode.CEILING);
+
+        return new SuggestPackagingResponse(
+                suggested.getId(),
+                suggested.getCode(),
+                suggested.getName(),
+                suggested.getQtyPerPack(),
+                packs.intValue());
+    }
+
+    /** Request DTO cho upsert packagings — dùng nội bộ, không extend framework record. */
+    public record PackagingRequest(
+            String code,
+            String name,
+            BigDecimal qtyPerPack,
+            boolean isDefault) {}
+
+    /** Response DTO cho suggest-packaging endpoint. */
+    public record SuggestPackagingResponse(
+            java.util.UUID packagingId,
+            String code,
+            String name,
+            BigDecimal qtyPerPack,
+            int suggestedPacks) {}
+
+    // ── Export ────────────────────────────────────────────────────────────────
+
+    /**
+     * Xuất toàn bộ INGREDIENT ra file Excel (.xlsx).
+     * Cột: STT, Mã, Tên, Đơn vị, Unit Size, Base Unit, Nhóm, NCC mặc định,
+     *       Giá vốn, Giá nhập mới nhất, Ngày cập nhật giá.
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportIngredients() {
+        // Query tất cả ingredient — dùng Specification để tận dụng ItemLookupRepository
+        List<Item> ingredients = repository.findAll(
+                (root, query, cb) -> cb.equal(root.type(), Ingredient.class));
+
+        // Batch-fetch latest prices
+        List<UUID> ids = ingredients.stream().map(Item::getId).toList();
+        Map<UUID, IngredientPrice> priceMap = ids.isEmpty()
+                ? Map.of()
+                : ingredientPriceRepository.findLatestByItemIds(ids)
+                        .stream()
+                        .collect(Collectors.toMap(p -> p.getItem().getId(), p -> p));
+
+        try (Workbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("Nguyên Liệu");
+
+            // ── Header style ──────────────────────────────────────────────────
+            CellStyle headerStyle = wb.createCellStyle();
+            Font headerFont = wb.createFont();
+            headerFont.setBold(true);
+            headerFont.setColor(IndexedColors.WHITE.getIndex());
+            headerStyle.setFont(headerFont);
+            headerStyle.setFillForegroundColor(IndexedColors.DARK_BLUE.getIndex());
+            headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            headerStyle.setAlignment(HorizontalAlignment.CENTER);
+            applyBorderAll(headerStyle);
+
+            // ── Data style ────────────────────────────────────────────────────
+            CellStyle dataStyle = wb.createCellStyle();
+            applyBorderAll(dataStyle);
+
+            CellStyle numStyle = wb.createCellStyle();
+            applyBorderAll(numStyle);
+            numStyle.setAlignment(HorizontalAlignment.RIGHT);
+            org.apache.poi.ss.usermodel.DataFormat fmt = wb.createDataFormat();
+            numStyle.setDataFormat(fmt.getFormat("#,##0.####"));
+
+            CellStyle centerStyle = wb.createCellStyle();
+            applyBorderAll(centerStyle);
+            centerStyle.setAlignment(HorizontalAlignment.CENTER);
+
+            // ── Header row ────────────────────────────────────────────────────
+            String[] headers = {
+                "STT", "Mã", "Tên", "Đơn vị", "Unit Size", "Base Unit",
+                "Nhóm", "NCC mặc định", "Giá vốn", "Giá nhập mới nhất", "Ngày cập nhật giá"
+            };
+            Row headerRow = sheet.createRow(0);
+            for (int i = 0; i < headers.length; i++) {
+                Cell c = headerRow.createCell(i);
+                c.setCellValue(headers[i]);
+                c.setCellStyle(headerStyle);
+            }
+
+            // ── Data rows ─────────────────────────────────────────────────────
+            int rowNum = 1;
+            for (Item item : ingredients) {
+                Ingredient ing = (Ingredient) item;
+                IngredientPrice latestPrice = priceMap.get(ing.getId());
+
+                Row row = sheet.createRow(rowNum);
+                setCell(row, 0, rowNum, centerStyle);                                             // STT
+                setCell(row, 1, ing.getCode(), dataStyle);                                        // Mã
+                setCell(row, 2, ing.getName(), dataStyle);                                        // Tên
+                setCell(row, 3, ing.getUnit(), centerStyle);                                      // Đơn vị
+                setNumCell(row, 4, ing.getUnitSize(), numStyle);                                  // Unit Size
+                setCell(row, 5, ing.getBaseUnit(), centerStyle);                                  // Base Unit
+                setCell(row, 6, ing.getItemGroup() != null ? ing.getItemGroup().getName() : "", dataStyle); // Nhóm
+                setCell(row, 7, ing.getDefaultSupplier() != null ? ing.getDefaultSupplier().getName() : "", dataStyle); // NCC
+                setNumCell(row, 8, ing.getUnitCost(), numStyle);                                  // Giá vốn
+                setNumCell(row, 9, latestPrice != null ? latestPrice.getPrice() : null, numStyle); // Giá nhập
+                setCell(row, 10,                                                                   // Ngày cập nhật
+                        latestPrice != null && latestPrice.getEffectiveDate() != null
+                                ? latestPrice.getEffectiveDate().toString()
+                                : "",
+                        centerStyle);
+                rowNum++;
+            }
+
+            // ── Auto-size columns ─────────────────────────────────────────────
+            for (int i = 0; i < headers.length; i++) {
+                sheet.autoSizeColumn(i);
+                // Thêm padding tránh bị cắt chữ
+                sheet.setColumnWidth(i, Math.min(sheet.getColumnWidth(i) + 512, 10000));
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            wb.write(out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Không thể tạo file Excel", e);
+        }
+    }
+
+    private static void applyBorderAll(CellStyle style) {
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+    }
+
+    private static void setCell(Row row, int col, Object value, CellStyle style) {
+        Cell c = row.createCell(col);
+        c.setCellStyle(style);
+        if (value instanceof Number n) {
+            c.setCellValue(n.doubleValue());
+        } else if (value != null) {
+            c.setCellValue(value.toString());
+        }
+    }
+
+    private static void setNumCell(Row row, int col, BigDecimal value, CellStyle style) {
+        Cell c = row.createCell(col);
+        c.setCellStyle(style);
+        if (value != null) {
+            c.setCellValue(value.doubleValue());
+        }
     }
 
     private Class<? extends Item> resolveClass(String itemType) {

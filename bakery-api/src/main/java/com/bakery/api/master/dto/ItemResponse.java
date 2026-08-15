@@ -5,6 +5,7 @@ package com.bakery.api.master.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 import com.bakery.api.recipe.dto.RecipeResponse;
 import com.bakery.framework.dto.BaseResponse;
@@ -38,12 +39,12 @@ public class ItemResponse extends BaseResponse {
     private BigDecimal lastPrice;
     private LocalDate lastPriceDate;
 
-    // ── Splittable (common) ──────────────────────────────────────
-    /** true = có thể xuất lẻ; false = phải xuất theo bội số unitSize */
+    // ── Splittable ───────────────────────────────────────────────
+    /** true = có thể xuất lẻ; false = phải xuất nguyên pack */
     private boolean splittable = true;
-    private BigDecimal unitSize;
-    /** Đơn vị cơ sở: kết hợp unitSize để convert đóng gói → đvt cân đo. Vd: KG khi unit=HOP */
-    private String baseUnit;
+
+    /** Danh sách đóng gói (chỉ có giá trị với INGREDIENT) */
+    private List<PackagingResponse> packagings;
 
     // ── Product only ──────────────────────────────────────────
     /** Hạn sử dụng (ngày kể từ ngày SX). 0 = trong ngày. null = chưa cấu hình. */
@@ -59,4 +60,16 @@ public class ItemResponse extends BaseResponse {
     // ── Recipe (Product + SemiProduct) ────────────────────────
     /** Công thức active; nếu chưa active thì là phiên bản mới nhất */
     private RecipeResponse recipe;
+
+    /** DTO cho 1 packaging option của item. */
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    public static class PackagingResponse {
+        private java.util.UUID id;
+        private String code;
+        private String name;
+        private BigDecimal qtyPerPack;
+        private boolean isDefault;
+    }
 }

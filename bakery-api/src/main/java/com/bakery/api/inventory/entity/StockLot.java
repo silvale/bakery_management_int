@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 import com.bakery.api.master.entity.Item;
+import com.bakery.api.master.entity.ItemPackaging;
 import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.entity.Warehouse;
 import com.bakery.framework.entity.BaseEntity;
@@ -52,6 +53,21 @@ public class StockLot extends BaseEntity {
 
     @Column(name = "expiry_date")
     private LocalDate expiryDate;
+
+    /**
+     * Đóng gói của lô này — lưu để hiển thị "5 Bao 20kg" thay vì "100 KG".
+     * null nếu lot không có packaging (sản xuất nội bộ, điều chỉnh...).
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "packaging_id")
+    private ItemPackaging packaging;
+
+    /**
+     * Số pack nhận ban đầu (số bao, số thùng...).
+     * Dùng để hiển thị: "còn X bao" = qtyRemaining / packaging.qtyPerPack.
+     */
+    @Column(name = "qty_received_pack", precision = 15, scale = 4)
+    private BigDecimal qtyReceivedPack;
 
     /**
      * EX_CODE của lô bánh thành phẩm tại kho SHOP.

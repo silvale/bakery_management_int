@@ -272,18 +272,16 @@ public class RecipeCostService {
     // ── Unit conversion ───────────────────────────────────────────
 
     /**
-     * Tra hệ số quy đổi từ {@code lineUnit} (đơn vị công thức) sang {@code item.unit} (đơn vị giá).
+     * Tra hệ số quy đổi từ {@code lineUnit} (đơn vị công thức) sang {@code item.unit} (đơn vị canonical).
      *
      * <ul>
      *   <li>Cùng đơn vị → factor = 1, source = "SAME_UNIT"</li>
-     *   <li>Tìm thấy trực tiếp → factor, source = "CONVERTED"</li>
-     *   <li>Không trực tiếp nhưng item có baseUnit + unitSize → derive 2 bước,
-     *       source = "CONVERTED_VIA_BASE_UNIT"</li>
+     *   <li>Tìm thấy trong unit_conversion → factor, source = "CONVERTED"</li>
      *   <li>Không tìm thấy → factor = 1, source = "UNIT_MISMATCH"</li>
      * </ul>
      *
-     * <p>Ví dụ: lineUnit=G, item.unit=HOP, item.unitSize=5, item.baseUnit=KG
-     * → lookup(G→KG)=0.001 → factor = 0.001/5 = 0.0002 (1G = 0.0002 HOP)
+     * <p>Item.unit luôn là đơn vị canonical (KG, L, G...) kể từ V42.
+     * Packaging được xử lý riêng ở tầng nhập kho, không ảnh hưởng đến recipe cost.
      */
     private ConversionResult resolveConversionFactor(String lineUnit, Item item) {
         String itemUnit = item.getUnit();
@@ -293,21 +291,9 @@ public class RecipeCostService {
         if (lineUnit.equalsIgnoreCase(itemUnit)) {
             return new ConversionResult(BigDecimal.ONE, "SAME_UNIT");
         }
-        // Bước 1: tra trực tiếp
         Optional<UnitConversion> direct = unitConversionRepository.findConversion(lineUnit, itemUnit);
         if (direct.isPresent()) {
             return new ConversionResult(direct.get().getFactor(), "CONVERTED");
-        }
-        // Bước 2: fallback qua baseUnit (đơn vị đóng gói → đơn vị cơ sở)
-        String baseUnit = item.getBaseUnit();
-        java.math.BigDecimal unitSize = item.getUnitSize();
-        if (baseUnit != null && unitSize != null && unitSize.compareTo(java.math.BigDecimal.ZERO) > 0) {
-            Optional<UnitConversion> viaBase = unitConversionRepository.findConversion(lineUnit, baseUnit);
-            if (viaBase.isPresent()) {
-                BigDecimal derived = viaBase.get().getFactor()
-                        .divide(unitSize, 10, java.math.RoundingMode.HALF_UP);
-                return new ConversionResult(derived, "CONVERTED_VIA_BASE_UNIT");
-            }
         }
         return new ConversionResult(BigDecimal.ONE, "UNIT_MISMATCH");
     }

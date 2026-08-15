@@ -6,6 +6,7 @@ import org.hibernate.envers.RelationTargetAuditMode;
 import java.math.BigDecimal;
 
 import com.bakery.api.master.entity.Item;
+import com.bakery.api.master.entity.ItemPackaging;
 import com.bakery.framework.entity.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -42,6 +43,22 @@ public class InventoryRequestLine extends BaseEntity {
     /** Giá mua thực tế — chỉ điền khi PURCHASE */
     @Column(name = "unit_cost", precision = 15, scale = 4)
     private BigDecimal unitCost;
+
+    /**
+     * Đóng gói sử dụng khi mua (Bao 10kg, Thùng 12 chai...).
+     * null nếu không dùng packaging (xuất kho nội bộ, điều chỉnh...).
+     */
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "packaging_id")
+    private ItemPackaging packaging;
+
+    /**
+     * Số lượng mua theo đơn vị đóng gói (số bao, số thùng...).
+     * quantity = purchaseQty × packaging.qtyPerPack (BE tự tính khi tạo/approve).
+     */
+    @Column(name = "purchase_qty", precision = 15, scale = 4)
+    private BigDecimal purchaseQty;
 
     @Column(name = "sort_order")
     private Integer sortOrder;

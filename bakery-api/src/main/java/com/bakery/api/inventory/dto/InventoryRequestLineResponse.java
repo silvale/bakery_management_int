@@ -19,4 +19,20 @@ public class InventoryRequestLineResponse extends BaseResponse {
     private BigDecimal unitCost;
     private Integer sortOrder;
     private String note;
+
+    // ── Packaging ────────────────────────────────────────────────
+    /** Packaging đã chọn. null nếu không dùng packaging. */
+    private PackagingRef packaging;
+    /** Số lượng mua theo đơn vị đóng gói (số bao, số thùng...). */
+    private BigDecimal purchaseQty;
+    /** Thành tiền = purchaseQty × unitCost. */
+    private BigDecimal totalCost;
+
+    @Getter @Setter @NoArgsConstructor
+    public static class PackagingRef {
+        private java.util.UUID id;
+        private String code;
+        private String name;
+        private BigDecimal qtyPerPack;
+    }
 }

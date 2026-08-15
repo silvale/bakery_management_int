@@ -28,16 +28,9 @@ public record ItemRequest(
         // ── Ingredient only ──────────────────────────────────
         UUID defaultSupplierId,
 
-        // ── Splittable (Ingredient + Product) ────────────────
-        /** true (default) = có thể xuất lẻ. false = phải xuất theo bội số unitSize. */
+        // ── Splittable ────────────────────────────────────────
+        /** true (default) = có thể xuất lẻ. false = phải xuất nguyên pack. */
         boolean splittable,
-        /** Kích thước đơn vị tối thiểu không thể tách. Ví dụ: bơ 5kg/cục → 5.0 */
-        BigDecimal unitSize,
-        /**
-         * Đơn vị cơ sở tương ứng với unitSize. Ví dụ: unit=HOP, unitSize=5, baseUnit=KG
-         * → hệ thống hiểu 1 HOP = 5 KG khi tính cost / quy đổi công thức.
-         */
-        String baseUnit,
 
         // ── Product only ─────────────────────────────────────
         /** Hạn sử dụng (ngày). 0 = bánh tươi trong ngày. null = không set. */

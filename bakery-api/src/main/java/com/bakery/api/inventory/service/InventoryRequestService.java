@@ -20,8 +20,11 @@ import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.inventory.repository.StockMovementRepository;
 import com.bakery.api.pricing.entity.IngredientPrice;
 import com.bakery.api.pricing.repository.IngredientPriceRepository;
+import com.bakery.api.inventory.dto.InventoryRequestLineResponse.PackagingRef;
 import com.bakery.api.master.entity.Item;
+import com.bakery.api.master.entity.ItemPackaging;
 import com.bakery.api.master.repository.ItemLookupRepository;
+import com.bakery.api.master.repository.ItemPackagingRepository;
 import com.bakery.api.master.repository.ProductExpiryConfigRepository;
 import com.bakery.api.master.repository.SupplierRepository;
 import com.bakery.api.master.repository.UnitConversionRepository;
@@ -59,6 +62,7 @@ public class InventoryRequestService
     private final WarehouseRepository warehouseRepository;
     private final SupplierRepository supplierRepository;
     private final ItemLookupRepository itemRepository;
+    private final ItemPackagingRepository packagingRepository;
     private final StockLotRepository stockLotRepository;
     private final StockMovementRepository stockMovementRepository;
     private final ProductExpiryConfigRepository expiryConfigRepository;
@@ -180,6 +184,18 @@ public class InventoryRequestService
                     lr.setUnitCost(line.getUnitCost());
                     lr.setSortOrder(line.getSortOrder());
                     lr.setNote(line.getNote());
+                    lr.setPurchaseQty(line.getPurchaseQty());
+                    if (line.getPackaging() != null) {
+                        PackagingRef pRef = new PackagingRef();
+                        pRef.setId(line.getPackaging().getId());
+                        pRef.setCode(line.getPackaging().getCode());
+                        pRef.setName(line.getPackaging().getName());
+                        pRef.setQtyPerPack(line.getPackaging().getQtyPerPack());
+                        lr.setPackaging(pRef);
+                    }
+                    if (line.getPurchaseQty() != null && line.getUnitCost() != null) {
+                        lr.setTotalCost(line.getPurchaseQty().multiply(line.getUnitCost()));
+                    }
                     return lr;
                 })
                 .toList();
@@ -258,6 +274,19 @@ public class InventoryRequestService
                     .map(cfg -> receivedDate.plusDays(cfg.getShelfDays()))
                     .orElse(null);
 
+            // Tính unitCost per canonical unit (item.unit):
+            //   Nếu có packaging: unitCost/bao = line.unitCost → cost/KG = line.unitCost / packaging.qtyPerPack
+            //   Nếu không có packaging: line.unitCost đã là per item.unit
+            BigDecimal unitCostPerCanonical;
+            if (line.getPackaging() != null && line.getPackaging().getQtyPerPack() != null
+                    && line.getPackaging().getQtyPerPack().compareTo(BigDecimal.ZERO) > 0
+                    && line.getUnitCost() != null) {
+                unitCostPerCanonical = line.getUnitCost()
+                        .divide(line.getPackaging().getQtyPerPack(), 4, java.math.RoundingMode.HALF_UP);
+            } else {
+                unitCostPerCanonical = line.getUnitCost() != null ? line.getUnitCost() : BigDecimal.ZERO;
+            }
+
             // Tạo StockLot — qty luôn ở item.unit
             StockLot lot = new StockLot();
             lot.setItem(item);
@@ -265,9 +294,12 @@ public class InventoryRequestService
             lot.setWarehouse(e.getTargetWarehouse());
             lot.setQtyInitial(qtyInItemUnit);
             lot.setQtyRemaining(qtyInItemUnit);
-            lot.setUnitCost(line.getUnitCost() != null ? line.getUnitCost() : BigDecimal.ZERO);
+            lot.setUnitCost(unitCostPerCanonical);
             lot.setReceivedDate(receivedDate);
             lot.setExpiryDate(expiryDate);
+            // Lưu packaging để hiển thị "X Bao 20kg" trên màn hình kho
+            lot.setPackaging(line.getPackaging());
+            lot.setQtyReceivedPack(line.getPurchaseQty());
             StockLot savedLot = stockLotRepository.save(lot);
 
             // Tạo StockMovement(IN)
@@ -476,8 +508,20 @@ public class InventoryRequestService
             line.setInventoryRequest(e);
             line.setItem(itemRepository.findById(lr.itemId())
                     .orElseThrow(() -> new ResourceNotFoundException("Item", lr.itemId())));
-            line.setQuantity(lr.quantity());
-            line.setUnit(lr.unit());
+            // Nếu có packaging: tính qty canonical = purchaseQty × qtyPerPack
+            ItemPackaging packaging = null;
+            if (lr.packagingId() != null) {
+                packaging = packagingRepository.findById(lr.packagingId()).orElse(null);
+            }
+            line.setPackaging(packaging);
+            line.setPurchaseQty(lr.purchaseQty());
+
+            BigDecimal qty = lr.quantity();
+            if (packaging != null && lr.purchaseQty() != null) {
+                qty = lr.purchaseQty().multiply(packaging.getQtyPerPack());
+            }
+            line.setQuantity(qty != null ? qty : BigDecimal.ZERO);
+            line.setUnit(packaging != null ? line.getItem().getUnit() : lr.unit());
             line.setUnitCost(lr.unitCost());
             line.setSortOrder(lr.sortOrder() != null ? lr.sortOrder() : i + 1);
             line.setNote(lr.note());
@@ -485,14 +529,21 @@ public class InventoryRequestService
         }
     }
 
+    /**
+     * Làm tròn qty lên nếu item không tách lẻ (splittable=false).
+     * Với thiết kế packaging mới, "bội số tối thiểu" được xác định qua packaging default.
+     * Nếu không có packaging → trả về qty nguyên gốc (không làm tròn).
+     */
     private BigDecimal roundUpToUnitSize(BigDecimal qty, com.bakery.api.master.entity.Item item) {
-        if (item.isSplittable() || item.getUnitSize() == null
-                || item.getUnitSize().compareTo(BigDecimal.ZERO) <= 0) {
-            return qty;
-        }
-        BigDecimal unitSize = item.getUnitSize();
-        // Math.ceil(qty / unitSize) * unitSize
-        BigDecimal units = qty.divide(unitSize, 0, java.math.RoundingMode.CEILING);
-        return units.multiply(unitSize);
+        if (item.isSplittable()) return qty;
+        // Lấy packaging default để biết bội số tối thiểu
+        return packagingRepository.findByItemIdAndIsDefaultTrue(item.getId())
+                .map(pkg -> {
+                    BigDecimal unitSize = pkg.getQtyPerPack();
+                    if (unitSize.compareTo(BigDecimal.ZERO) <= 0) return qty;
+                    BigDecimal units = qty.divide(unitSize, 0, java.math.RoundingMode.CEILING);
+                    return units.multiply(unitSize);
+                })
+                .orElse(qty);
     }
 }

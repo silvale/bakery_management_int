@@ -54,25 +54,6 @@ public abstract class Item extends BaseEntity {
     private ItemGroup itemGroup;
 
     /**
-     * Kích thước đơn vị tối thiểu không thể tách lẻ.
-     * Chỉ có ý nghĩa khi isSplittable = false.
-     * Ví dụ: bơ 5kg/cục → unitSize = 5.0
-     *
-     * <p>Kết hợp với {@code baseUnit}: nếu {@code unit=HOP}, {@code unitSize=5}, {@code baseUnit=KG}
-     * thì hệ thống hiểu 1 HOP = 5 KG, cho phép tự động quy đổi sang G/ML...
-     */
-    @Column(name = "unit_size", precision = 15, scale = 4)
-    private java.math.BigDecimal unitSize;
-
-    /**
-     * Đơn vị cơ sở tương ứng với unitSize.
-     * Ví dụ: unit=HOP, unitSize=5, baseUnit=KG → 1 HOP = 5 KG.
-     * Chỉ cần điền khi unit là đơn vị đóng gói (HOP, GOI, THUNG...).
-     */
-    @Column(name = "base_unit", length = 20)
-    private String baseUnit;
-
-    /**
      * true (default) = có thể xuất lẻ từ kho tổng.
      * false = phải xuất theo bội số của unitSize.
      */
