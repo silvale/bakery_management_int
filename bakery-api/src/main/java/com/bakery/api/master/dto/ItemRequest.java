@@ -26,8 +26,6 @@ public record ItemRequest(
         UUID itemGroupId,
 
         // ── Ingredient only ──────────────────────────────────
-        /** Code value key: INGREDIENT_TYPE */
-        String ingredientType,
         UUID defaultSupplierId,
 
         // ── Splittable (Ingredient + Product) ────────────────
@@ -35,10 +33,13 @@ public record ItemRequest(
         boolean splittable,
         /** Kích thước đơn vị tối thiểu không thể tách. Ví dụ: bơ 5kg/cục → 5.0 */
         BigDecimal unitSize,
+        /**
+         * Đơn vị cơ sở tương ứng với unitSize. Ví dụ: unit=HOP, unitSize=5, baseUnit=KG
+         * → hệ thống hiểu 1 HOP = 5 KG khi tính cost / quy đổi công thức.
+         */
+        String baseUnit,
 
         // ── Product only ─────────────────────────────────────
-        /** Code value key: PRODUCT_TYPE */
-        String productType,
         /** Hạn sử dụng (ngày). 0 = bánh tươi trong ngày. null = không set. */
         Integer shelfDays,
 

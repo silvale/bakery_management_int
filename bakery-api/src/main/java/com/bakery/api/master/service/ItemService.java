@@ -169,7 +169,6 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             case "INGREDIENT" -> {
                 Ingredient e = new Ingredient();
                 applyCommonFields(e, req);
-                e.setIngredientType(req.ingredientType());
                 applySupplier(e, req);
                 yield e;
             }
@@ -181,7 +180,6 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             case "PRODUCT" -> {
                 Product e = new Product();
                 applyCommonFields(e, req);
-                applyProductFields(e, req);
                 yield e;
             }
             default -> throw new IllegalArgumentException("Unknown itemType: " + req.itemType());
@@ -194,12 +192,9 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     protected void applyUpdate(Item e, ItemRequest req) {
         applyCommonFields(e, req);
         if (e instanceof Ingredient ing) {
-            ing.setIngredientType(req.ingredientType());
             applySupplier(ing, req);
-        } else if (e instanceof Product prod) {
-            applyProductFields(prod, req);
         }
-        // SemiProduct: chỉ có common fields, không cần xử lý thêm
+        // SemiProduct/Product: chỉ có common fields, không cần xử lý thêm
     }
 
     // ── toResponse ────────────────────────────────────────────────────────────
@@ -213,6 +208,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         r.setUnit(item.getUnit());
         r.setSplittable(item.isSplittable());
         r.setUnitSize(item.getUnitSize());
+        r.setBaseUnit(item.getBaseUnit());
         r.setUnitCost(item.getUnitCost());
         if (item.getItemGroup() != null) {
             r.setItemGroup(new ReferenceValue(
@@ -221,7 +217,6 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
         if (item instanceof Ingredient ing) {
             r.setItemType("INGREDIENT");
-            r.setIngredientType(ing.getIngredientType());
             if (ing.getDefaultSupplier() != null) {
                 r.setDefaultSupplier(new ReferenceValue(
                         ing.getDefaultSupplier().getCode(),
@@ -246,7 +241,6 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
         } else if (item instanceof Product prod) {
             r.setItemType("PRODUCT");
-            r.setProductType(prod.getProductType());
             expiryConfigRepository.findByItemId(item.getId())
                     .ifPresent(cfg -> r.setShelfDays(cfg.getShelfDays()));
             recipeRepository.findByProductIdAndActiveTrue(item.getId())
@@ -425,6 +419,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         e.setUnit(req.unit());
         e.setSplittable(req.splittable());
         e.setUnitSize(req.unitSize());
+        e.setBaseUnit(req.baseUnit() != null ? req.baseUnit().toUpperCase() : null);
         if (req.itemGroupId() != null) {
             ItemGroup ig = itemGroupRepository.findById(req.itemGroupId())
                     .orElseThrow(() -> new ResourceNotFoundException("ItemGroup", req.itemGroupId()));
@@ -437,10 +432,6 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         if ("INGREDIENT".equalsIgnoreCase(req.itemType())) {
             e.setUnitCost(req.unitCost());
         }
-    }
-
-    private void applyProductFields(Product e, ItemRequest req) {
-        e.setProductType(req.productType());
     }
 
     private void applySupplier(Ingredient e, ItemRequest req) {

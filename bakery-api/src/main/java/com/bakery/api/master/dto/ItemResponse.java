@@ -34,8 +34,6 @@ public class ItemResponse extends BaseResponse {
     private ReferenceValue itemGroup;
 
     // ── Ingredient only ───────────────────────────────────────
-    /** Code value key: INGREDIENT_TYPE */
-    private String ingredientType;
     private ReferenceValue defaultSupplier;
     private BigDecimal lastPrice;
     private LocalDate lastPriceDate;
@@ -44,10 +42,10 @@ public class ItemResponse extends BaseResponse {
     /** true = có thể xuất lẻ; false = phải xuất theo bội số unitSize */
     private boolean splittable = true;
     private BigDecimal unitSize;
+    /** Đơn vị cơ sở: kết hợp unitSize để convert đóng gói → đvt cân đo. Vd: KG khi unit=HOP */
+    private String baseUnit;
 
     // ── Product only ──────────────────────────────────────────
-    /** Code value key: PRODUCT_TYPE */
-    private String productType;
     /** Hạn sử dụng (ngày kể từ ngày SX). 0 = trong ngày. null = chưa cấu hình. */
     private Integer shelfDays;
 

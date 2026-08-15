@@ -428,7 +428,7 @@ public class ProductionIngredientService {
             if (item == null) continue;
 
             // Quy đổi đơn vị: line.unit (đvt công thức, e.g. G) → item.unit (đvt kho, e.g. KG)
-            BigDecimal convFactor = resolveConversionFactor(rl.getUnit(), item.getUnit());
+            BigDecimal convFactor = resolveConversionFactor(rl.getUnit(), item);
             BigDecimal needed = rl.getQuantity().multiply(multiplier).multiply(convFactor);
 
             if (item instanceof SemiProduct) {
@@ -448,20 +448,34 @@ public class ProductionIngredientService {
     }
 
     /**
-     * Tra hệ số quy đổi từ {@code lineUnit} (đơn vị công thức) sang {@code itemUnit} (đơn vị kho).
+     * Tra hệ số quy đổi từ {@code lineUnit} (đơn vị công thức) sang {@code item.unit} (đơn vị kho).
      * Ví dụ: G → KG = 0.001, ML → L = 0.001.
-     * Cùng đơn vị hoặc không tìm thấy → 1 (log warning).
+     *
+     * <p>Fallback: nếu không tìm thấy cặp trực tiếp nhưng item có baseUnit + unitSize,
+     * derive qua 2 bước: factor(lineUnit→baseUnit) / unitSize.
+     * Ví dụ: lineUnit=G, item.unit=HOP, item.unitSize=5, item.baseUnit=KG
+     * → factor = 0.001 / 5 = 0.0002.
      */
-    private BigDecimal resolveConversionFactor(String lineUnit, String itemUnit) {
+    private BigDecimal resolveConversionFactor(String lineUnit, Item item) {
+        String itemUnit = item.getUnit();
         if (lineUnit == null || itemUnit == null) return BigDecimal.ONE;
         if (lineUnit.equalsIgnoreCase(itemUnit)) return BigDecimal.ONE;
-        return unitConversionRepository.findConversion(lineUnit, itemUnit)
-                .map(uc -> uc.getFactor())
-                .orElseGet(() -> {
-                    log.warn("Không tìm thấy unit conversion: {} → {} — dùng factor=1, kết quả có thể sai!",
-                            lineUnit, itemUnit);
-                    return BigDecimal.ONE;
-                });
+        // Bước 1: tra trực tiếp
+        var direct = unitConversionRepository.findConversion(lineUnit, itemUnit);
+        if (direct.isPresent()) return direct.get().getFactor();
+        // Bước 2: fallback qua baseUnit
+        String baseUnit = item.getBaseUnit();
+        BigDecimal unitSize = item.getUnitSize();
+        if (baseUnit != null && unitSize != null && unitSize.compareTo(BigDecimal.ZERO) > 0) {
+            var viaBase = unitConversionRepository.findConversion(lineUnit, baseUnit);
+            if (viaBase.isPresent()) {
+                return viaBase.get().getFactor()
+                        .divide(unitSize, 10, java.math.RoundingMode.HALF_UP);
+            }
+        }
+        log.warn("Không tìm thấy unit conversion: {} → {} (baseUnit={}) — dùng factor=1, kết quả có thể sai!",
+                lineUnit, itemUnit, baseUnit);
+        return BigDecimal.ONE;
     }
 
     private Map<UUID, BigDecimal> currentMainStock(Warehouse mainWarehouse) {
@@ -523,7 +537,7 @@ public class ProductionIngredientService {
                 List<RecipeLine> rls = recipeLineRepository.findByRecipeIdOrderBySortOrderAsc(recipe.getId());
                 for (RecipeLine rl : rls) {
                     if (rl.getItem() == null || !rl.getItem().getId().equals(semiItemId)) continue;
-                    BigDecimal conv = resolveConversionFactor(rl.getUnit(), semiItem.getUnit());
+                    BigDecimal conv = resolveConversionFactor(rl.getUnit(), semiItem);
                     neededByPlan = neededByPlan.add(rl.getQuantity().multiply(l.getPlannedQty()).multiply(conv));
                 }
             }
@@ -769,7 +783,7 @@ public class ProductionIngredientService {
             for (RecipeLine rl : recipeLines) {
                 if (rl.getItem() == null || !(rl.getItem() instanceof SemiProduct semi)) continue;
 
-                BigDecimal conv = resolveConversionFactor(rl.getUnit(), semi.getUnit());
+                BigDecimal conv = resolveConversionFactor(rl.getUnit(), semi);
                 BigDecimal needed = rl.getQuantity().multiply(multiplier).multiply(conv);
 
                 result.merge(semi.getId(),

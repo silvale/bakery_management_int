@@ -8,6 +8,7 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -119,9 +120,8 @@ public class RecipeCostService {
                 PriceResolution resolved = resolveIngredientPrice(lineItem.getId());
 
                 // Quy đổi đơn vị: line.unit (đvt công thức) → item.unit (đvt giá nhập)
-                String lineUnit  = line.getUnit();
-                String itemUnit  = lineItem.getUnit();
-                ConversionResult conv = resolveConversionFactor(lineUnit, itemUnit);
+                String lineUnit = line.getUnit();
+                ConversionResult conv = resolveConversionFactor(lineUnit, lineItem);
 
                 // cost = qty(line_unit) × factor(line→item) × unit_cost(per item_unit)
                 BigDecimal effectiveUnitPrice = resolved.unitPrice().multiply(conv.factor());
@@ -272,23 +272,43 @@ public class RecipeCostService {
     // ── Unit conversion ───────────────────────────────────────────
 
     /**
-     * Tra hệ số quy đổi từ {@code lineUnit} (đơn vị công thức) sang {@code itemUnit} (đơn vị giá).
+     * Tra hệ số quy đổi từ {@code lineUnit} (đơn vị công thức) sang {@code item.unit} (đơn vị giá).
      *
      * <ul>
      *   <li>Cùng đơn vị → factor = 1, source = "SAME_UNIT"</li>
-     *   <li>Tìm thấy trong bảng → factor, source = "CONVERTED"</li>
-     *   <li>Không tìm thấy → factor = 1, source = "UNIT_MISMATCH" (đánh dấu cost không chính xác)</li>
+     *   <li>Tìm thấy trực tiếp → factor, source = "CONVERTED"</li>
+     *   <li>Không trực tiếp nhưng item có baseUnit + unitSize → derive 2 bước,
+     *       source = "CONVERTED_VIA_BASE_UNIT"</li>
+     *   <li>Không tìm thấy → factor = 1, source = "UNIT_MISMATCH"</li>
      * </ul>
+     *
+     * <p>Ví dụ: lineUnit=G, item.unit=HOP, item.unitSize=5, item.baseUnit=KG
+     * → lookup(G→KG)=0.001 → factor = 0.001/5 = 0.0002 (1G = 0.0002 HOP)
      */
-    private ConversionResult resolveConversionFactor(String lineUnit, String itemUnit) {
+    private ConversionResult resolveConversionFactor(String lineUnit, Item item) {
+        String itemUnit = item.getUnit();
         if (lineUnit == null || itemUnit == null) {
             return new ConversionResult(BigDecimal.ONE, "UNIT_MISMATCH");
         }
         if (lineUnit.equalsIgnoreCase(itemUnit)) {
             return new ConversionResult(BigDecimal.ONE, "SAME_UNIT");
         }
-        return unitConversionRepository.findConversion(lineUnit, itemUnit)
-                .map(uc -> new ConversionResult(uc.getFactor(), "CONVERTED"))
-                .orElse(new ConversionResult(BigDecimal.ONE, "UNIT_MISMATCH"));
+        // Bước 1: tra trực tiếp
+        Optional<UnitConversion> direct = unitConversionRepository.findConversion(lineUnit, itemUnit);
+        if (direct.isPresent()) {
+            return new ConversionResult(direct.get().getFactor(), "CONVERTED");
+        }
+        // Bước 2: fallback qua baseUnit (đơn vị đóng gói → đơn vị cơ sở)
+        String baseUnit = item.getBaseUnit();
+        java.math.BigDecimal unitSize = item.getUnitSize();
+        if (baseUnit != null && unitSize != null && unitSize.compareTo(java.math.BigDecimal.ZERO) > 0) {
+            Optional<UnitConversion> viaBase = unitConversionRepository.findConversion(lineUnit, baseUnit);
+            if (viaBase.isPresent()) {
+                BigDecimal derived = viaBase.get().getFactor()
+                        .divide(unitSize, 10, java.math.RoundingMode.HALF_UP);
+                return new ConversionResult(derived, "CONVERTED_VIA_BASE_UNIT");
+            }
+        }
+        return new ConversionResult(BigDecimal.ONE, "UNIT_MISMATCH");
     }
 }
