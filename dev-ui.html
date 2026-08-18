@@ -1080,7 +1080,7 @@
     async function approveItem(id) { try { await api('POST', `/api/v1/items/${id}/approve`); toast('Đã approve'); } finally { loadItems(); } }
 
     // Item Form
-    let recipeLines = [];
+    let recipeLines = []; let packagings = [];
     async function pageItemForm(item = {}) {
       await Promise.all([loadAllItems(), loadAllSuppliers(), loadAllUnits()]);
       const isEdit = !!item.id;
@@ -1113,8 +1113,6 @@
       <div class="field" id="f-shelf-wrap" style="${item.itemType === 'PRODUCT' ? '' : 'display:none'}">
         <label>Hạn sử dụng (ngày) <small style="color:#94a3b8">0 = trong ngày</small></label>
         <input id="f-shelf" type="number" min="0" value="${item.shelfDays ?? ''}" placeholder="1"></div>
-      <div class="field" id="f-ingtype-wrap" style="${item.itemType === 'INGREDIENT' ? '' : 'display:none'}">
-        <label>Ingredient Type</label><input id="f-ingtype" value="${item.ingredientType ?? ''}" placeholder="DRY, WET..."></div>
       <div class="field" id="f-sup-wrap" style="${item.itemType === 'INGREDIENT' ? '' : 'display:none'}">
         <label>Nhà cung cấp</label>
         <select id="f-sup">
@@ -1129,10 +1127,26 @@
         <input value="${item.unitCost ? fmt(item.unitCost) + 'đ' : '—'}" readonly style="background:#f8fafc;color:#475569"></div>
       <div class="field" style="display:flex;align-items:center;gap:12px">
         <label style="margin:0"><input type="checkbox" id="f-splittable" ${item.splittable === false ? '' : 'checked'} style="margin-right:6px">Có thể xuất lẻ</label>
-        <div style="display:flex;align-items:center;gap:6px">
-          <label style="margin:0;white-space:nowrap;font-size:13px">Unit size</label>
-          <input id="f-unitsize" type="number" step="0.001" value="${item.unitSize ?? ''}" placeholder="5.0" style="width:80px">
-        </div>
+      </div>
+    </div>
+    <div id="packaging-section" style="${item.itemType === 'INGREDIENT' ? '' : 'display:none'}">
+      <hr class="divider">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="card-title" style="margin:0">📦 Đóng gói <small style="color:#94a3b8;font-size:12px;font-weight:400">(đơn vị: ${item.unit ?? '?'})</small></div>
+        <button class="btn btn-ghost btn-sm" onclick="addPackagingRow()">+ Thêm</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:#f8fafc">
+          <th style="text-align:left;padding:5px 8px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0">Mã</th>
+          <th style="text-align:left;padding:5px 8px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0">Tên đóng gói</th>
+          <th style="text-align:right;padding:5px 8px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0">Qty/pack</th>
+          <th style="text-align:center;padding:5px 8px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0">Mặc định</th>
+          <th style="border-bottom:1px solid #e2e8f0;width:32px"></th>
+        </tr></thead>
+        <tbody id="packaging-tbody"></tbody>
+      </table>
+      <div style="margin-top:10px">
+        <button class="btn btn-primary btn-sm" onclick="savePackagings('${item.id ?? ''}')">💾 Lưu đóng gói</button>
       </div>
     </div>
     <div id="recipe-section" style="${item.itemType === 'PRODUCT' || item.itemType === 'SEMI_PRODUCT' ? '' : 'display:none'}">
@@ -1153,6 +1167,8 @@
     </div>
   </div>`;
       renderRL();
+      packagings = (item.packagings ?? []).map(p => ({ id: p.id, code: p.code, name: p.name, qtyPerPack: p.qtyPerPack, isDefault: !!p.isDefault }));
+      if (isEdit && item.itemType === 'INGREDIENT') setTimeout(renderPackagings, 0);
     }
     function onItemTypeChange() {
       const t = document.getElementById('f-type').value;
@@ -1162,6 +1178,8 @@
       document.getElementById('f-unitcost-ing-wrap').style.display = t === 'INGREDIENT' ? '' : 'none';
       document.getElementById('f-unitcost-ro-wrap').style.display = (t === 'PRODUCT' || t === 'SEMI_PRODUCT') ? '' : 'none';
       document.getElementById('recipe-section').style.display = (t === 'PRODUCT' || t === 'SEMI_PRODUCT') ? '' : 'none';
+      const pkgSec = document.getElementById('packaging-section');
+      if (pkgSec) pkgSec.style.display = t === 'INGREDIENT' ? '' : 'none';
     }
     function renderRL() {
       const tb = document.getElementById('recipe-tbody'); if (!tb) return;
@@ -1192,8 +1210,6 @@
         name: document.getElementById('f-name').value.trim(), unit: document.getElementById('f-unit').value.trim(),
         itemGroupId: igVal || null,
         splittable: document.getElementById('f-splittable')?.checked ?? true,
-        unitSize: document.getElementById('f-unitsize')?.value ? +document.getElementById('f-unitsize').value : null,
-        ingredientType: document.getElementById('f-ingtype')?.value.trim() || null,
         defaultSupplierId: document.getElementById('f-sup')?.value || null,
         unitCost: itemType === 'INGREDIENT' && document.getElementById('f-unitcost')?.value ? +document.getElementById('f-unitcost').value : null,
         shelfDays: document.getElementById('f-shelf')?.value !== '' && document.getElementById('f-shelf')?.value != null ? +document.getElementById('f-shelf').value : null,
@@ -1201,8 +1217,39 @@
         recipeLines: recipeLines.filter(l => l.itemId).map(l => ({ itemId: l.itemId, quantity: +l.qty, unit: l.unit, sortOrder: l.sort }))
       };
       if (!body.code || !body.name || !body.unit) { toast('Code, Tên, Đơn vị là bắt buộc', 'err'); return; }
-      id ? await api('PUT', `/api/v1/items/${id}`, body) : await api('POST', '/api/v1/items', body);
+      const savedRes = id ? await api('PUT', `/api/v1/items/${id}`, body) : await api('POST', '/api/v1/items', body);
+      const savedId = id || savedRes?.id;
+      if (itemType === 'INGREDIENT' && savedId && packagings.length > 0) {
+        await savePackagings(savedId);
+      }
       toast(id ? 'Đã cập nhật' : 'Đã tạo sản phẩm'); nav('items-list');
+    }
+    function renderPackagings() {
+      const tb = document.getElementById('packaging-tbody'); if (!tb) return;
+      if (!packagings.length) {
+        tb.innerHTML = `<tr><td colspan="5" style="padding:12px 8px;color:#94a3b8;text-align:center;font-size:12px">Chưa có đóng gói — nhấn "+ Thêm" để bắt đầu</td></tr>`;
+        return;
+      }
+      tb.innerHTML = packagings.map((p, i) => `<tr style="border-bottom:1px solid #f1f5f9">
+        <td style="padding:4px 4px"><input value="${p.code ?? ''}" oninput="packagings[${i}].code=this.value" placeholder="BAO10" style="width:72px"></td>
+        <td style="padding:4px 4px"><input value="${p.name ?? ''}" oninput="packagings[${i}].name=this.value" placeholder="Bao 10kg" style="width:150px"></td>
+        <td style="padding:4px 4px;text-align:right"><input type="number" step="0.001" value="${p.qtyPerPack ?? ''}" oninput="packagings[${i}].qtyPerPack=+this.value" placeholder="10" style="width:80px;text-align:right"></td>
+        <td style="padding:4px 4px;text-align:center"><input type="checkbox" ${p.isDefault ? 'checked' : ''} onchange="packagings.forEach((x,j)=>{x.isDefault=(j===${i}&&this.checked)});renderPackagings()"></td>
+        <td style="padding:4px 4px"><button class="btn btn-danger btn-sm" onclick="packagings.splice(${i},1);renderPackagings()">✕</button></td>
+      </tr>`).join('');
+    }
+    function addPackagingRow() {
+      packagings.push({ code: '', name: '', qtyPerPack: '', isDefault: packagings.length === 0 });
+      renderPackagings();
+    }
+    async function savePackagings(itemId) {
+      if (!itemId) { toast('Lưu item trước', 'err'); return; }
+      const valid = packagings.filter(p => p.code && p.name && p.qtyPerPack);
+      if (!valid.length) { toast('Không có đóng gói hợp lệ (cần có mã, tên, qty)', 'err'); return; }
+      await api('PUT', `/api/v1/items/${itemId}/packagings`, valid.map(p => ({
+        code: p.code, name: p.name, qtyPerPack: +p.qtyPerPack, isDefault: !!p.isDefault
+      })));
+      toast('Đã lưu đóng gói ✓');
     }
 
     // ══════════════════════════════════════════════════════════════════════════════
@@ -3326,21 +3373,35 @@
         const stockLabel = stockQty != null
           ? `<small id="ir-stock-lbl-${i}" style="color:#64748b;font-size:10px;white-space:nowrap">Tồn: ${fmt(stockQty)}</small>`
           : `<small id="ir-stock-lbl-${i}" style="color:#64748b;font-size:10px"></small>`;
+        const hasPkg = isPurchase && (l.packagings?.length > 0);
+        const pkgSubRow = hasPkg ? `<div style="display:flex;gap:6px;align-items:center;margin-top:3px;padding-left:2px;flex-wrap:wrap">
+          <small style="color:#64748b;white-space:nowrap">📦 Đóng gói:</small>
+          <select id="ir-pkg-${i}" onchange="onIRPackagingChange(${i})" style="font-size:12px;padding:2px 4px">
+            <option value="">— Nhập theo đơn vị —</option>
+            ${(l.packagings ?? []).map(p => `<option value="${p.id}" data-qty="${p.qtyPerPack}" ${l.packagingId === p.id ? 'selected' : ''}>${p.name} (${p.qtyPerPack} ${l.unit ?? '?'})</option>`).join('')}
+          </select>
+          ${l.packagingId ? `<input id="ir-pqty-${i}" type="number" step="1" min="1" value="${l.purchaseQty ?? ''}" oninput="irLines[${i}].purchaseQty=+this.value;updateIRQtyFromPack(${i})" placeholder="Số bao/thùng" style="width:100px;font-size:12px">
+          <small style="color:#94a3b8">${l.purchaseQty && l.qty ? '→ ' + l.qty + ' ' + (l.unit ?? '') : '→ qty tự tính'}</small>` : ''}
+        </div>` : '';
         return `
-    <div style="display:grid;grid-template-columns:1fr 90px 70px ${isPurchase ? '90px' : ''} 50px 32px;gap:5px;margin-bottom:6px;align-items:start">
-      ${acHtml('acir' + i, pool, l.itemId, 'Tìm nguyên liệu / sản phẩm...')}
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <input id="ir-qty-${i}" type="number" step="0.001" value="${l.qty ?? ''}" oninput="irLines[${i}].qty=+this.value" placeholder="Qty" style="width:100%;box-sizing:border-box">
-        ${stockLabel}
+    <div style="margin-bottom:8px">
+      <div style="display:grid;grid-template-columns:1fr 90px 70px ${isPurchase ? '90px' : ''} 50px 32px;gap:5px;align-items:start">
+        ${acHtml('acir' + i, pool, l.itemId, 'Tìm nguyên liệu / sản phẩm...')}
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <input id="ir-qty-${i}" type="number" step="0.001" value="${l.qty ?? ''}" oninput="irLines[${i}].qty=+this.value" placeholder="Qty" style="width:100%;box-sizing:border-box">
+          ${stockLabel}
+        </div>
+        <select id="ir-unit-${i}" onchange="irLines[${i}].unit=this.value">${unitSelectHtml(l.unit)}</select>
+        ${isPurchase ? `<input type="number" step="0.01" value="${l.cost ?? ''}" oninput="irLines[${i}].cost=this.value" placeholder="Giá/pack">` : ''}
+        <input type="number" value="${l.sort || i + 1}" oninput="irLines[${i}].sort=+this.value">
+        <button class="btn btn-danger btn-sm" onclick="irLines.splice(${i},1);renderIRLines()">✕</button>
       </div>
-      <select id="ir-unit-${i}" onchange="irLines[${i}].unit=this.value">${unitSelectHtml(l.unit)}</select>
-      ${isPurchase ? `<input type="number" step="0.01" value="${l.cost ?? ''}" oninput="irLines[${i}].cost=this.value" placeholder="Đơn giá">` : ''}
-      <input type="number" value="${l.sort || i + 1}" oninput="irLines[${i}].sort=+this.value">
-      <button class="btn btn-danger btn-sm" onclick="irLines.splice(${i},1);renderIRLines()">✕</button>
+      ${pkgSubRow}
     </div>`;
       }).join('');
       irLines.forEach((_, i) => acOn('acir' + i, item => {
         irLines[i].itemId = item.id;
+        irLines[i].packagingId = null; irLines[i].purchaseQty = null; irLines[i]._qtyPerPack = null;
         // Luôn set unit khi chọn item
         const u = document.getElementById('ir-unit-' + i);
         const val = (item.unit || '').toUpperCase();
@@ -3351,14 +3412,42 @@
           const stockQty = warehouseStockQtyMap[item.id];
           lblEl.textContent = stockQty != null ? `Tồn: ${fmt(stockQty)}` : '';
         }
+        // Load packagings cho INGREDIENT trong PURCHASE mode
+        if (isPurchase && item.itemType === 'INGREDIENT') {
+          api('GET', `/api/v1/items/${item.id}`).then(fullItem => {
+            irLines[i].packagings = fullItem?.packagings ?? [];
+            renderIRLines();
+          }).catch(() => { irLines[i].packagings = []; });
+        } else {
+          irLines[i].packagings = [];
+        }
       }));
     }
-    function addIRLine() { irLines.push({ itemId: '', qty: '', unit: '', cost: '', sort: irLines.length + 1 }); renderIRLines(); }
+    function addIRLine() { irLines.push({ itemId: '', qty: '', unit: '', cost: '', sort: irLines.length + 1, packagings: [], packagingId: null, purchaseQty: null, _qtyPerPack: null }); renderIRLines(); }
+    function onIRPackagingChange(i) {
+      const sel = document.getElementById('ir-pkg-' + i); if (!sel) return;
+      const opt = sel.options[sel.selectedIndex];
+      irLines[i].packagingId = sel.value || null;
+      irLines[i].purchaseQty = null;
+      irLines[i]._qtyPerPack = sel.value ? +opt.dataset.qty : null;
+      renderIRLines();
+    }
+    function updateIRQtyFromPack(i) {
+      const pqty = irLines[i].purchaseQty;
+      const qpp = irLines[i]._qtyPerPack;
+      if (pqty && qpp) {
+        irLines[i].qty = +(pqty * qpp).toFixed(4);
+        const qtyEl = document.getElementById('ir-qty-' + i);
+        if (qtyEl) { qtyEl.value = irLines[i].qty; }
+      }
+    }
     async function saveIR() {
       const type = document.getElementById('ir-type').value;
       const lines = irLines.filter(l => l.itemId).map(l => ({
         itemId: l.itemId, quantity: +l.qty, unit: l.unit,
-        unitCost: l.cost ? +l.cost : null, sortOrder: l.sort ?? 0
+        unitCost: l.cost ? +l.cost : null, sortOrder: l.sort ?? 0,
+        packagingId: l.packagingId || null,
+        purchaseQty: l.purchaseQty ? +l.purchaseQty : null
       }));
       if (!lines.length) { toast('Cần ít nhất 1 dòng', 'err'); return; }
       const body = {
@@ -3410,12 +3499,14 @@
       <th style="padding:4px 8px;background:#f1f5f9;text-align:right">Số lượng</th>
       <th style="padding:4px 8px;background:#f1f5f9">Đơn vị</th>
       <th style="padding:4px 8px;background:#f1f5f9;text-align:right">Đơn giá</th>
+      <th style="padding:4px 8px;background:#f1f5f9">Đóng gói</th>
     </tr></thead>
     <tbody>${lines.map(l => `<tr>
       <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">${l.item?.name ?? l.item?.key ?? '?'}</td>
       <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">${fmt(l.quantity)}</td>
       <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">${l.unit ?? '—'}</td>
       <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">${l.unitCost ? fmt(l.unitCost) + 'đ' : '—'}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;color:#64748b;font-size:12px">${l.packaging ? `📦 ${l.purchaseQty ?? '?'} ${l.packaging.name}` : ''}</td>
     </tr>`).join('')}</tbody>
   </table>`: '<div style="color:#94a3b8;font-size:12px">Không có dòng</div>';
     }
