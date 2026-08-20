@@ -1063,8 +1063,9 @@
 
       if (!items.length) { wrap.innerHTML = '<div class="empty">Không có dữ liệu</div>'; return; }
       const showGroup   = itemsActiveType === 'PRODUCT'    && itemsActiveGroup === null;
-      const isIngredient = itemsActiveType === 'INGREDIENT';
-      const isProduct    = itemsActiveType === 'PRODUCT';
+      const isIngredient  = itemsActiveType === 'INGREDIENT';
+      const isProduct     = itemsActiveType === 'PRODUCT';
+      const showRecipeCol = itemsActiveType === 'PRODUCT' || itemsActiveType === 'SEMI_PRODUCT';
 
       // ── Helper: default packaging của ingredient ──────────────
       function defPkg(i) {
@@ -1092,7 +1093,7 @@
         thead += '<th>Đơn vị</th>';
         thead += '<th style="text-align:right">Giá vốn</th>';
       }
-      if (isProduct) thead += '<th style="text-align:center">Công thức</th>';
+      if (showRecipeCol) thead += '<th style="text-align:center">Công thức</th>';
       thead += '<th>Status</th><th></th></tr>';
 
       // ── Rows ──────────────────────────────────────────────────
@@ -1118,7 +1119,7 @@
           tr += `<td>${i.unit}</td>`;
           tr += `<td style="text-align:right;color:${i.unitCost ? '#0f172a' : '#cbd5e1'}">${giaLe}</td>`;
         }
-        if (isProduct) tr += `<td style="text-align:center">${recipeBadge(i)}</td>`;
+        if (showRecipeCol) tr += `<td style="text-align:center">${recipeBadge(i)}</td>`;
         tr += `<td>${badge(i.approvalStatus)}</td>`;
         tr += `<td style="white-space:nowrap">
           <button class="btn btn-ghost btn-sm" onclick='nav("item-form",${JSON.stringify(i)})'>Sửa</button>
