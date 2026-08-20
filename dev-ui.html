@@ -570,6 +570,7 @@
       <div class="nav-item" data-screen="SUPPLIERS" onclick="nav('suppliers')">🏭 Nhà cung cấp</div>
       <div class="nav-item" data-screen="PRODUCT_MAPPING" onclick="nav('product-mapping')">🔗 Product Mapping</div>
       <div class="nav-item" data-screen="ITEM_GROUPS" onclick="nav('item-groups')">🏠 Item Groups</div>
+      <div class="nav-item" data-screen="NO_RECIPE" onclick="nav('no-recipe')">⚠️ Chưa có công thức</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">Kế hoạch SX</div>
@@ -834,7 +835,8 @@
       'prod-requests': 'Phiếu sản xuất', 'delivery-records': 'Giao nhận bếp → shop', 'prod-adjustments': 'Điều chỉnh SX',
       'stock-summary': 'Tồn kho', 'inventory-requests': 'Phiếu kho',
       'daily-report': 'Báo cáo ngày', 'pos-sales': 'POS Sales',
-      'users': 'Tài khoản người dùng', 'roles': 'Phân quyền (Roles)', 'activity-log': 'Nhật ký hoạt động'
+      'users': 'Tài khoản người dùng', 'roles': 'Phân quyền (Roles)', 'activity-log': 'Nhật ký hoạt động',
+      'no-recipe': 'SP / BTP chưa có công thức'
     };
     const PAGE_FNS = {
       'items-list': pageItemsList, 'item-form': pageItemForm, 'suppliers': pageSuppliers,
@@ -843,7 +845,8 @@
       'threshold-rules': pageThresholdRules, 'prod-plans': pageProdPlans, 'prod-requests': pageProdRequests,
       'delivery-records': pageDeliveryRecords, 'prod-adjustments': pageProdAdjustments, 'stock-summary': pageStockSummary,
       'inventory-requests': pageInventoryRequests, 'daily-report': pageDailyReport, 'pos-sales': pagePosSales,
-      'users': showUsers, 'roles': showRoles, 'activity-log': showActivityLog
+      'users': showUsers, 'roles': showRoles, 'activity-log': showActivityLog,
+      'no-recipe': pageNoRecipe
     };
 
     function nav(page, data) {
@@ -1059,23 +1062,73 @@
       }
 
       if (!items.length) { wrap.innerHTML = '<div class="empty">Không có dữ liệu</div>'; return; }
-      const showGroup = itemsActiveType === 'PRODUCT' && itemsActiveGroup === null;
-      const showSupplier = itemsActiveType === 'INGREDIENT';
-      wrap.innerHTML = `<table><thead><tr>
-    ${showGroup ? '<th>Nhóm</th>' : ''}${showSupplier ? '<th>Nhà cung cấp</th>' : ''}<th>Code</th><th>Tên</th><th>Đơn vị</th><th style="text-align:right">Giá vốn</th><th>Status</th><th></th>
-  </tr></thead><tbody>
-  ${items.map(i => `<tr>
-    ${showGroup ? `<td>${i.itemGroup?.value ?? i.itemGroup?.name ?? '<span style="color:#cbd5e1">—</span>'}</td>` : ''}
-    ${showSupplier ? `<td style="color:${i.defaultSupplier ? '#0f172a' : '#cbd5e1'}">${i.defaultSupplier?.value ?? i.defaultSupplier?.name ?? '—'}</td>` : ''}
-    <td><code>${i.code}</code></td><td>${i.name}</td><td>${i.unit}</td>
-    <td style="text-align:right;color:${i.unitCost ? '#0f172a' : '#cbd5e1'}">${i.unitCost ? fmt(i.unitCost) + 'đ' : '—'}</td>
-    <td>${badge(i.approvalStatus)}</td>
-    <td style="white-space:nowrap">
-      <button class="btn btn-ghost btn-sm" onclick='nav("item-form",${JSON.stringify(i)})'>Sửa</button>
-      ${i.approvalStatus === 'DRAFT' || i.approvalStatus === 'PENDING_APPROVAL'
-          ? `<button class="btn btn-success btn-sm" onclick="approveItem('${i.id}')">Approve</button>` : ''}
-    </td>
-  </tr>`).join('')}</tbody></table>`;
+      const showGroup   = itemsActiveType === 'PRODUCT'    && itemsActiveGroup === null;
+      const isIngredient = itemsActiveType === 'INGREDIENT';
+      const isProduct    = itemsActiveType === 'PRODUCT';
+
+      // ── Helper: default packaging của ingredient ──────────────
+      function defPkg(i) {
+        const pkgs = i.packagings ?? [];
+        return pkgs.find(p => p.isDefault) ?? pkgs[0] ?? null;
+      }
+      function recipeBadge(i) {
+        if (!i.recipe) return `<span style="color:#ef4444;font-size:15px;font-weight:700" title="Chưa có công thức">✗</span>`;
+        if (i.recipe.active) return `<span style="color:#16a34a;font-size:15px;font-weight:700" title="Công thức đang hoạt động">✓</span>`;
+        return `<span style="color:#d97706;font-size:14px;font-weight:700" title="Có công thức nhưng chưa kích hoạt">⚠</span>`;
+      }
+
+      // ── Header ────────────────────────────────────────────────
+      let thead = '<tr>';
+      if (showGroup)    thead += '<th>Nhóm</th>';
+      if (isIngredient) thead += '<th>Nhà cung cấp</th>';
+      thead += '<th>Code</th><th>Tên</th>';
+      if (isIngredient) {
+        thead += '<th style="text-align:center">Đơn vị tính<br><small style="font-weight:400;color:#94a3b8">KG / CAI / L…</small></th>';
+        thead += '<th style="text-align:center">Đơn vị nhập<br><small style="font-weight:400;color:#94a3b8">thùng / bao…</small></th>';
+        thead += '<th style="text-align:center">Quy đổi<br><small style="font-weight:400;color:#94a3b8">1 đvị nhập = ? đvị tính</small></th>';
+        thead += '<th style="text-align:right">Giá nhập<br><small style="font-weight:400;color:#94a3b8">đ / đvị nhập</small></th>';
+        thead += '<th style="text-align:right">Giá lẻ<br><small style="font-weight:400;color:#94a3b8">đ / đvị tính</small></th>';
+      } else {
+        thead += '<th>Đơn vị</th>';
+        thead += '<th style="text-align:right">Giá vốn</th>';
+      }
+      if (isProduct) thead += '<th style="text-align:center">Công thức</th>';
+      thead += '<th>Status</th><th></th></tr>';
+
+      // ── Rows ──────────────────────────────────────────────────
+      const rows = items.map(i => {
+        const pkg = defPkg(i);
+        const giaLe   = i.unitCost ? fmt(i.unitCost) + 'đ' : '—';
+        const giaNhap = (pkg && i.unitCost)
+          ? fmt(Number(i.unitCost) * Number(pkg.qtyPerPack)) + 'đ' : '—';
+        const quyDoi  = pkg
+          ? `1 ${pkg.name} = <strong>${Number(pkg.qtyPerPack).toLocaleString('vi')}</strong> ${i.unit}` : '—';
+
+        let tr = '<tr>';
+        if (showGroup)    tr += `<td>${i.itemGroup?.value ?? i.itemGroup?.name ?? '<span style="color:#cbd5e1">—</span>'}</td>`;
+        if (isIngredient) tr += `<td style="color:${i.defaultSupplier ? '#0f172a' : '#cbd5e1'}">${i.defaultSupplier?.value ?? i.defaultSupplier?.name ?? '—'}</td>`;
+        tr += `<td><code>${i.code}</code></td><td>${i.name}</td>`;
+        if (isIngredient) {
+          tr += `<td style="text-align:center">${i.unit}</td>`;
+          tr += `<td style="text-align:center;color:${pkg ? '#0f172a' : '#cbd5e1'}">${pkg?.name ?? '—'}</td>`;
+          tr += `<td style="font-size:12px;color:${pkg ? '#374151' : '#cbd5e1'}">${quyDoi}</td>`;
+          tr += `<td style="text-align:right;color:${pkg && i.unitCost ? '#0f172a' : '#cbd5e1'}">${giaNhap}</td>`;
+          tr += `<td style="text-align:right;color:${i.unitCost ? '#0f172a' : '#cbd5e1'}">${giaLe}</td>`;
+        } else {
+          tr += `<td>${i.unit}</td>`;
+          tr += `<td style="text-align:right;color:${i.unitCost ? '#0f172a' : '#cbd5e1'}">${giaLe}</td>`;
+        }
+        if (isProduct) tr += `<td style="text-align:center">${recipeBadge(i)}</td>`;
+        tr += `<td>${badge(i.approvalStatus)}</td>`;
+        tr += `<td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" onclick='nav("item-form",${JSON.stringify(i)})'>Sửa</button>
+          ${i.approvalStatus === 'DRAFT' || i.approvalStatus === 'PENDING_APPROVAL'
+            ? `<button class="btn btn-success btn-sm" onclick="approveItem('${i.id}')">Approve</button>` : ''}
+        </td></tr>`;
+        return tr;
+      }).join('');
+
+      wrap.innerHTML = `<table><thead>${thead}</thead><tbody>${rows}</tbody></table>`;
     }
     async function approveItem(id) { try { await api('POST', `/api/v1/items/${id}/approve`); toast('Đã approve'); } finally { loadItems(); } }
 
@@ -1338,7 +1391,7 @@
       document.getElementById('content').innerHTML = `
   <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:14px">
     <div class="card">
-      <div class="card-title">Thêm mapping</div>
+      <div class="card-title" id="pm-form-title">Thêm mapping</div>
       <div class="form-grid">
         <div class="field form-full"><label>Sản phẩm *</label>
           <select id="pm-item">
@@ -1348,16 +1401,41 @@
         <div class="field"><label>EX_CODE (POS) *</label><input id="pm-ex" placeholder="VD: BK253145683"></div>
         <div class="field"><label>Giá bán (đ)</label><input id="pm-price" type="number" placeholder="280000"></div>
         <div class="field form-full"><label>Ghi chú</label><input id="pm-note"></div>
+        <div class="field form-full" id="pm-bulk-wrap" style="display:none">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 10px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px">
+            <input type="checkbox" id="pm-bulk" style="width:15px;height:15px">
+            <span id="pm-bulk-label" style="font-size:13px;color:#92400e;font-weight:500">
+              Áp dụng giá này cho tất cả SP cùng EX_CODE
+            </span>
+          </label>
+        </div>
       </div>
-      <div class="action-row"><button class="btn btn-primary" onclick="savePM()">Thêm mapping</button></div>
+      <div class="action-row">
+        <button class="btn btn-primary" id="pm-save-btn" onclick="savePM()">Thêm mapping</button>
+        <button class="btn btn-ghost" id="pm-cancel-btn" style="display:none" onclick="resetPMForm()">Huỷ</button>
+      </div>
     </div>
     <div class="card">
-      <div class="card-title">Danh sách mappings</div>
+      <div class="card-title">Danh sách mappings <small style="font-weight:400;color:#94a3b8;font-size:12px">— nhóm theo EX_CODE</small></div>
       <div class="tabs" id="pm-group-tabs" style="margin-bottom:12px"></div>
       <div id="pm-list"><div class="empty">Đang tải...</div></div>
     </div>
   </div>`;
       loadPM();
+    }
+
+    function resetPMForm() {
+      document.getElementById('pm-item').value = '';
+      document.getElementById('pm-ex').value = '';
+      document.getElementById('pm-price').value = '';
+      document.getElementById('pm-note').value = '';
+      const hid = document.getElementById('pm-edit-id');
+      if (hid) hid.value = '';
+      document.getElementById('pm-form-title').textContent = 'Thêm mapping';
+      document.getElementById('pm-save-btn').textContent = 'Thêm mapping';
+      document.getElementById('pm-cancel-btn').style.display = 'none';
+      document.getElementById('pm-bulk-wrap').style.display = 'none';
+      document.getElementById('pm-bulk').checked = false;
     }
 
     function getItemGroupKey(mapping) {
@@ -1396,15 +1474,67 @@
         data = data.filter(m => getItemGroupKey(m) === pmActiveGroup);
       }
       if (!data.length) { el.innerHTML = '<div class="empty">Chưa có mapping</div>'; return; }
-      el.innerHTML = `<table><thead><tr><th>SP (IN_CODE)</th><th>EX_CODE</th><th>Giá bán</th><th>Ghi chú</th><th></th></tr></thead>
-  <tbody>${data.map(m => `<tr>
-    <td>${m.item?.name ?? m.item?.key ?? '?'}</td>
-    <td><code>${m.exCode}</code></td>
-    <td>${m.sellingPrice != null ? fmt(m.sellingPrice) + 'đ' : '—'}</td>
-    <td>${m.note ?? '—'}</td>
-    <td><button class="btn btn-danger btn-sm" onclick="deletePM('${m.id}')">Xóa</button>
-        <button class="btn btn-ghost btn-sm" onclick="editPM('${m.id}')">Sửa</button></td>
-  </tr>`).join('')}</tbody></table>`;
+
+      // Nhóm theo exCode
+      const grouped = {};
+      for (const m of data) {
+        if (!grouped[m.exCode]) grouped[m.exCode] = [];
+        grouped[m.exCode].push(m);
+      }
+
+      let rows = '';
+      for (const [exCode, members] of Object.entries(grouped)) {
+        const isGroup = members.length > 1;
+        const priceLabel = members[0].sellingPrice != null ? fmt(members[0].sellingPrice) + 'đ' : '—';
+        // Header row của nhóm
+        rows += `<tr style="background:#f0f9ff">
+          <td colspan="3" style="padding:6px 10px">
+            <span style="font-weight:700;color:#0369a1;font-size:12px;font-family:monospace">${exCode}</span>
+            ${isGroup ? `<span style="margin-left:8px;font-size:11px;color:#64748b">${members.length} sản phẩm · ${priceLabel}</span>
+              <button class="btn btn-warn btn-sm" style="margin-left:8px;padding:2px 8px;font-size:11px"
+                onclick="bulkUpdatePrice('${exCode}')">💰 Cập nhật giá cả nhóm</button>` : ''}
+          </td>
+          <td colspan="2"></td>
+        </tr>`;
+        for (const m of members) {
+          rows += `<tr>
+            <td style="padding-left:22px">${m.item?.name ?? m.item?.key ?? '?'}<br>
+              <small style="color:#94a3b8;font-size:11px">${m.item?.key ?? ''}</small></td>
+            <td>${m.sellingPrice != null ? fmt(m.sellingPrice) + 'đ' : '—'}</td>
+            <td style="font-size:12px;color:#64748b">${m.note ?? '—'}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-ghost btn-sm" onclick="editPM('${m.id}')">Sửa</button>
+              <button class="btn btn-danger btn-sm" onclick="deletePM('${m.id}')">Xóa</button>
+            </td>
+          </tr>`;
+        }
+      }
+      el.innerHTML = `<table style="width:100%"><thead><tr>
+        <th>Sản phẩm</th><th>Giá bán</th><th>Ghi chú</th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    // Cập nhật giá toàn bộ nhóm cùng exCode từ nút nhanh trong bảng
+    async function bulkUpdatePrice(exCode) {
+      const siblings = pmAllMappings.filter(m => m.exCode === exCode);
+      if (!siblings.length) return;
+      const currentPrice = siblings[0].sellingPrice ?? '';
+      const input = prompt(`Nhập giá mới cho tất cả ${siblings.length} SP cùng mã [${exCode}]:`, currentPrice);
+      if (input === null) return; // cancelled
+      const newPrice = input.trim() === '' ? null : Number(input);
+      if (input.trim() !== '' && isNaN(newPrice)) { toast('Giá không hợp lệ', 'err'); return; }
+      try {
+        await Promise.all(siblings.map(m =>
+          api('PUT', `/api/v1/product-mappings/${m.id}`, {
+            itemId: allItems.find(i => i.code === m.item?.key)?.id,
+            exCode: m.exCode,
+            sellingPrice: newPrice,
+            note: m.note ?? null
+          })
+        ));
+        toast(`Đã cập nhật giá cho ${siblings.length} SP`);
+        loadPM();
+      } catch (e) { toast('Lỗi khi cập nhật', 'err'); }
     }
 
     async function savePM() {
@@ -1412,19 +1542,34 @@
       const itemId = document.getElementById('pm-item').value;
       const exCode = document.getElementById('pm-ex').value.trim();
       if (!itemId || !exCode) { toast('Cần chọn SP và nhập EX_CODE', 'err'); return; }
-      const body = {
-        itemId, exCode,
-        sellingPrice: document.getElementById('pm-price').value ? +document.getElementById('pm-price').value : null,
-        note: document.getElementById('pm-note').value || null
-      };
-      id ? await api('PUT', `/api/v1/product-mappings/${id}`, body) : await api('POST', '/api/v1/product-mappings', body);
-      toast(id ? 'Đã cập nhật' : 'Đã thêm mapping');
-      document.getElementById('pm-item').value = '';
-      document.getElementById('pm-ex').value = '';
-      document.getElementById('pm-price').value = '';
-      document.getElementById('pm-note').value = '';
-      if (document.getElementById('pm-edit-id')) document.getElementById('pm-edit-id').value = '';
-      document.querySelector('#content .card .card-title').textContent = 'Thêm mapping';
+      const newPrice = document.getElementById('pm-price').value ? +document.getElementById('pm-price').value : null;
+      const note = document.getElementById('pm-note').value || null;
+      const applyAll = document.getElementById('pm-bulk')?.checked && id;
+
+      if (applyAll) {
+        // Bulk: cập nhật giá cho toàn bộ mapping cùng exCode
+        const siblings = pmAllMappings.filter(m => m.exCode === exCode);
+        try {
+          // Cập nhật record hiện tại với đầy đủ thông tin (kể cả itemId mới nếu đổi)
+          await api('PUT', `/api/v1/product-mappings/${id}`, { itemId, exCode, sellingPrice: newPrice, note });
+          // Cập nhật giá cho các record cùng nhóm (giữ nguyên itemId + note của chúng)
+          const others = siblings.filter(m => m.id !== id);
+          await Promise.all(others.map(m => {
+            const mItemId = allItems.find(i => i.code === m.item?.key)?.id;
+            return api('PUT', `/api/v1/product-mappings/${m.id}`, {
+              itemId: mItemId, exCode: m.exCode, sellingPrice: newPrice, note: m.note ?? null
+            });
+          }));
+          toast(`Đã cập nhật giá ${newPrice != null ? fmt(newPrice) + 'đ' : '(xoá giá)'} cho ${siblings.length} SP cùng nhóm [${exCode}]`);
+        } catch (e) { toast('Lỗi khi cập nhật hàng loạt', 'err'); return; }
+      } else {
+        const body = { itemId, exCode, sellingPrice: newPrice, note };
+        try {
+          id ? await api('PUT', `/api/v1/product-mappings/${id}`, body) : await api('POST', '/api/v1/product-mappings', body);
+          toast(id ? 'Đã cập nhật' : 'Đã thêm mapping');
+        } catch (e) { toast('Lỗi khi lưu', 'err'); return; }
+      }
+      resetPMForm();
       loadPM();
     }
 
@@ -1435,14 +1580,27 @@
       document.getElementById('pm-ex').value = m.exCode ?? '';
       document.getElementById('pm-price').value = m.sellingPrice ?? '';
       document.getElementById('pm-note').value = m.note ?? '';
-      // thêm hidden field để biết đang edit
+      // Hidden field để biết đang edit
       let hid = document.getElementById('pm-edit-id');
       if (!hid) {
         hid = document.createElement('input'); hid.type = 'hidden'; hid.id = 'pm-edit-id';
         document.getElementById('pm-item').closest('.form-grid').appendChild(hid);
       }
       hid.value = id;
-      document.querySelector('#content .card .card-title').textContent = 'Sửa mapping';
+      document.getElementById('pm-form-title').textContent = 'Sửa mapping';
+      document.getElementById('pm-save-btn').textContent = 'Lưu thay đổi';
+      document.getElementById('pm-cancel-btn').style.display = '';
+      // Hiện checkbox bulk nếu có SP khác cùng exCode
+      const siblings = pmAllMappings.filter(x => x.exCode === m.exCode && x.id !== id);
+      const bulkWrap = document.getElementById('pm-bulk-wrap');
+      if (siblings.length) {
+        bulkWrap.style.display = '';
+        document.getElementById('pm-bulk').checked = false;
+        document.getElementById('pm-bulk-label').textContent =
+          `Áp dụng giá này cho tất cả ${siblings.length + 1} SP cùng mã [${m.exCode}]`;
+      } else {
+        bulkWrap.style.display = 'none';
+      }
       document.getElementById('pm-item').closest('.card').scrollIntoView({ behavior: 'smooth' });
     }
 
@@ -4375,6 +4533,81 @@
         <td style="font-size:12px;color:#64748b;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.note || ''}">${r.note || '—'}</td>
       </tr>`;
       }).join('')}</tbody></table>`;
+    }
+
+    // ── No-Recipe screen ─────────────────────────────────────────────────────────
+    async function pageNoRecipe() {
+      const content = document.getElementById('content');
+      content.innerHTML = `<div class="card"><div class="empty">Đang tải...</div></div>`;
+
+      await Promise.all([loadAllItems(), loadAllRecipes()]);
+
+      // Build set of item IDs that have at least one ACTIVE recipe
+      const activeRecipeItemIds = new Set();
+      // Build set of item IDs that have ANY recipe (active or not)
+      const anyRecipeItemIds = new Set();
+      for (const r of allRecipes) {
+        const itemId = r.product?.key ?? r.semiProduct?.key;
+        if (!itemId) continue;
+        anyRecipeItemIds.add(itemId);
+        if (r.active) activeRecipeItemIds.add(itemId);
+      }
+
+      // Filter to PRODUCT + SEMI_PRODUCT only
+      const targets = allItems.filter(i => i.itemType === 'PRODUCT' || i.itemType === 'SEMI_PRODUCT');
+
+      // Group 1: no recipe at all
+      const noRecipe = targets.filter(i => !anyRecipeItemIds.has(i.id));
+      // Group 2: has recipe(s) but none active
+      const noActive = targets.filter(i => anyRecipeItemIds.has(i.id) && !activeRecipeItemIds.has(i.id));
+
+      function itemRow(item) {
+        return `<tr>
+          <td><strong>${item.code}</strong></td>
+          <td>${item.name}</td>
+          <td>${badge(item.itemType)}</td>
+          <td>${badge(item.approvalStatus)}</td>
+          <td>
+            <button class="btn btn-ghost btn-sm" onclick="nav('item-form',{id:'${item.id}'})">✏️ Sửa / Tạo CT</button>
+          </td>
+        </tr>`;
+      }
+
+      function section(title, color, items, emptyMsg) {
+        const rows = items.length
+          ? items.map(itemRow).join('')
+          : `<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:16px">${emptyMsg}</td></tr>`;
+        return `
+        <div class="card">
+          <div class="card-title" style="display:flex;align-items:center;gap:8px">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${color}22;color:${color};font-size:13px;font-weight:700">${items.length}</span>
+            ${title}
+          </div>
+          <table>
+            <thead><tr>
+              <th style="width:160px">Code</th>
+              <th>Tên</th>
+              <th style="width:80px">Loại</th>
+              <th style="width:100px">Trạng thái</th>
+              <th style="width:120px"></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+      }
+
+      const total = noRecipe.length + noActive.length;
+      const summary = total === 0
+        ? `<div style="padding:6px 0;color:#16a34a;font-weight:600">✅ Tất cả SP / BTP đều đã có công thức đang hoạt động.</div>`
+        : `<div style="padding:6px 0;color:#b45309;font-weight:600">⚠️ Tổng cộng <strong>${total}</strong> sản phẩm cần tạo hoặc kích hoạt công thức.</div>`;
+
+      content.innerHTML = `
+        <div style="margin-bottom:14px;display:flex;align-items:center;gap:16px">
+          ${summary}
+          <button class="btn btn-ghost" style="margin-left:auto" onclick="allRecipes=[];pageNoRecipe()">🔄 Làm mới</button>
+        </div>
+        ${section('Chưa có công thức nào', '#dc2626', noRecipe, '✅ Không có — tất cả đã được tạo công thức')}
+        ${section('Có công thức nhưng chưa kích hoạt (is_active = false)', '#d97706', noActive, '✅ Không có')}`;
     }
 
     // ── Boot ──────────────────────────────────────────────────────────────────────
