@@ -126,7 +126,20 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         MultiValueMap<String, String> rest = new LinkedMultiValueMap<>(params);
         rest.remove("itemType");
 
+        // q = full-text OR search trên name + code (case-insensitive).
+        // Loại khỏi rest để SpecificationBuilder không hiểu nhầm thành exact-match field.
+        String q = rest.getFirst("q");
+        rest.remove("q");
+
         Specification<Item> spec = SpecificationBuilder.from(rest);
+
+        if (q != null && !q.isBlank()) {
+            String pattern = "%" + q.toLowerCase() + "%";
+            spec = spec.and((root, query, cb) -> cb.or(
+                    cb.like(cb.lower(root.get("name")), pattern),
+                    cb.like(cb.lower(root.get("code")), pattern)
+            ));
+        }
 
         if (itemType != null && !itemType.isBlank()) {
             Class<? extends Item> typeClass = resolveClass(itemType);

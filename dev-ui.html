@@ -1051,7 +1051,7 @@
       } else {
         // Không chọn group: phân trang bình thường
         let path = `/api/v1/items?size=${PAGE_SIZE}&page=${itemsPage}&itemType=${itemsActiveType}`;
-        if (name) path += `&name=${encodeURIComponent(name)}`;
+        if (name) path += `&q=${encodeURIComponent(name)}`;
         const data = await api('GET', path);
         items = data?.content ?? [];
         total = data?.totalElements ?? 0; totalPages = data?.totalPages ?? 1;
