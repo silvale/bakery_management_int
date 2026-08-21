@@ -711,8 +711,10 @@
     }
     async function loadAllUnits() {
       try {
-        const d = await api('GET', '/api/v1/code-values?groupKey=UNIT&size=100&sort=sortOrder,asc');
-        allUnits = d?.content ?? [];
+        // /api/v1/units → bảng `unit` (source of truth, bao gồm unit mới từ migration V43+)
+        // Không dùng /api/v1/code-values?groupKey=UNIT vì bảng code_value không được sync
+        const d = await api('GET', '/api/v1/units');
+        allUnits = Array.isArray(d) ? d.sort((a, b) => a.code.localeCompare(b.code)) : [];
       }
       catch (_) { allUnits = [] }
     }
