@@ -10,12 +10,23 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.bakery.api.master.service.ItemService;
+import com.bakery.api.master.repository.ProductRepository;
+import com.bakery.api.master.repository.SemiProductRepository;
+import com.bakery.api.master.entity.Item;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.stream.Stream;
 import com.bakery.api.recipe.dto.RecipeRequest;
 import com.bakery.api.recipe.dto.RecipeResponse;
 import com.bakery.api.recipe.service.RecipeCostService;
 import com.bakery.api.recipe.service.RecipeService;
 import com.bakery.framework.controller.BakeryAdminResource;
 import com.bakery.framework.service.BakeryAdminService;
+import com.bakery.api.recipe.service.RecipeExportService;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.RequestBody;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -52,6 +63,9 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
     private final RecipeService service;
     private final RecipeCostService recipeCostService;
     private final ItemService itemService;
+    private final RecipeExportService recipeExportService;
+    private final ProductRepository productRepository;
+    private final SemiProductRepository semiProductRepository;
 
     @Override
     protected BakeryAdminService<RecipeRequest, RecipeResponse> getService() {
@@ -121,6 +135,72 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
             m.put("recipeUnit",       r[6]);
             return m;
         }).toList();
+    }
+
+
+    /**
+     * Xuất công thức của nhiều sản phẩm / bán thành phẩm ra Excel.
+     * POST /api/v1/recipes/export
+     * Body: ["uuid1", "uuid2", ...]
+     */
+    @PostMapping("/export")
+    public ResponseEntity<byte[]> exportRecipes(@RequestBody List<UUID> itemIds) {
+        byte[] data = recipeExportService.exportRecipes(itemIds);
+        String filename = "cong-thuc-" + System.currentTimeMillis() + ".xlsx";
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(data);
+    }
+
+    /**
+     * Tính lại giá vốn cho TOÀN BỘ Sản Phẩm + Bán Thành Phẩm có active recipe.
+     * POST /api/v1/recipes/cost/apply-all
+     * Trả về: { updated, skipped, noRecipe, errors[] }
+     */
+    @PostMapping("/cost/apply-all")
+    public Map<String, Object> applyAllCosts() {
+        List<Item> all = Stream.concat(
+                productRepository.findAll().stream(),
+                semiProductRepository.findAll().stream()
+        ).toList();
+
+        int updated = 0, skipped = 0, noRecipe = 0;
+        List<String> errors = new ArrayList<>();
+
+        for (Item item : all) {
+            try {
+                RecipeCostService.CostResult result = recipeCostService.calculate(item.getId());
+                if (result.complete()) {
+                    itemService.saveUnitCost(item.getId(), result.totalCostPerUnit());
+                    updated++;
+                } else {
+                    skipped++;
+                    errors.add(item.getCode() + ": thiếu giá " +
+                            result.breakdown().stream()
+                                    .filter(l -> "MISSING".equals(l.priceSource()))
+                                    .map(RecipeCostService.LineCost::itemCode)
+                                    .limit(3)
+                                    .reduce((a, b) -> a + ", " + b).orElse(""));
+                }
+            } catch (Exception e) {
+                noRecipe++;
+                // Không log item không có active recipe (bình thường)
+                String msg = e.getMessage();
+                if (msg != null && !msg.contains("chưa có active recipe")) {
+                    errors.add(item.getCode() + ": " + msg);
+                }
+            }
+        }
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("total", all.size());
+        res.put("updated", updated);
+        res.put("skipped", skipped);
+        res.put("noRecipe", noRecipe);
+        res.put("errors", errors);
+        return res;
     }
 
 }

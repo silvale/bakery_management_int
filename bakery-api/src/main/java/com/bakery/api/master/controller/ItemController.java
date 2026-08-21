@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import java.util.Map;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -87,5 +89,16 @@ public class ItemController extends BakeryAdminResource<ItemRequest, ItemRespons
                 .contentType(MediaType.parseMediaType(
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .body(data);
+    }
+
+    /**
+     * Xóa hàng loạt items (soft-delete).
+     * DELETE /api/v1/items/bulk
+     * Body: ["uuid1", "uuid2", ...]
+     */
+    @DeleteMapping("/bulk")
+    public ResponseEntity<Map<String, Object>> bulkDelete(@RequestBody List<UUID> ids) {
+        int count = service.bulkDelete(ids);
+        return ResponseEntity.ok(Map.of("deleted", count, "ids", ids));
     }
 }

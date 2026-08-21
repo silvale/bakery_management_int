@@ -572,6 +572,8 @@
       <div class="nav-item" data-screen="ITEM_GROUPS" onclick="nav('item-groups')">🏠 Item Groups</div>
       <div class="nav-item" data-screen="NO_RECIPE" onclick="nav('no-recipe')">⚠️ Chưa có công thức</div>
       <div class="nav-item" data-screen="UNIT_ISSUES" onclick="nav('unit-issues')">🔀 Lỗi đơn vị công thức</div>
+      <div class="nav-item" data-screen="UNITS" onclick="nav('units')">📐 Đơn vị tính</div>
+      <div class="nav-item" data-screen="UNIT_CONVERSIONS" onclick="nav('unit-conversions')">🔄 Quy đổi đơn vị</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">Kế hoạch SX</div>
@@ -840,7 +842,9 @@
       'daily-report': 'Báo cáo ngày', 'pos-sales': 'POS Sales',
       'users': 'Tài khoản người dùng', 'roles': 'Phân quyền (Roles)', 'activity-log': 'Nhật ký hoạt động',
       'no-recipe': 'SP / BTP chưa có công thức',
-      'unit-issues': '🔀 Lỗi đơn vị trong công thức'
+      'unit-issues': '🔀 Lỗi đơn vị trong công thức',
+      'units': '📐 Quản lý đơn vị tính',
+      'unit-conversions': '🔄 Quản lý quy đổi đơn vị'
     };
     const PAGE_FNS = {
       'items-list': pageItemsList, 'item-form': pageItemForm, 'suppliers': pageSuppliers,
@@ -851,7 +855,9 @@
       'inventory-requests': pageInventoryRequests, 'daily-report': pageDailyReport, 'pos-sales': pagePosSales,
       'users': showUsers, 'roles': showRoles, 'activity-log': showActivityLog,
       'no-recipe': pageNoRecipe,
-      'unit-issues': pageUnitIssues
+      'unit-issues': pageUnitIssues,
+      'units': pageUnits,
+      'unit-conversions': pageUnitConversions
     };
 
     function nav(page, data) {
@@ -977,6 +983,7 @@
     let itemsActiveType = 'PRODUCT'; // tab loại hiện tại
     let itemsActiveGroup = null;     // groupCode đang chọn trong Sản Phẩm (null = Tất cả)
     let itemsPage = 0;
+    let selectedItems = new Map();   // id → item object (multi-select)
 
     async function pageItemsList() {
       itemsPage = 0;
@@ -992,6 +999,7 @@
     <div class="filter-bar">
       <input id="fn" placeholder="Tìm tên / code..." oninput="itemsPage=0;loadItems()" style="width:200px">
       <button class="btn btn-primary" onclick="nav('item-form',{})">+ Tạo mới</button>
+      <button class="btn btn-ghost" id="btn-recalc-all" onclick="recalcAllCosts()" title="Tính lại giá vốn cho toàn bộ Sản Phẩm + Bán Thành Phẩm" style="color:#0ea5e9;border-color:#0ea5e9">🔄 Tính lại giá vốn tất cả</button>
     </div>
     <div id="items-wrap"><div class="empty">Đang tải...</div></div>
     <div id="items-pag" style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:10px"></div>
@@ -1004,6 +1012,7 @@
       itemsActiveType = type;
       itemsActiveGroup = null;
       itemsPage = 0;
+      selectedItems.clear();
       // update tab active class
       document.querySelectorAll('#items-type-tabs .tab').forEach((el, i) => {
         const types = ['PRODUCT', 'SEMI_PRODUCT', 'INGREDIENT'];
@@ -1048,6 +1057,7 @@
           const all = data?.content ?? [];
           items = all.filter(i => i.itemGroup?.key === itemsActiveGroup);
           if (name) items = items.filter(i => i.name?.toLowerCase().includes(name.toLowerCase()) || i.code?.toLowerCase().includes(name.toLowerCase()));
+          window._lastLoadedItems = items;
         } catch (_) { items = []; }
         if (pag) pag.innerHTML = '';
       } else {
@@ -1056,6 +1066,7 @@
         if (name) path += `&q=${encodeURIComponent(name)}`;
         const data = await api('GET', path);
         items = data?.content ?? [];
+        window._lastLoadedItems = items;
         total = data?.totalElements ?? 0; totalPages = data?.totalPages ?? 1;
         if (pag) {
           const from = itemsPage * PAGE_SIZE + 1, to = Math.min((itemsPage + 1) * PAGE_SIZE, total);
@@ -1083,8 +1094,33 @@
         return `<span style="color:#d97706;font-size:14px;font-weight:700" title="Có công thức nhưng chưa kích hoạt">⚠</span>`;
       }
 
+      // ── Bulk action bar ───────────────────────────────────────
+      const selCount = selectedItems.size;
+      const selIds   = [...selectedItems.keys()];
+      const canDownload = selIds.every(id => {
+        const it = selectedItems.get(id);
+        return it.itemType === 'PRODUCT' || it.itemType === 'SEMI_PRODUCT';
+      });
+      const bulkBar = selCount > 0 ? `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-bottom:8px">
+          <span style="font-weight:600;color:#92400e">Đã chọn ${selCount} item</span>
+          <button class="btn btn-ghost btn-sm" onclick="selectedItems.clear();loadItems()">✕ Bỏ chọn</button>
+          <div style="flex:1"></div>
+          ${canDownload ? `<button class="btn btn-sm" style="background:#0ea5e9;color:#fff" onclick="downloadRecipeExcel()">⬇ Download công thức</button>` : ''}
+          <button class="btn btn-sm" style="background:#ef4444;color:#fff" onclick="bulkDeleteItems()">🗑 Xóa đã chọn (${selCount})</button>
+        </div>` : '';
+      // Xóa bulk bar cũ trước, rồi insert mới nếu có selection
+      document.getElementById('bulk-bar')?.remove();
+      if (selCount > 0) {
+        const barEl = document.createElement('div');
+        barEl.id = 'bulk-bar';
+        barEl.innerHTML = bulkBar;
+        wrap.parentNode.insertBefore(barEl, wrap);
+      }
+
       // ── Header ────────────────────────────────────────────────
-      let thead = '<tr>';
+      const allChecked = items.length > 0 && items.every(i => selectedItems.has(i.id));
+      let thead = `<tr><th style="width:32px;text-align:center"><input type="checkbox" title="Chọn tất cả" ${allChecked ? 'checked' : ''} onchange="toggleSelectAll(this, ${JSON.stringify(items.map(i => i.id))})"></th>`;
       if (showGroup)    thead += '<th>Nhóm</th>';
       if (isIngredient) thead += '<th>Nhà cung cấp</th>';
       thead += '<th>Code</th><th>Tên</th>';
@@ -1110,7 +1146,9 @@
         const quyDoi  = pkg
           ? `1 ${pkg.name} = <strong>${Number(pkg.qtyPerPack).toLocaleString('vi')}</strong> ${i.unit}` : '—';
 
-        let tr = '<tr>';
+        const isChecked = selectedItems.has(i.id);
+        let tr = `<tr style="${isChecked ? 'background:#fef9c3' : ''}">`;
+        tr += `<td style="text-align:center"><input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleSelectItem(this,'${i.id}',${JSON.stringify(i).replace(/'/g,"&#39;")})"></td>`;
         if (showGroup)    tr += `<td>${i.itemGroup?.value ?? i.itemGroup?.name ?? '<span style="color:#cbd5e1">—</span>'}</td>`;
         if (isIngredient) tr += `<td style="color:${i.defaultSupplier ? '#0f172a' : '#cbd5e1'}">${i.defaultSupplier?.value ?? i.defaultSupplier?.name ?? '—'}</td>`;
         tr += `<td><code>${i.code}</code></td><td>${i.name}</td>`;
@@ -1139,6 +1177,101 @@
       wrap.innerHTML = `<table><thead>${thead}</thead><tbody>${rows}</tbody></table>`;
     }
     async function approveItem(id) { try { await api('POST', `/api/v1/items/${id}/approve`); toast('Đã approve'); } finally { loadItems(); } }
+
+    // ── Multi-select ──────────────────────────────────────────────
+    function toggleSelectItem(cb, id, item) {
+      if (cb.checked) selectedItems.set(id, item);
+      else            selectedItems.delete(id);
+      loadItems();
+    }
+    function toggleSelectAll(cb, ids) {
+      // ids là array string từ JSON — cần map ngược sang item objects
+      // Dùng allItems (đã load) hoặc lookup từ DOM
+      if (cb.checked) {
+        ids.forEach(id => {
+          const found = (window._lastLoadedItems ?? []).find(i => i.id === id);
+          if (found) selectedItems.set(id, found);
+        });
+      } else {
+        ids.forEach(id => selectedItems.delete(id));
+      }
+      loadItems();
+    }
+
+    // ── Bulk delete ───────────────────────────────────────────────
+    async function bulkDeleteItems() {
+      const ids = [...selectedItems.keys()];
+      if (!ids.length) return;
+      if (!confirm(`Xóa ${ids.length} item đã chọn? (Soft-delete, có thể khôi phục)`) ) return;
+      try {
+        const res = await api('DELETE', '/api/v1/items/bulk', ids);
+        toast(`Đã xóa ${res.deleted ?? ids.length} item`);
+        selectedItems.clear();
+        loadItems();
+      } catch(e) { toast('Lỗi xóa: ' + e.message, 'err'); }
+    }
+
+    // ── Recalc all unit costs ─────────────────────────────────────
+    async function recalcAllCosts() {
+      const btn = document.getElementById('btn-recalc-all');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang tính...'; }
+      try {
+        const res = await api('POST', '/api/v1/recipes/cost/apply-all');
+        if (!res) return;
+        const errs = (res.errors ?? []).filter(Boolean);
+        let msg = `✓ Đã cập nhật ${res.updated} item`;
+        if (res.skipped)  msg += ` · Thiếu giá: ${res.skipped}`;
+        if (res.noRecipe) msg += ` · Chưa có CT: ${res.noRecipe}`;
+        toast(msg);
+        if (errs.length) {
+          // Hiện modal tóm tắt lỗi
+          let modal = document.getElementById('recalc-modal');
+          if (!modal) { modal = document.createElement('div'); modal.id = 'recalc-modal'; document.body.appendChild(modal); }
+          modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+          modal.innerHTML = `<div style="background:#fff;border-radius:10px;padding:24px;width:600px;max-width:95vw;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <strong>Kết quả tính lại giá vốn</strong>
+              <button onclick="document.getElementById('recalc-modal').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#94a3b8">✕</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
+              <div style="background:#dcfce7;border-radius:6px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:700;color:#16a34a">${res.updated}</div><div style="font-size:12px;color:#166534">Đã cập nhật</div></div>
+              <div style="background:#fef3c7;border-radius:6px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:700;color:#d97706">${res.skipped}</div><div style="font-size:12px;color:#92400e">Thiếu giá</div></div>
+              <div style="background:#f1f5f9;border-radius:6px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:700;color:#64748b">${res.noRecipe}</div><div style="font-size:12px;color:#475569">Chưa có CT</div></div>
+            </div>
+            ${errs.length ? `<div style="font-size:13px;color:#64748b;margin-bottom:6px">Item thiếu giá (${errs.length}):</div>
+            <div style="background:#fef2f2;border-radius:6px;padding:10px;font-size:12px;font-family:monospace;max-height:300px;overflow-y:auto">${errs.map(e=>`<div style="padding:2px 0;border-bottom:1px solid #fee2e2">${e}</div>`).join('')}</div>` : ''}
+          </div>`;
+        }
+        loadItems();
+      } catch(e) {
+        // error already toasted by api()
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🔄 Tính lại giá vốn tất cả'; }
+      }
+    }
+
+    // ── Download recipe Excel ─────────────────────────────────────
+    async function downloadRecipeExcel() {
+      const ids = [...selectedItems.keys()];
+      if (!ids.length) return;
+      try {
+        toast('Đang xuất Excel...');
+        const res = await fetch(BASE + '/api/v1/recipes/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+          body: JSON.stringify(ids)
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url;
+        a.download = `cong-thuc-${new Date().toISOString().slice(0,10)}.xlsx`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast('Đã tải xuống ✓');
+      } catch(e) { toast('Lỗi xuất Excel: ' + e.message, 'err'); }
+    }
 
     // ── Cost Modal ────────────────────────────────────────────────
     async function showCostModal(itemId, itemName) {
@@ -1252,6 +1385,10 @@
     async function pageItemForm(item = {}) {
       await Promise.all([loadAllItems(), loadAllSuppliers(), loadAllUnits()]);
       const isEdit = !!item.id;
+      // List API không trả về packagings → fetch full item khi edit
+      if (isEdit) {
+        try { item = await api('GET', `/api/v1/items/${item.id}`); } catch(_) {}
+      }
       // l.item là ReferenceValue {key: itemCode, value: itemName} — không có id
       // Phải lookup ngược qua allItems bằng code
       recipeLines = (item.recipe?.lines ?? []).map(l => {
@@ -1288,8 +1425,11 @@
           ${allSuppliers.map(s => `<option value="${s.id}" ${item.defaultSupplier?.key === s.code ? 'selected' : ''}>${s.code} — ${s.name}</option>`).join('')}
         </select></div>
       <div class="field" id="f-unitcost-ing-wrap" style="${item.itemType === 'INGREDIENT' ? '' : 'display:none'}">
-        <label>Giá vốn (đ/đvt) <small style="color:#94a3b8">Nhập tay</small></label>
-        <input id="f-unitcost" type="number" min="0" step="1" value="${item.unitCost ?? ''}" placeholder="0"></div>
+        <label>Giá Nhập (đ/lô)</label>
+        <input id="f-gia-nhap" type="number" min="0" step="1" placeholder="Ví dụ: 48000" oninput="calcGiaLe()"></div>
+      <div class="field" id="f-gia-le-wrap" style="${item.itemType === 'INGREDIENT' ? '' : 'display:none'}">
+        <label>Giá Lẻ (đ/đvt) <small id="f-gia-le-hint" style="color:#94a3b8">= Giá Nhập ÷ Khối lượng đóng gói</small></label>
+        <input id="f-gia-le" type="number" readonly style="background:#f8fafc;color:#0f172a;font-weight:600" value="${item.unitCost ?? ''}" placeholder="—"></div>
       <div class="field" id="f-unitcost-ro-wrap" style="${(item.itemType === 'PRODUCT' || item.itemType === 'SEMI_PRODUCT') && item.unitCost ? '' : 'display:none'}">
         <label>Giá vốn (đ/đvt) <small style="color:#94a3b8">Tính từ công thức</small></label>
         <input value="${item.unitCost ? fmt(item.unitCost) + 'đ' : '—'}" readonly style="background:#f8fafc;color:#475569"></div>
@@ -1338,16 +1478,30 @@
       packagings = (item.packagings ?? []).map(p => ({ id: p.id, code: p.code, name: p.name, qtyPerPack: p.qtyPerPack, isDefault: !!p.isDefault }));
       if (isEdit && item.itemType === 'INGREDIENT') setTimeout(renderPackagings, 0);
     }
+    function calcGiaLe() {
+      const giaNhap = parseFloat(document.getElementById('f-gia-nhap')?.value) || 0;
+      const defPkg  = packagings.find(p => p.isDefault) ?? packagings[0] ?? null;
+      const qty     = defPkg && defPkg.qtyPerPack ? parseFloat(defPkg.qtyPerPack) : 1;
+      const el      = document.getElementById('f-gia-le');
+      const hint    = document.getElementById('f-gia-le-hint');
+      if (hint) hint.textContent = defPkg
+        ? `= Giá Nhập ÷ ${defPkg.name || 'đóng gói mặc định'} (${qty})`
+        : '= Giá Nhập ÷ 1 (chưa có đóng gói)';
+      if (el) el.value = giaNhap > 0 ? Math.round(giaNhap / qty) : '';
+    }
     function onItemTypeChange() {
       const t = document.getElementById('f-type').value;
+      const isIng = t === 'INGREDIENT';
+      const isProd = t === 'PRODUCT' || t === 'SEMI_PRODUCT';
       document.getElementById('f-shelf-wrap').style.display = t === 'PRODUCT' ? '' : 'none';
-      document.getElementById('f-ingtype-wrap').style.display = t === 'INGREDIENT' ? '' : 'none';
-      document.getElementById('f-sup-wrap').style.display = t === 'INGREDIENT' ? '' : 'none';
-      document.getElementById('f-unitcost-ing-wrap').style.display = t === 'INGREDIENT' ? '' : 'none';
-      document.getElementById('f-unitcost-ro-wrap').style.display = (t === 'PRODUCT' || t === 'SEMI_PRODUCT') ? '' : 'none';
-      document.getElementById('recipe-section').style.display = (t === 'PRODUCT' || t === 'SEMI_PRODUCT') ? '' : 'none';
+      document.getElementById('f-ingtype-wrap').style.display = isIng ? '' : 'none';
+      document.getElementById('f-sup-wrap').style.display = isIng ? '' : 'none';
+      document.getElementById('f-unitcost-ing-wrap').style.display = isIng ? '' : 'none';
+      document.getElementById('f-gia-le-wrap').style.display = isIng ? '' : 'none';
+      document.getElementById('f-unitcost-ro-wrap').style.display = isProd ? '' : 'none';
+      document.getElementById('recipe-section').style.display = isProd ? '' : 'none';
       const pkgSec = document.getElementById('packaging-section');
-      if (pkgSec) pkgSec.style.display = t === 'INGREDIENT' ? '' : 'none';
+      if (pkgSec) pkgSec.style.display = isIng ? '' : 'none';
     }
     function renderRL() {
       const tb = document.getElementById('recipe-tbody'); if (!tb) return;
@@ -1379,7 +1533,11 @@
         itemGroupId: igVal || null,
         splittable: document.getElementById('f-splittable')?.checked ?? true,
         defaultSupplierId: document.getElementById('f-sup')?.value || null,
-        unitCost: itemType === 'INGREDIENT' && document.getElementById('f-unitcost')?.value ? +document.getElementById('f-unitcost').value : null,
+        unitCost: (() => {
+          if (itemType !== 'INGREDIENT') return null;
+          const giaLe = document.getElementById('f-gia-le')?.value;
+          return giaLe ? +giaLe : null;
+        })(),
         shelfDays: document.getElementById('f-shelf')?.value !== '' && document.getElementById('f-shelf')?.value != null ? +document.getElementById('f-shelf').value : null,
         recipeNote: document.getElementById('f-rnote')?.value || null,
         recipeLines: recipeLines.filter(l => l.itemId).map(l => ({ itemId: l.itemId, quantity: +l.qty, unit: l.unit, sortOrder: l.sort }))
@@ -1396,15 +1554,32 @@
       const tb = document.getElementById('packaging-tbody'); if (!tb) return;
       if (!packagings.length) {
         tb.innerHTML = `<tr><td colspan="5" style="padding:12px 8px;color:#94a3b8;text-align:center;font-size:12px">Chưa có đóng gói — nhấn "+ Thêm" để bắt đầu</td></tr>`;
+        // Không có đóng gói → giaNhap = giaLe × 1 (reverse từ unitCost)
+        const giaNhapEl = document.getElementById('f-gia-nhap');
+        const giaLeEl   = document.getElementById('f-gia-le');
+        if (giaNhapEl && !giaNhapEl.value && giaLeEl && giaLeEl.value) {
+          giaNhapEl.value = giaLeEl.value;
+        }
+        calcGiaLe();
         return;
       }
       tb.innerHTML = packagings.map((p, i) => `<tr style="border-bottom:1px solid #f1f5f9">
         <td style="padding:4px 4px"><input value="${p.code ?? ''}" oninput="packagings[${i}].code=this.value" placeholder="BAO10" style="width:72px"></td>
         <td style="padding:4px 4px"><input value="${p.name ?? ''}" oninput="packagings[${i}].name=this.value" placeholder="Bao 10kg" style="width:150px"></td>
-        <td style="padding:4px 4px;text-align:right"><input type="number" step="0.001" value="${p.qtyPerPack ?? ''}" oninput="packagings[${i}].qtyPerPack=+this.value" placeholder="10" style="width:80px;text-align:right"></td>
+        <td style="padding:4px 4px;text-align:right"><input type="number" step="0.001" value="${p.qtyPerPack ?? ''}" oninput="packagings[${i}].qtyPerPack=+this.value;calcGiaLe()" placeholder="10" style="width:80px;text-align:right"></td>
         <td style="padding:4px 4px;text-align:center"><input type="checkbox" ${p.isDefault ? 'checked' : ''} onchange="packagings.forEach((x,j)=>{x.isDefault=(j===${i}&&this.checked)});renderPackagings()"></td>
         <td style="padding:4px 4px"><button class="btn btn-danger btn-sm" onclick="packagings.splice(${i},1);renderPackagings()">✕</button></td>
       </tr>`).join('');
+      // Nếu đang chỉnh sửa: f-gia-nhap chưa có giá trị nhưng f-gia-le đã được điền từ unitCost
+      // → tính ngược: giaNhap = giaLe × qtyPerPack rồi mới gọi calcGiaLe()
+      const giaNhapEl = document.getElementById('f-gia-nhap');
+      const giaLeEl   = document.getElementById('f-gia-le');
+      if (giaNhapEl && !giaNhapEl.value && giaLeEl && giaLeEl.value) {
+        const defPkg = packagings.find(p => p.isDefault) ?? packagings[0] ?? null;
+        const qty    = defPkg && defPkg.qtyPerPack ? parseFloat(defPkg.qtyPerPack) : 1;
+        giaNhapEl.value = Math.round(parseFloat(giaLeEl.value) * qty);
+      }
+      calcGiaLe();
     }
     function addPackagingRow() {
       packagings.push({ code: '', name: '', qtyPerPack: '', isDefault: packagings.length === 0 });
@@ -4798,6 +4973,214 @@
       </div>`;
 
       content.innerHTML = html;
+    }
+
+    // ── Units ─────────────────────────────────────────────────────────────────────
+    let unitsData = [];
+
+    async function pageUnits() {
+      document.getElementById('content').innerHTML = `<div style="padding:16px">
+        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+          <button class="btn btn-primary" onclick="showUnitForm()">+ Thêm đơn vị</button>
+          <button class="btn btn-ghost" onclick="pageUnits()">🔄 Làm mới</button>
+        </div>
+        <div id="units-table">Đang tải...</div>
+      </div>`;
+      try {
+        const data = await api('GET', '/api/v1/units');
+        unitsData = Array.isArray(data) ? data : [];
+        renderUnitsTable();
+      } catch(e) { document.getElementById('units-table').innerHTML = `<div style="color:red">Lỗi: ${e.message}</div>`; }
+    }
+
+    function renderUnitsTable() {
+      const el = document.getElementById('units-table');
+      if (!el) return;
+      if (!unitsData.length) { el.innerHTML = '<div style="color:#94a3b8">Chưa có đơn vị nào.</div>'; return; }
+      el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:#f1f5f9">
+          <th style="padding:8px 12px;text-align:left">Code</th>
+          <th style="padding:8px 12px;text-align:left">Tên</th>
+          <th style="padding:8px 12px;text-align:left">Ghi chú</th>
+          <th style="padding:8px 12px;text-align:center">Thao tác</th>
+        </tr></thead>
+        <tbody>
+          ${unitsData.map(u => `<tr style="border-top:1px solid #e2e8f0">
+            <td style="padding:8px 12px"><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">${u.code}</code></td>
+            <td style="padding:8px 12px">${u.name ?? ''}</td>
+            <td style="padding:8px 12px;color:#64748b;font-size:12px">${u.note ?? ''}</td>
+            <td style="padding:8px 12px;text-align:center;white-space:nowrap">
+              <button class="btn btn-ghost btn-sm" onclick='showUnitForm(${JSON.stringify(u)})'>✏️ Sửa</button>
+              <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="deleteUnit('${u.code}','${u.name ?? u.code}')">🗑 Xóa</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+    }
+
+    function showUnitForm(u = null) {
+      let modal = document.getElementById('unit-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'unit-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+        document.body.appendChild(modal);
+      }
+      modal.innerHTML = `<div style="background:#fff;border-radius:10px;padding:24px;width:420px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <h3 style="margin:0 0 16px">${u ? 'Sửa đơn vị' : 'Thêm đơn vị'}</h3>
+        <label style="font-size:13px;font-weight:600">Code *</label>
+        <input id="u-code" class="input" value="${u?.code ?? ''}" ${u ? 'readonly style="width:100%;margin:4px 0 12px;background:#f1f5f9"' : 'style="width:100%;margin:4px 0 12px"'} placeholder="VD: KG, CAI, HOP...">
+        <label style="font-size:13px;font-weight:600">Tên</label>
+        <input id="u-name" class="input" value="${u?.name ?? ''}" placeholder="VD: Kilogram" style="width:100%;margin:4px 0 12px">
+        <label style="font-size:13px;font-weight:600">Ghi chú</label>
+        <input id="u-desc" class="input" value="${u?.note ?? ''}" placeholder="Ghi chú thêm (tuỳ chọn)" style="width:100%;margin:4px 0 16px">
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost" onclick="document.getElementById('unit-modal').remove()">Huỷ</button>
+          <button class="btn btn-primary" onclick="saveUnit(${u ? `'${u.code}'` : 'null'})">💾 Lưu</button>
+        </div>
+      </div>`;
+      modal.style.display = 'flex';
+    }
+
+    async function saveUnit(existingCode) {
+      const code = document.getElementById('u-code').value.trim().toUpperCase();
+      const name = document.getElementById('u-name').value.trim();
+      const note = document.getElementById('u-desc').value.trim();
+      if (!code) { toast('Vui lòng nhập Code', true); return; }
+      try {
+        if (existingCode) {
+          await api('PUT', `/api/v1/units/${existingCode}`, { code, name, note });
+          toast('Đã cập nhật đơn vị');
+        } else {
+          await api('POST', '/api/v1/units', { code, name, note });
+          toast('Đã tạo đơn vị');
+        }
+        document.getElementById('unit-modal')?.remove();
+        pageUnits();
+      } catch(e) { toast('Lỗi: ' + e.message, true); }
+    }
+
+    async function deleteUnit(code, label) {
+      if (!confirm(`Xóa đơn vị "${label}" (${code})?`)) return;
+      try {
+        await api('DELETE', `/api/v1/units/${code}`);
+        toast('Đã xóa');
+        pageUnits();
+      } catch(e) { toast('Lỗi: ' + e.message, true); }
+    }
+
+    // ── Unit Conversions ──────────────────────────────────────────────────────────
+    let convData = [];
+
+    async function pageUnitConversions() {
+      document.getElementById('content').innerHTML = `<div style="padding:16px">
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+          <button class="btn btn-primary" onclick="showConvForm()">+ Thêm quy đổi</button>
+          <button class="btn btn-ghost" onclick="pageUnitConversions()">🔄 Làm mới</button>
+          <input id="conv-search" class="input" placeholder="Tìm from/to unit..." oninput="renderConvTable()" style="width:200px;margin-left:auto">
+        </div>
+        <div id="conv-table">Đang tải...</div>
+      </div>`;
+      try {
+        const data = await api('GET', '/api/v1/units/conversions');
+        convData = Array.isArray(data) ? data : (data?.content ?? []);
+        renderConvTable();
+      } catch(e) { document.getElementById('conv-table').innerHTML = `<div style="color:red">Lỗi: ${e.message}</div>`; }
+    }
+
+    function renderConvTable() {
+      const el = document.getElementById('conv-table');
+      if (!el) return;
+      const q = (document.getElementById('conv-search')?.value ?? '').toLowerCase();
+      const rows = convData.filter(c =>
+        !q || c.fromUnit?.toLowerCase().includes(q) || c.toUnit?.toLowerCase().includes(q) || c.note?.toLowerCase().includes(q)
+      );
+      if (!rows.length) { el.innerHTML = '<div style="color:#94a3b8">Không có dữ liệu.</div>'; return; }
+      el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:#f1f5f9">
+          <th style="padding:8px 12px;text-align:left">Từ</th>
+          <th style="padding:8px 12px;text-align:center">→</th>
+          <th style="padding:8px 12px;text-align:left">Đến</th>
+          <th style="padding:8px 12px;text-align:right">Hệ số</th>
+          <th style="padding:8px 12px;text-align:left">Ghi chú</th>
+          <th style="padding:8px 12px;text-align:center">Thao tác</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(c => `<tr style="border-top:1px solid #e2e8f0">
+            <td style="padding:8px 12px"><code style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:4px">${c.fromUnit}</code></td>
+            <td style="padding:8px 12px;text-align:center;color:#94a3b8">→</td>
+            <td style="padding:8px 12px"><code style="background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:4px">${c.toUnit}</code></td>
+            <td style="padding:8px 12px;text-align:right;font-weight:600">${c.factor}</td>
+            <td style="padding:8px 12px;color:#64748b;font-size:12px">${c.note ?? ''}</td>
+            <td style="padding:8px 12px;text-align:center;white-space:nowrap">
+              <button class="btn btn-ghost btn-sm" onclick='showConvForm(${JSON.stringify(c)})'>✏️ Sửa</button>
+              <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="deleteConv('${c.fromUnit}','${c.toUnit}')">🗑 Xóa</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <div style="color:#64748b;font-size:12px;margin-top:8px">${rows.length} quy đổi</div>`;
+    }
+
+    function showConvForm(c = null) {
+      let modal = document.getElementById('conv-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'conv-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+        document.body.appendChild(modal);
+      }
+      const unitOpts = unitsData.length
+        ? unitsData.map(u => `<option value="${u.code}" ${c?.fromUnit===u.code||(!c&&u.code==='')?'selected':''}>${u.code}${u.name?' - '+u.name:''}</option>`).join('')
+        : '';
+      const sel = (id, val) => unitOpts
+        ? `<select id="${id}" class="input" style="width:100%;margin:4px 0 12px">${unitOpts.replace(`value="${val}"`, `value="${val}" selected`)}</select>`
+        : `<input id="${id}" class="input" value="${val??''}" placeholder="VD: KG" style="width:100%;margin:4px 0 12px">`;
+      modal.innerHTML = `<div style="background:#fff;border-radius:10px;padding:24px;width:420px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <h3 style="margin:0 0 16px">${c ? 'Sửa quy đổi' : 'Thêm quy đổi'}</h3>
+        <label style="font-size:13px;font-weight:600">Từ đơn vị (From) *</label>
+        ${c ? `<input id="cv-from" class="input" value="${c.fromUnit}" readonly style="width:100%;margin:4px 0 12px;background:#f1f5f9">` : sel('cv-from', '')}
+        <label style="font-size:13px;font-weight:600">Đến đơn vị (To) *</label>
+        ${c ? `<input id="cv-to" class="input" value="${c.toUnit}" readonly style="width:100%;margin:4px 0 12px;background:#f1f5f9">` : sel('cv-to', '')}
+        <label style="font-size:13px;font-weight:600">Hệ số *</label>
+        <input id="cv-factor" class="input" type="number" step="any" value="${c?.factor ?? ''}" placeholder="VD: 1000 (1 KG = 1000 G)" style="width:100%;margin:4px 0 12px">
+        <label style="font-size:13px;font-weight:600">Ghi chú</label>
+        <input id="cv-note" class="input" value="${c?.note ?? ''}" placeholder="VD: 1 KG = 1000 G" style="width:100%;margin:4px 0 16px">
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost" onclick="document.getElementById('conv-modal').remove()">Huỷ</button>
+          <button class="btn btn-primary" onclick="saveConv(${c ? `'${c.fromUnit}','${c.toUnit}'` : 'null,null'})">💾 Lưu</button>
+        </div>
+      </div>`;
+      modal.style.display = 'flex';
+    }
+
+    async function saveConv(existingFrom, existingTo) {
+      const fromUnit = document.getElementById('cv-from').value.trim().toUpperCase();
+      const toUnit   = document.getElementById('cv-to').value.trim().toUpperCase();
+      const factor   = parseFloat(document.getElementById('cv-factor').value);
+      const note     = document.getElementById('cv-note').value.trim();
+      if (!fromUnit || !toUnit) { toast('Vui lòng chọn đủ From và To', true); return; }
+      if (isNaN(factor) || factor <= 0) { toast('Hệ số phải là số dương', true); return; }
+      try {
+        if (existingFrom) {
+          await api('PUT', `/api/v1/units/conversions/${existingFrom}/${existingTo}`, { fromUnit, toUnit, factor, note });
+          toast('Đã cập nhật quy đổi');
+        } else {
+          await api('POST', '/api/v1/units/conversions', { fromUnit, toUnit, factor, note });
+          toast('Đã tạo quy đổi');
+        }
+        document.getElementById('conv-modal')?.remove();
+        pageUnitConversions();
+      } catch(e) { toast('Lỗi: ' + e.message, true); }
+    }
+
+    async function deleteConv(fromUnit, toUnit) {
+      if (!confirm(`Xóa quy đổi ${fromUnit} → ${toUnit}?`)) return;
+      try {
+        await api('DELETE', `/api/v1/units/conversions/${fromUnit}/${toUnit}`);
+        toast('Đã xóa');
+        pageUnitConversions();
+      } catch(e) { toast('Lỗi: ' + e.message, true); }
     }
 
     // ── Boot ──────────────────────────────────────────────────────────────────────

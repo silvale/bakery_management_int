@@ -821,4 +821,18 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         log.info("saveUnitCost: item={}, cost={}", item.getCode(), cost);
     }
 
+
+    /**
+     * Xóa hàng loạt items (soft-delete).
+     * @return số lượng item đã xóa thành công
+     */
+    @Transactional
+    public int bulkDelete(List<java.util.UUID> ids) {
+        int count = 0;
+        for (java.util.UUID id : ids) {
+            try { delete(id); count++; } catch (Exception ignored) {}
+        }
+        return count;
+    }
+
 }
