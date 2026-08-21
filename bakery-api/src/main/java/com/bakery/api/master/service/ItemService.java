@@ -797,4 +797,15 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             default -> throw new IllegalArgumentException("Unknown itemType: " + itemType);
         };
     }
+    /**
+     * Lưu unit_cost tính từ công thức vào item — dùng bởi RecipeController /cost/apply.
+     */
+    @Transactional
+    public void saveUnitCost(UUID itemId, BigDecimal cost) {
+        Item item = repository.findById(itemId)
+                .orElseThrow(() -> new ResourceNotFoundException("Item", itemId));
+        item.setUnitCost(cost);
+        log.info("saveUnitCost: item={}, cost={}", item.getCode(), cost);
+    }
+
 }

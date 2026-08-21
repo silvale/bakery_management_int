@@ -1123,6 +1123,8 @@
         tr += `<td>${badge(i.approvalStatus)}</td>`;
         tr += `<td style="white-space:nowrap">
           <button class="btn btn-ghost btn-sm" onclick='nav("item-form",${JSON.stringify(i)})'>Sửa</button>
+          ${showRecipeCol && i.recipe?.active
+            ? `<button class="btn btn-ghost btn-sm" style="color:#0ea5e9" onclick="showCostModal('${i.id}','${i.name.replace(/'/g,"\\'")}')">💰</button>` : ''}
           ${i.approvalStatus === 'DRAFT' || i.approvalStatus === 'PENDING_APPROVAL'
             ? `<button class="btn btn-success btn-sm" onclick="approveItem('${i.id}')">Approve</button>` : ''}
         </td></tr>`;
@@ -1132,6 +1134,113 @@
       wrap.innerHTML = `<table><thead>${thead}</thead><tbody>${rows}</tbody></table>`;
     }
     async function approveItem(id) { try { await api('POST', `/api/v1/items/${id}/approve`); toast('Đã approve'); } finally { loadItems(); } }
+
+    // ── Cost Modal ────────────────────────────────────────────────
+    async function showCostModal(itemId, itemName) {
+      // Show modal skeleton
+      let modal = document.getElementById('cost-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'cost-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+        document.body.appendChild(modal);
+      }
+      modal.innerHTML = `<div style="background:#fff;border-radius:10px;padding:24px;width:760px;max-width:95vw;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div>
+            <div style="font-weight:700;font-size:16px">💰 Tính giá cost</div>
+            <div style="color:#64748b;font-size:13px;margin-top:2px">${itemName}</div>
+          </div>
+          <button onclick="document.getElementById('cost-modal').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#94a3b8">✕</button>
+        </div>
+        <div id="cost-modal-body" style="color:#64748b;text-align:center;padding:32px">⏳ Đang tính...</div>
+      </div>`;
+      modal.style.display = 'flex';
+
+      try {
+        const result = await api('GET', `/api/v1/recipes/cost/${itemId}`);
+        renderCostResult(result, itemId);
+      } catch(e) {
+        document.getElementById('cost-modal-body').innerHTML =
+          `<div style="color:#ef4444">❌ ${e.message ?? 'Lỗi tính cost'}</div>`;
+      }
+    }
+
+    function renderCostResult(r, itemId) {
+      const body = document.getElementById('cost-modal-body');
+      if (!body) return;
+      const fmtCost = v => v ? Number(v).toLocaleString('vi') + 'đ' : '—';
+      const srcBadge = s => {
+        const map = {
+          CATALOG: ['#dcfce7','#16a34a','Catalog'],
+          STOCK_LOT_AVG: ['#dbeafe','#1d4ed8','Tồn kho TB'],
+          RECIPE_CALCULATED: ['#f3e8ff','#7c3aed','BTP'],
+          MISSING: ['#fee2e2','#dc2626','Thiếu giá'],
+          UNIT_MISMATCH: ['#fef3c7','#d97706','Lỗi đvt'],
+        };
+        const [bg, col, label] = map[s] ?? ['#f1f5f9','#64748b', s];
+        return `<span style="background:${bg};color:${col};padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600">${label}</span>`;
+      };
+
+      function renderLines(lines, depth = 0) {
+        return lines.map(l => {
+          const indent = depth ? `<span style="margin-left:${depth*16}px;color:#cbd5e1">└ </span>` : '';
+          const sub = l.subBreakdown?.length ? renderLines(l.subBreakdown, depth + 1) : '';
+          return `<tr style="${depth?'background:#f8fafc':''}">
+            <td style="padding:5px 8px;font-size:13px">${indent}${l.itemName} <code style="font-size:11px;color:#94a3b8">${l.itemCode}</code></td>
+            <td style="padding:5px 8px;text-align:right;font-size:13px">${Number(l.quantity).toLocaleString('vi')} ${l.unit}</td>
+            <td style="padding:5px 8px;text-align:right;font-size:13px">${fmtCost(l.unitPrice)}</td>
+            <td style="padding:5px 8px;text-align:right;font-size:13px;font-weight:${depth?400:600}">${fmtCost(l.lineCost)}</td>
+            <td style="padding:5px 8px">${srcBadge(l.priceSource)}</td>
+          </tr>${sub}`;
+        }).join('');
+      }
+
+      const completeColor = r.complete ? '#16a34a' : '#d97706';
+      const completeLabel = r.complete ? '✓ Đủ dữ liệu' : '⚠ Thiếu giá một số NL';
+
+      body.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div>
+            <span style="font-size:22px;font-weight:700;color:#0f172a">${fmtCost(r.totalCostPerUnit)}</span>
+            <span style="color:#64748b;font-size:13px;margin-left:8px">/ đơn vị sản xuất</span>
+          </div>
+          <span style="color:${completeColor};font-size:13px;font-weight:600">${completeLabel}</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:6px">
+            <thead>
+              <tr style="background:#f8fafc">
+                <th style="padding:6px 8px;text-align:left;font-size:12px;color:#64748b;border-bottom:1px solid #e2e8f0">Nguyên liệu</th>
+                <th style="padding:6px 8px;text-align:right;font-size:12px;color:#64748b;border-bottom:1px solid #e2e8f0">Số lượng</th>
+                <th style="padding:6px 8px;text-align:right;font-size:12px;color:#64748b;border-bottom:1px solid #e2e8f0">Đơn giá</th>
+                <th style="padding:6px 8px;text-align:right;font-size:12px;color:#64748b;border-bottom:1px solid #e2e8f0">Thành tiền</th>
+                <th style="padding:6px 8px;font-size:12px;color:#64748b;border-bottom:1px solid #e2e8f0">Nguồn giá</th>
+              </tr>
+            </thead>
+            <tbody style="border-top:none">
+              ${renderLines(r.breakdown ?? [])}
+            </tbody>
+          </table>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+          ${r.complete
+            ? `<button class="btn btn-primary" onclick="applyCost('${itemId}',${r.totalCostPerUnit})">💾 Áp dụng giá vốn ${fmtCost(r.totalCostPerUnit)}</button>`
+            : `<div style="color:#d97706;font-size:13px;padding:6px 0">Không thể lưu vì thiếu giá một số NL — vui lòng nhập giá trước.</div>`}
+          <button class="btn btn-ghost" onclick="document.getElementById('cost-modal').remove()">Đóng</button>
+        </div>`;
+    }
+
+    async function applyCost(itemId, expectedCost) {
+      try {
+        const result = await api('POST', `/api/v1/recipes/cost/${itemId}/apply`);
+        document.getElementById('cost-modal')?.remove();
+        toast(`✓ Đã lưu giá vốn: ${Number(result.totalCostPerUnit).toLocaleString('vi')}đ`);
+        allItems = []; loadItems();
+      } catch(e) {
+        toast('Lỗi: ' + (e.message ?? 'Không lưu được'), 'error');
+      }
+    }
 
     // Item Form
     let recipeLines = []; let packagings = [];
