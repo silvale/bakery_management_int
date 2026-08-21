@@ -314,4 +314,15 @@ public class RecipeService
         if (item instanceof SemiProduct) return "SEMI_PRODUCT";
         return "INGREDIENT";
     }
+    /**
+     * Delegate tới repository để lấy danh sách UNIT_MISMATCH trong active recipe.
+     * Kết quả là Object[] với 7 cột:
+     *   [0] product_code, [1] product_name, [2] product_type,
+     *   [3] ingredient_code, [4] ingredient_name, [5] ingredient_unit, [6] recipe_unit
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public java.util.List<Object[]> findUnitMismatchIssues() {
+        return recipeRepository.findUnitMismatchIssues();
+    }
+
 }

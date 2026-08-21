@@ -4,7 +4,9 @@
 package com.bakery.api.recipe.controller;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import com.bakery.api.master.service.ItemService;
@@ -98,4 +100,27 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
         }
         return result;
     }
+    /**
+     * Trả danh sách recipe line trong active recipe có đơn vị UNIT_MISMATCH:
+     * - lineUnit ≠ ingredient.unit (khác đơn vị)
+     * - KHÔNG có bản ghi unit_conversion để quy đổi
+     *
+     * Dùng để chẩn đoán và sửa công thức / bổ sung unit_conversion.
+     */
+    @GetMapping("/unit-issues")
+    public List<Map<String, Object>> unitIssues() {
+        List<Object[]> rows = service.findUnitMismatchIssues();
+        return rows.stream().map(r -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("productCode",      r[0]);
+            m.put("productName",      r[1]);
+            m.put("productType",      r[2]);
+            m.put("ingredientCode",   r[3]);
+            m.put("ingredientName",   r[4]);
+            m.put("ingredientUnit",   r[5]);
+            m.put("recipeUnit",       r[6]);
+            return m;
+        }).toList();
+    }
+
 }

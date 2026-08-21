@@ -54,4 +54,36 @@ public interface RecipeRepository extends BaseRepository<Recipe> {
     /** Phiên bản PENDING_APPROVAL mới nhất của recipe cho 1 semi-product (dùng để upsert khi update). */
     Optional<Recipe> findFirstBySemiProductIdAndApprovalStatusOrderByVersionDesc(
             UUID semiProductId, com.bakery.framework.entity.ApprovalStatus approvalStatus);
+    /**
+     * Tìm tất cả recipe line trong active recipe có đơn vị KHÔNG khớp với item.unit
+     * VÀ không có bản ghi unit_conversion nào để quy đổi.
+     * Kết quả dùng để chẩn đoán lỗi UNIT_MISMATCH khi tính giá cost.
+     *
+     * Columns: product_code, product_name, product_type,
+     *          ingredient_code, ingredient_name, ingredient_unit, recipe_unit
+     */
+    @Query(value = """
+        SELECT
+            p.code            AS product_code,
+            p.name            AS product_name,
+            p.item_type       AS product_type,
+            i.code            AS ingredient_code,
+            i.name            AS ingredient_name,
+            i.unit            AS ingredient_unit,
+            rl.unit           AS recipe_unit
+        FROM recipe_line rl
+        JOIN recipe r  ON r.id  = rl.recipe_id
+        JOIN item   i  ON i.id  = rl.item_id
+        JOIN item   p  ON p.id  = COALESCE(r.product_id, r.semi_product_id)
+        WHERE r.is_active = true
+          AND UPPER(rl.unit) <> UPPER(i.unit)
+          AND NOT EXISTS (
+              SELECT 1 FROM unit_conversion uc
+              WHERE UPPER(uc.from_unit) = UPPER(rl.unit)
+                AND UPPER(uc.to_unit)   = UPPER(i.unit)
+          )
+        ORDER BY p.code, i.code
+        """, nativeQuery = true)
+    List<Object[]> findUnitMismatchIssues();
+
 }
