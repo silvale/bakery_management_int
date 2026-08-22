@@ -102,16 +102,18 @@ public class RecipeCostService {
             BigDecimal qty = line.getQuantity().multiply(multiplier);
 
             if (lineItem instanceof SemiProduct) {
-                // BOM 2 tầng: đệ quy tính cost của SemiProduct này
-                CostResult subResult = calculateInternal(lineItem, qty, new HashSet<>(visitedIds));
+                // BOM 2 tầng: đệ quy tính cost của SemiProduct này (luôn dùng BigDecimal.ONE để lấy đơn giá thực)
+                CostResult subResult = calculateInternal(lineItem, BigDecimal.ONE, new HashSet<>(visitedIds));
+                BigDecimal btpUnitPrice = subResult.totalCostPerUnit();
+                BigDecimal btpLineCost = btpUnitPrice.multiply(qty).setScale(COST_SCALE, RoundingMode.HALF_UP);
                 breakdown.add(new LineCost(
                         lineItem.getCode(),
                         lineItem.getName(),
                         "SEMI_PRODUCT",
                         qty,
                         line.getUnit(),
-                        subResult.totalCostPerUnit(),
-                        subResult.totalCostPerUnit().multiply(qty).setScale(COST_SCALE, RoundingMode.HALF_UP),
+                        btpUnitPrice,
+                        btpLineCost,
                         "RECIPE_CALCULATED",
                         subResult.breakdown()
                 ));
