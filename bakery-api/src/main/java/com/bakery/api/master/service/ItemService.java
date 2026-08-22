@@ -490,6 +490,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         Recipe recipe = new Recipe();
         recipe.setProduct(product);
         recipe.setNote(req.recipeNote());
+        recipe.setYieldQuantity(req.recipeYieldQuantity());
         recipe.setActive(false);
         recipe.setVersion(version);
         recipe.setCreatedBy(actorResolver.currentUserId());
@@ -501,6 +502,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         Recipe recipe = new Recipe();
         recipe.setSemiProduct(sp);
         recipe.setNote(req.recipeNote());
+        recipe.setYieldQuantity(req.recipeYieldQuantity());
         recipe.setActive(false);
         recipe.setVersion(version);
         recipe.setCreatedBy(actorResolver.currentUserId());
@@ -510,6 +512,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
     private void replaceRecipeLines(Recipe recipe, ItemRequest req) {
         recipe.setNote(req.recipeNote());
+        recipe.setYieldQuantity(req.recipeYieldQuantity());
         // Force dirty Recipe header — nếu chỉ lines thay đổi, Hibernate không detect
         // Recipe là dirty (lines là @NotAudited) → không có UPDATE SQL → Envers bỏ sót.
         // Set updatedAt thủ công để trigger dirty check.

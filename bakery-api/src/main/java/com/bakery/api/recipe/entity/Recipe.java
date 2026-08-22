@@ -4,6 +4,7 @@ import org.hibernate.envers.Audited;
 import org.hibernate.envers.RelationTargetAuditMode;
 import org.hibernate.envers.NotAudited;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -47,6 +48,14 @@ public class Recipe extends BaseEntity {
 
     @Column(name = "note", length = 500)
     private String note;
+
+    /**
+     * Tổng khối lượng sản phẩm tạo ra từ 1 mẻ (KG).
+     * Dùng trong RecipeCostService để tính đúng giá/KG: batchCost / yieldQuantity.
+     * null = tự tính từ tổng KG nguyên liệu trong công thức.
+     */
+    @Column(name = "yield_quantity", precision = 10, scale = 4)
+    private BigDecimal yieldQuantity;
 
     /**
      * NULL = công thức gốc (base).

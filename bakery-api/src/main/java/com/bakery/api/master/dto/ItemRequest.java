@@ -45,4 +45,12 @@ public record ItemRequest(
 
         // ── Recipe (Product + SemiProduct) ───────────────────
         String recipeNote,
+
+        /**
+         * Tổng khối lượng sản phẩm BTP/SP tạo ra từ 1 mẻ (KG).
+         * Dùng để tính giá/KG chính xác: giá/KG = tổng chi phí nguyên liệu / yieldQuantity.
+         * null = tự tính từ tổng KG nguyên liệu trong công thức.
+         */
+        BigDecimal recipeYieldQuantity,
+
         @Valid List<RecipeLineRequest> recipeLines) {}

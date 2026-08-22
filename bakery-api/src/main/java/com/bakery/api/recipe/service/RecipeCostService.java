@@ -102,9 +102,30 @@ public class RecipeCostService {
             BigDecimal qty = line.getQuantity().multiply(multiplier);
 
             if (lineItem instanceof SemiProduct) {
-                // BOM 2 tầng: đệ quy tính cost của SemiProduct này (luôn dùng BigDecimal.ONE để lấy đơn giá thực)
+                // BOM 2 tầng: đệ quy tính cost của SemiProduct với multiplier=1 để ra giá/mẻ
+                Recipe subRecipe = findActiveRecipe(lineItem);
                 CostResult subResult = calculateInternal(lineItem, BigDecimal.ONE, new HashSet<>(visitedIds));
-                BigDecimal btpUnitPrice = subResult.totalCostPerUnit();
+
+                // Ưu tiên 1: yieldQuantity được set thủ công trên recipe
+                // Ưu tiên 2: tổng KG nguyên liệu trong recipe (tự tính)
+                // giá/KG = batchCost / yield
+                BigDecimal batchYield = subRecipe.getYieldQuantity();
+                if (batchYield == null || batchYield.compareTo(BigDecimal.ZERO) <= 0) {
+                    batchYield = subResult.breakdown().stream()
+                            .filter(l -> l.unit() != null && l.unit().equalsIgnoreCase("KG"))
+                            .map(LineCost::quantity)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+                }
+
+                BigDecimal btpUnitPrice;
+                if (batchYield.compareTo(BigDecimal.ZERO) > 0) {
+                    btpUnitPrice = subResult.totalCostPerUnit()
+                            .divide(batchYield, COST_SCALE, RoundingMode.HALF_UP);
+                } else {
+                    // Fallback nếu recipe BTP không có KG ingredient (hiếm)
+                    btpUnitPrice = subResult.totalCostPerUnit();
+                }
+
                 BigDecimal btpLineCost = btpUnitPrice.multiply(qty).setScale(COST_SCALE, RoundingMode.HALF_UP);
                 breakdown.add(new LineCost(
                         lineItem.getCode(),
