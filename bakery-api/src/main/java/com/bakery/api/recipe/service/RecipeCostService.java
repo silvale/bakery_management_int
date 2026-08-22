@@ -24,6 +24,7 @@ import com.bakery.api.pricing.entity.IngredientPrice;
 import com.bakery.api.pricing.repository.IngredientPriceRepository;
 import com.bakery.api.recipe.entity.Recipe;
 import com.bakery.api.recipe.entity.RecipeLine;
+import org.hibernate.Hibernate;
 import com.bakery.api.recipe.repository.RecipeRepository;
 import com.bakery.framework.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -97,7 +98,7 @@ public class RecipeCostService {
         boolean complete = true;
 
         for (RecipeLine line : recipe.getLines()) {
-            Item lineItem = line.getItem();
+            Item lineItem = Hibernate.unproxy(line.getItem(), Item.class);
             BigDecimal qty = line.getQuantity().multiply(multiplier);
 
             if (lineItem instanceof SemiProduct) {
