@@ -214,4 +214,14 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
         return service.autoFillYieldQuantity();
     }
 
+    /**
+     * Trả về danh sách sản phẩm / bán thành phẩm (active recipe) có dùng đến ingredient/BTP này.
+     * GET /api/v1/recipes/usage/{itemId}
+     * Trả về: [{ productId, productCode, productName, productType, recipeVersion, quantity, unit }]
+     */
+    @GetMapping("/usage/{itemId}")
+    public List<Map<String, Object>> usageByItem(@PathVariable UUID itemId) {
+        return service.findUsageByItem(itemId);
+    }
+
 }

@@ -111,9 +111,15 @@ public class RecipeCostService {
                 // giá/KG = batchCost / yield
                 BigDecimal batchYield = subRecipe.getYieldQuantity();
                 if (batchYield == null || batchYield.compareTo(BigDecimal.ZERO) <= 0) {
+                    // Quy đổi tất cả nguyên liệu về KG (áp dụng unit_conversion nếu đơn vị khác KG)
                     batchYield = subResult.breakdown().stream()
-                            .filter(l -> l.unit() != null && l.unit().equalsIgnoreCase("KG"))
-                            .map(LineCost::quantity)
+                            .filter(l -> l.unit() != null)
+                            .map(l -> {
+                                if (l.unit().equalsIgnoreCase("KG")) return l.quantity();
+                                return unitConversionRepository.findConversion(l.unit(), "KG")
+                                        .map(uc -> l.quantity().multiply(uc.getFactor()))
+                                        .orElse(BigDecimal.ZERO);
+                            })
                             .reduce(BigDecimal.ZERO, BigDecimal::add);
                 }
 

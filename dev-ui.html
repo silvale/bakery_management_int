@@ -660,6 +660,24 @@
     let allItems = [], allWarehouses = [], allSuppliers = [], allItemGroups = [], mainStockItems = [];
     let warehouseStockQtyMap = {}; // itemId -> qty (tồn kho kho xuất đang chọn)
     let allUnits = []; // loaded from code_value WHERE group_key='UNIT'
+    let allUnitConversions = []; // { fromUnit, toUnit, factor } — dùng để quy đổi về KG khi tính yield
+    async function loadAllUnitConversions() {
+      if (allUnitConversions.length) return;
+      try {
+        const d = await api('GET', '/api/v1/units/conversions');
+        allUnitConversions = Array.isArray(d) ? d : (d?.content ?? []);
+      } catch (_) { allUnitConversions = []; }
+    }
+    /** Tìm hệ số quy đổi từ fromUnit → KG. Trả về null nếu không tìm thấy. */
+    function conversionToKg(fromUnit) {
+      if (!fromUnit) return null;
+      const u = fromUnit.toUpperCase();
+      if (u === 'KG') return 1;
+      const c = allUnitConversions.find(x =>
+        x.fromUnit?.toUpperCase() === u && x.toUnit?.toUpperCase() === 'KG'
+      );
+      return c ? parseFloat(c.factor) : null;
+    }
     const PAGE_SIZE = 20;
 
     // ── API ───────────────────────────────────────────────────────────────────────
@@ -1270,7 +1288,9 @@
           ${showRecipeCol && i.recipe?.active
             ? `<button class="btn btn-ghost btn-sm" style="color:#0ea5e9" onclick="showCostModal('${i.id}','${i.name.replace(/'/g,"\\'")}')">💰</button>` : ''}
           ${i.approvalStatus === 'DRAFT' || i.approvalStatus === 'PENDING_APPROVAL'
-            ? `<button class="btn btn-success btn-sm" onclick="approveItem('${i.id}')">Approve</button>` : ''}`}
+            ? `<button class="btn btn-success btn-sm" onclick="approveItem('${i.id}')">Approve</button>` : ''}
+          ${!itemsShowDeleted && (i.itemType === 'INGREDIENT' || i.itemType === 'SEMI_PRODUCT')
+            ? `<button class="btn btn-ghost btn-sm" style="color:#7c3aed" title="Xem sản phẩm nào dùng NL/BTP này" onclick="showUsageModal('${i.id}','${i.name.replace(/'/g,"\\'")}')">🔍</button>` : ''}`}
         </td></tr>`;
         return tr;
       }).join('');
@@ -1364,6 +1384,96 @@
         // error already toasted by api()
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = '🔄 Tính lại giá vốn tất cả'; }
+      }
+    }
+
+    // ── Usage lookup ──────────────────────────────────────────────
+
+    async function loadItemUsage(itemId) {
+      const el = document.getElementById('usage-inline-list');
+      if (!el) return;
+      try {
+        const rows = await api('GET', `/api/v1/recipes/usage/${itemId}`);
+        if (!rows || rows.length === 0) {
+          el.innerHTML = '<span style="color:#94a3b8;font-size:13px">Chưa có sản phẩm nào dùng NL/BTP này trong công thức đang active.</span>';
+          return;
+        }
+        el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:#f8fafc">
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #e2e8f0">Code</th>
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #e2e8f0">Tên sản phẩm</th>
+            <th style="padding:6px 8px;text-align:center;border-bottom:1px solid #e2e8f0">Loại</th>
+            <th style="padding:6px 8px;text-align:right;border-bottom:1px solid #e2e8f0">Số lượng</th>
+            <th style="padding:6px 8px;border-bottom:1px solid #e2e8f0">ĐVT</th>
+            <th style="padding:6px 8px;text-align:center;border-bottom:1px solid #e2e8f0">Phiên bản CT</th>
+            <th style="padding:6px 8px;border-bottom:1px solid #e2e8f0"></th>
+          </tr></thead>
+          <tbody>${rows.map(r => `<tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:6px 8px"><code>${r.productCode}</code></td>
+            <td style="padding:6px 8px;font-weight:500">${r.productName}</td>
+            <td style="padding:6px 8px;text-align:center">${badge(r.productType)}</td>
+            <td style="padding:6px 8px;text-align:right;font-weight:700;color:#0f172a">${r.quantity}</td>
+            <td style="padding:6px 8px;color:#64748b">${r.unit}</td>
+            <td style="padding:6px 8px;text-align:center;color:#94a3b8;font-size:12px">v${r.recipeVersion}</td>
+            <td style="padding:6px 8px"><button class="btn btn-ghost btn-sm" onclick="nav('item-form',{id:'${r.productId}'})">Xem CT</button></td>
+          </tr>`).join('')}</tbody>
+        </table>`;
+      } catch(e) {
+        const el2 = document.getElementById('usage-inline-list');
+        if (el2) el2.innerHTML = '<span style="color:#ef4444;font-size:13px">Lỗi tải dữ liệu.</span>';
+      }
+    }
+
+    async function showUsageModal(itemId, itemName) {
+      let modal = document.getElementById('usage-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'usage-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+        document.body.appendChild(modal);
+      }
+      modal.innerHTML = `<div style="background:#fff;border-radius:10px;padding:24px;width:700px;max-width:95vw;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div>
+            <div style="font-size:16px;font-weight:700;color:#0f172a">📦 Dùng trong sản phẩm</div>
+            <div style="font-size:13px;color:#64748b;margin-top:2px">${itemName}</div>
+          </div>
+          <button onclick="document.getElementById('usage-modal').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#94a3b8">✕</button>
+        </div>
+        <div id="usage-modal-body" style="color:#64748b;text-align:center;padding:32px">⏳ Đang tải...</div>
+      </div>`;
+      modal.style.display = 'flex';
+      try {
+        const rows = await api('GET', `/api/v1/recipes/usage/${itemId}`);
+        const body = document.getElementById('usage-modal-body');
+        if (!body) return;
+        if (!rows || rows.length === 0) {
+          body.innerHTML = '<div style="padding:24px;color:#94a3b8">Chưa có sản phẩm nào dùng NL/BTP này trong công thức đang active.</div>';
+          return;
+        }
+        body.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:#f8fafc">
+            <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0">Code</th>
+            <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0">Tên sản phẩm</th>
+            <th style="padding:8px;text-align:center;border-bottom:1px solid #e2e8f0">Loại</th>
+            <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0">Số lượng</th>
+            <th style="padding:8px;border-bottom:1px solid #e2e8f0">ĐVT</th>
+            <th style="padding:8px;text-align:center;border-bottom:1px solid #e2e8f0">Phiên bản CT</th>
+            <th style="padding:8px;border-bottom:1px solid #e2e8f0"></th>
+          </tr></thead>
+          <tbody>${rows.map(r => `<tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:8px"><code>${r.productCode}</code></td>
+            <td style="padding:8px;font-weight:500">${r.productName}</td>
+            <td style="padding:8px;text-align:center">${badge(r.productType)}</td>
+            <td style="padding:8px;text-align:right;font-weight:700;color:#0f172a">${r.quantity}</td>
+            <td style="padding:8px;color:#64748b">${r.unit}</td>
+            <td style="padding:8px;text-align:center;color:#94a3b8;font-size:12px">v${r.recipeVersion}</td>
+            <td style="padding:8px"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('usage-modal').remove();nav('item-form',{id:'${r.productId}'})">Xem CT</button></td>
+          </tr>`).join('')}</tbody>
+        </table>`;
+      } catch(e) {
+        const body2 = document.getElementById('usage-modal-body');
+        if (body2) body2.innerHTML = '<div style="color:#ef4444">Lỗi: ' + (e.message || e) + '</div>';
       }
     }
 
@@ -1530,7 +1640,7 @@
     // Item Form
     let recipeLines = []; let packagings = []; let recipeYieldQty = null;
     async function pageItemForm(item = {}) {
-      await Promise.all([loadAllItems(), loadAllSuppliers(), loadAllUnits()]);
+      await Promise.all([loadAllItems(), loadAllSuppliers(), loadAllUnits(), loadAllUnitConversions()]);
       const isEdit = !!item.id;
       // List API không trả về packagings → fetch full item khi edit
       if (isEdit) {
@@ -1651,6 +1761,14 @@
       </div>
       <button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="addRL()">+ Thêm dòng</button>
     </div>
+    <div id="usage-section" style="${(isEdit && (item.itemType === 'INGREDIENT' || item.itemType === 'SEMI_PRODUCT')) ? '' : 'display:none'}">
+      <hr class="divider">
+      <div class="card-title" style="display:flex;align-items:center;gap:8px">
+        📦 Dùng trong sản phẩm
+        <span style="font-size:12px;font-weight:400;color:#64748b">(active recipe)</span>
+      </div>
+      <div id="usage-inline-list"><span style="color:#94a3b8;font-size:13px">Đang tải...</span></div>
+    </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="nav('items-list')">Huỷ</button>
       <button class="btn btn-primary" onclick="saveItem('${item.id ?? ''}')">
@@ -1660,6 +1778,9 @@
       renderRL();
       packagings = (item.packagings ?? []).map(p => ({ id: p.id, code: p.code, name: p.name, qtyPerPack: p.qtyPerPack, isDefault: !!p.isDefault }));
       if (isEdit && item.itemType === 'INGREDIENT') setTimeout(renderPackagings, 0);
+      if (isEdit && (item.itemType === 'INGREDIENT' || item.itemType === 'SEMI_PRODUCT')) {
+        setTimeout(() => loadItemUsage(item.id), 0);
+      }
     }
     function calcGiaLe() {
       const giaNhap = parseFloat(document.getElementById('f-gia-nhap')?.value) || 0;
@@ -1719,9 +1840,12 @@
     }
     function updateRecipeYield() {
       // Tính tổng KG nguyên liệu → hiển thị vào ô "Tự tính" (readonly)
+      // Áp dụng unit_conversion để quy đổi các đơn vị khác về KG
       const kgSum = recipeLines.reduce((s, l) => {
-        const u = (l.unit || '').toUpperCase();
-        return u === 'KG' ? s + (parseFloat(l.qty) || 0) : s;
+        const qty = parseFloat(l.qty) || 0;
+        if (!qty) return s;
+        const factor = conversionToKg(l.unit);
+        return factor != null ? s + qty * factor : s;
       }, 0);
       const calcEl = document.getElementById('recipe-yield-calc');
       if (calcEl) calcEl.value = kgSum > 0 ? kgSum.toFixed(3).replace(/\.?0+$/, '') : '';
@@ -5084,6 +5208,40 @@
     }
 
     // ── No-Recipe screen ─────────────────────────────────────────────────────────
+    async function autoFillYield() {
+      if (!confirm('Tự động fill yieldQuantity = tổng KG nguyên liệu cho tất cả active recipe chưa có yield?\n(Chỉ fill recipe chưa có giá trị, không ghi đè)')) return;
+      try {
+        const res = await api('POST', '/api/v1/recipes/yield/auto-fill');
+        let modal = document.getElementById('yield-fill-modal');
+        if (!modal) { modal = document.createElement('div'); modal.id = 'yield-fill-modal'; modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center'; document.body.appendChild(modal); }
+        const details = (res.details ?? []).filter(d => d.status === 'FILLED');
+        const noKg = (res.details ?? []).filter(d => d.status === 'NO_KG_INGREDIENTS');
+        modal.innerHTML = `<div style="background:#fff;border-radius:10px;padding:24px;width:600px;max-width:95vw;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+            <div style="font-size:16px;font-weight:700;color:#0f172a">⚖ Kết quả Auto-fill Yield</div>
+            <button onclick="document.getElementById('yield-fill-modal').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#94a3b8">✕</button>
+          </div>
+          <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 16px;text-align:center;min-width:90px"><div style="font-size:22px;font-weight:700;color:#16a34a">${res.filled ?? 0}</div><div style="font-size:12px;color:#15803d">Đã fill</div></div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 16px;text-align:center;min-width:90px"><div style="font-size:22px;font-weight:700;color:#64748b">${res.alreadySet ?? 0}</div><div style="font-size:12px;color:#64748b">Đã có sẵn</div></div>
+            <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:10px 16px;text-align:center;min-width:90px"><div style="font-size:22px;font-weight:700;color:#d97706">${res.noKgIngredients ?? 0}</div><div style="font-size:12px;color:#b45309">Không có NL KG</div></div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 16px;text-align:center;min-width:90px"><div style="font-size:22px;font-weight:700;color:#475569">${res.total ?? 0}</div><div style="font-size:12px;color:#64748b">Tổng</div></div>
+          </div>
+          ${details.length ? `<div style="font-weight:600;font-size:13px;margin-bottom:6px;color:#0f172a">✅ Đã fill (${details.length}):</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px">
+            <thead><tr style="background:#f8fafc"><th style="padding:4px 8px;text-align:left;border-bottom:1px solid #e2e8f0">Code</th><th style="padding:4px 8px;text-align:left;border-bottom:1px solid #e2e8f0">Tên</th><th style="padding:4px 8px;text-align:right;border-bottom:1px solid #e2e8f0">Yield</th></tr></thead>
+            <tbody>${details.map(d => `<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:4px 8px"><code>${d.itemCode}</code></td><td style="padding:4px 8px">${d.itemName}</td><td style="padding:4px 8px;text-align:right;font-weight:600">${d.yieldQuantity ?? ''}</td></tr>`).join('')}</tbody>
+          </table>` : ''}
+          ${noKg.length ? `<div style="font-weight:600;font-size:13px;margin-bottom:6px;color:#b45309">⚠ Không có nguyên liệu KG (${noKg.length}):</div>
+          <div style="font-size:12px;color:#64748b">${noKg.map(d => `<code>${d.itemCode}</code> ${d.itemName}`).join(', ')}</div>` : ''}
+          <div style="margin-top:16px;text-align:right"><button class="btn btn-ghost" onclick="document.getElementById('yield-fill-modal').remove()">Đóng</button></div>
+        </div>`;
+        modal.style.display = 'flex';
+      } catch(e) {
+        toast('Lỗi: ' + (e.message || e), 'error');
+      }
+    }
+
     async function pageNoRecipe() {
       const content = document.getElementById('content');
       content.innerHTML = `<div class="card"><div class="empty">Đang tải...</div></div>`;
@@ -5152,6 +5310,7 @@
       content.innerHTML = `
         <div style="margin-bottom:14px;display:flex;align-items:center;gap:16px">
           ${summary}
+          <button class="btn btn-ghost" onclick="autoFillYield()">⚖ Auto-fill Yield</button>
           <button class="btn btn-ghost" style="margin-left:auto" onclick="allRecipes=[];pageNoRecipe()">🔄 Làm mới</button>
         </div>
         ${section('Chưa có công thức nào', '#dc2626', noRecipe, '✅ Không có — tất cả đã được tạo công thức')}

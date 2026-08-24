@@ -50,6 +50,7 @@ public class RecipeService
     private final CommandRequestRepository commandRequestRepository;
     private final BakeryActorResolver actorResolver;
     private final RecipeCostService recipeCostService;
+    private final com.bakery.api.master.repository.UnitConversionRepository unitConversionRepository;
 
     // ── Framework wiring ─────────────────────────────────────────
 
@@ -354,9 +355,16 @@ public class RecipeService
             }
 
             java.math.BigDecimal kgSum = recipe.getLines().stream()
-                    .filter(l -> l.getUnit() != null && l.getUnit().equalsIgnoreCase("KG"))
-                    .map(com.bakery.api.recipe.entity.RecipeLine::getQuantity)
-                    .filter(q -> q != null)
+                    .filter(l -> l.getUnit() != null && l.getQuantity() != null)
+                    .map(l -> {
+                        String unit = l.getUnit();
+                        java.math.BigDecimal qty = l.getQuantity();
+                        if (unit.equalsIgnoreCase("KG")) return qty;
+                        // Tra unit_conversion để quy đổi về KG
+                        return unitConversionRepository.findConversion(unit, "KG")
+                                .map(uc -> qty.multiply(uc.getFactor()))
+                                .orElse(java.math.BigDecimal.ZERO);
+                    })
                     .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
 
             if (kgSum.compareTo(java.math.BigDecimal.ZERO) <= 0) {
@@ -384,6 +392,44 @@ public class RecipeService
         result.put("alreadySet", alreadySet);
         result.put("noKgIngredients", noKg);
         result.put("details", details);
+        return result;
+    }
+
+    /**
+     * Trả về danh sách sản phẩm / bán thành phẩm (active recipe) có dùng đến item này.
+     * GET /api/v1/recipes/usage/{itemId}
+     * Mỗi phần tử: { productCode, productName, productType, recipeVersion, quantity, unit }
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public java.util.List<java.util.Map<String, Object>> findUsageByItem(UUID itemId) {
+        java.util.List<com.bakery.api.recipe.entity.Recipe> recipes =
+                recipeRepository.findActiveRecipesUsingItem(itemId);
+
+        java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
+        for (com.bakery.api.recipe.entity.Recipe recipe : recipes) {
+            // Lấy thông tin sản phẩm đầu ra
+            Item parent = recipe.getProduct() != null
+                    ? recipe.getProduct()
+                    : recipe.getSemiProduct();
+            if (parent == null) continue;
+
+            String parentType = recipe.getProduct() != null ? "PRODUCT" : "SEMI_PRODUCT";
+
+            // Tìm recipe line cụ thể chứa itemId để lấy qty & unit
+            recipe.getLines().stream()
+                    .filter(l -> itemId.equals(l.getItem() != null ? l.getItem().getId() : null))
+                    .forEach(line -> {
+                        java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                        row.put("productId",      parent.getId());
+                        row.put("productCode",    parent.getCode());
+                        row.put("productName",    parent.getName());
+                        row.put("productType",    parentType);
+                        row.put("recipeVersion",  recipe.getVersion());
+                        row.put("quantity",       line.getQuantity());
+                        row.put("unit",           line.getUnit());
+                        result.add(row);
+                    });
+        }
         return result;
     }
 

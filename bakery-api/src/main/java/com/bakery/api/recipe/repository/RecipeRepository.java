@@ -89,4 +89,11 @@ public interface RecipeRepository extends BaseRepository<Recipe> {
     /** Lấy tất cả active recipe để bulk-fill yieldQuantity. */
     List<Recipe> findByActiveTrue();
 
+    /**
+     * Tìm tất cả active recipe có chứa ingredient/semi-product với itemId cho trước.
+     * Dùng cho tính năng "Sản phẩm nào dùng NL/BTP này?"
+     */
+    @Query("SELECT r FROM Recipe r JOIN r.lines l WHERE l.item.id = :itemId AND r.active = true")
+    List<Recipe> findActiveRecipesUsingItem(@Param("itemId") UUID itemId);
+
 }
