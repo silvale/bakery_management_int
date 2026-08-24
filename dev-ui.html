@@ -661,12 +661,12 @@
     let warehouseStockQtyMap = {}; // itemId -> qty (tồn kho kho xuất đang chọn)
     let allUnits = []; // loaded from code_value WHERE group_key='UNIT'
     let allUnitConversions = []; // { fromUnit, toUnit, factor } — dùng để quy đổi về KG khi tính yield
-    async function loadAllUnitConversions() {
-      if (allUnitConversions.length) return;
+    async function loadAllUnitConversions(force = false) {
+      // Không cache: luôn fetch mới để tránh miss conversion mới thêm trong session
       try {
         const d = await api('GET', '/api/v1/units/conversions');
         allUnitConversions = Array.isArray(d) ? d : (d?.content ?? []);
-      } catch (_) { allUnitConversions = []; }
+      } catch (_) { /* giữ nguyên cache cũ nếu lỗi mạng */ }
     }
     /** Tìm hệ số quy đổi từ fromUnit → KG. Trả về null nếu không tìm thấy. */
     function conversionToKg(fromUnit) {
