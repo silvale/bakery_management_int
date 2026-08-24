@@ -1528,7 +1528,7 @@
     }
 
     // Item Form
-    let recipeLines = []; let packagings = []; let recipeYieldQty = null; let recipeYieldEdited = false;
+    let recipeLines = []; let packagings = []; let recipeYieldQty = null;
     async function pageItemForm(item = {}) {
       await Promise.all([loadAllItems(), loadAllSuppliers(), loadAllUnits()]);
       const isEdit = !!item.id;
@@ -1543,7 +1543,6 @@
         return { itemId: found?.id ?? '', qty: l.quantity ?? '', unit: l.unit ?? '', sort: l.sortOrder ?? 1 };
       });
       recipeYieldQty = item.recipe?.yieldQuantity ?? null;
-      recipeYieldEdited = false;
       let groups = []; try { groups = await api('GET', '/api/v1/item-groups'); } catch (_) { }
       document.getElementById('content').innerHTML = `
   <div class="card">
@@ -1625,16 +1624,30 @@
         <td colspan="2"></td>
       </tr></tfoot>
       </table>
-      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;padding:8px 10px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px">
-        <span style="font-size:12px;color:#0369a1;font-weight:600">⚖ Tổng KL mẻ (KG):</span>
-        <input type="number" id="recipe-yield" step="0.001" min="0"
-          placeholder="Tự tính từ NL"
-          style="width:100px;font-weight:700;color:#0c4a6e"
-          value="${item.recipe?.yieldQuantity ?? ''}"
-          oninput="recipeYieldQty=this.value?+this.value:null;recipeYieldEdited=true"
-          title="Tổng khối lượng sản phẩm BTP tạo ra từ 1 mẻ. Dùng để tính đơn giá/KG chính xác.">
-        <span style="font-size:11px;color:#64748b" id="recipe-yield-hint">← Tự tính nếu để trống</span>
-        <button class="btn btn-ghost btn-sm" onclick="recipeYieldQty=null;recipeYieldEdited=false;document.getElementById('recipe-yield').value='';updateRecipeYield()" style="font-size:11px">Reset</button>
+      <div style="margin-top:10px;padding:10px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px">
+        <div style="font-size:12px;color:#0369a1;font-weight:600;margin-bottom:8px">⚖ Khối lượng mẻ (KG)</div>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;color:#64748b;white-space:nowrap">Tự tính:</span>
+            <input type="number" id="recipe-yield-calc" step="0.001" min="0" readonly
+              placeholder="—"
+              style="width:90px;font-weight:700;color:#0c4a6e;background:#e0f2fe;cursor:default"
+              title="Tổng KG nguyên liệu trong công thức — tự tính">
+            <span style="font-size:11px;color:#94a3b8">KG</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;color:#64748b;white-space:nowrap">Thực tế:</span>
+            <input type="number" id="recipe-yield" step="0.001" min="0"
+              placeholder="Nhập..."
+              style="width:90px;font-weight:700;color:#0f172a"
+              value="${item.recipe?.yieldQuantity ?? ''}"
+              oninput="recipeYieldQty=this.value?+this.value:null;updateRecipeYieldHaohut()"
+              title="Khối lượng thực tế sản phẩm BTP thu được sau khi sản xuất. Dùng để tính đơn giá/KG và so sánh hao hụt.">
+            <span style="font-size:11px;color:#94a3b8">KG</span>
+            <button class="btn btn-ghost btn-sm" onclick="recipeYieldQty=null;document.getElementById('recipe-yield').value='';updateRecipeYieldHaohut()" style="font-size:11px;padding:2px 6px">Reset</button>
+          </div>
+          <div id="recipe-yield-haohut" style="font-size:11px;color:#64748b"></div>
+        </div>
       </div>
       <button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="addRL()">+ Thêm dòng</button>
     </div>
@@ -1705,18 +1718,19 @@
       updateRecipeYield();
     }
     function updateRecipeYield() {
-      // Auto-compute tổng KG nếu user chưa edit
+      // Tính tổng KG nguyên liệu → hiển thị vào ô "Tự tính" (readonly)
       const kgSum = recipeLines.reduce((s, l) => {
         const u = (l.unit || '').toUpperCase();
         return u === 'KG' ? s + (parseFloat(l.qty) || 0) : s;
       }, 0);
-      const yieldEl = document.getElementById('recipe-yield');
-      const hintEl = document.getElementById('recipe-yield-hint');
-      if (!recipeYieldEdited && yieldEl) {
-        yieldEl.value = kgSum > 0 ? kgSum.toFixed(3).replace(/\.?0+$/, '') : '';
-        recipeYieldQty = kgSum > 0 ? kgSum : null;
+      const calcEl = document.getElementById('recipe-yield-calc');
+      if (calcEl) calcEl.value = kgSum > 0 ? kgSum.toFixed(3).replace(/\.?0+$/, '') : '';
+      // Nếu user chưa nhập thực tế → lấy kgSum làm giá trị mặc định để backend tính
+      const actualEl = document.getElementById('recipe-yield');
+      if (actualEl && !actualEl.value && kgSum > 0) {
+        recipeYieldQty = kgSum;
       }
-      if (hintEl) hintEl.textContent = recipeYieldEdited ? '← Đã sửa thủ công' : (kgSum > 0 ? `← Tự tính từ ${kgSum.toFixed(3).replace(/\.?0+$/,'')} KG nguyên liệu` : '← Tự tính nếu để trống');
+      updateRecipeYieldHaohut(kgSum);
       // Update tổng thành tiền
       const totalEl = document.getElementById('recipe-total-cost');
       if (totalEl) {
@@ -1728,6 +1742,31 @@
         }, 0);
         const hasAny = recipeLines.some(l => allItems.find(x => x.id === l.itemId)?.unitCost != null);
         totalEl.textContent = hasAny ? fmt(Math.round(total)) + 'đ' : '—';
+      }
+    }
+    function updateRecipeYieldHaohut(kgSumArg) {
+      const haohutEl = document.getElementById('recipe-yield-haohut');
+      if (!haohutEl) return;
+      const calcEl = document.getElementById('recipe-yield-calc');
+      const actualEl = document.getElementById('recipe-yield');
+      const kgCalc = kgSumArg !== undefined ? kgSumArg : parseFloat(calcEl?.value) || 0;
+      const kgActual = parseFloat(actualEl?.value) || 0;
+      if (kgCalc > 0 && kgActual > 0) {
+        const diff = kgCalc - kgActual;
+        const pct = (diff / kgCalc * 100).toFixed(1);
+        if (Math.abs(diff) < 0.0001) {
+          haohutEl.textContent = '✓ Không hao hụt';
+          haohutEl.style.color = '#16a34a';
+        } else {
+          const sign = diff > 0 ? '+' : '';
+          haohutEl.innerHTML = `Hao hụt: <strong style="color:${diff > 0 ? '#dc2626' : '#16a34a'}">${sign}${diff.toFixed(3).replace(/\.?0+$/, '')} KG (${sign}${pct}%)</strong>`;
+          haohutEl.style.color = '#64748b';
+        }
+      } else if (kgCalc > 0) {
+        haohutEl.textContent = '← Nhập thực tế để so sánh hao hụt';
+        haohutEl.style.color = '#94a3b8';
+      } else {
+        haohutEl.textContent = '';
       }
     }
     function addRL() { recipeLines.push({ itemId: '', qty: '', unit: '', sort: recipeLines.length + 1 }); renderRL(); }

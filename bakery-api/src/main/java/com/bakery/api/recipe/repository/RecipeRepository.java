@@ -86,4 +86,7 @@ public interface RecipeRepository extends BaseRepository<Recipe> {
         """, nativeQuery = true)
     List<Object[]> findUnitMismatchIssues();
 
+    /** Lấy tất cả active recipe để bulk-fill yieldQuantity. */
+    List<Recipe> findByActiveTrue();
+
 }

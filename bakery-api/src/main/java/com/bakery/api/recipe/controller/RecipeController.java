@@ -203,4 +203,15 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
         return res;
     }
 
+    /**
+     * Tự động fill yieldQuantity = tổng KG nguyên liệu cho tất cả active recipe
+     * chưa có yieldQuantity (null hoặc <= 0).
+     * POST /api/v1/recipes/yield/auto-fill
+     * Trả về: { total, filled, alreadySet, noKgIngredients, details[] }
+     */
+    @PostMapping("/yield/auto-fill")
+    public java.util.Map<String, Object> autoFillYield() {
+        return service.autoFillYieldQuantity();
+    }
+
 }

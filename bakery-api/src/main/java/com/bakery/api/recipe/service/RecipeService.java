@@ -325,4 +325,66 @@ public class RecipeService
         return recipeRepository.findUnitMismatchIssues();
     }
 
+    /**
+     * Tự động fill yieldQuantity = tổng KG nguyên liệu cho tất cả active recipe
+     * chưa có yieldQuantity (null hoặc <= 0).
+     * POST /api/v1/recipes/yield/auto-fill
+     * Trả về: { total, filled, alreadySet, noKgIngredients, details[] }
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public java.util.Map<String, Object> autoFillYieldQuantity() {
+        java.util.List<com.bakery.api.recipe.entity.Recipe> recipes =
+                recipeRepository.findByActiveTrue();
+
+        int filled = 0, alreadySet = 0, noKg = 0;
+        java.util.List<java.util.Map<String, Object>> details = new java.util.ArrayList<>();
+
+        for (com.bakery.api.recipe.entity.Recipe recipe : recipes) {
+            String itemCode = recipe.getProduct() != null
+                    ? recipe.getProduct().getCode()
+                    : (recipe.getSemiProduct() != null ? recipe.getSemiProduct().getCode() : "?");
+            String itemName = recipe.getProduct() != null
+                    ? recipe.getProduct().getName()
+                    : (recipe.getSemiProduct() != null ? recipe.getSemiProduct().getName() : "?");
+
+            if (recipe.getYieldQuantity() != null
+                    && recipe.getYieldQuantity().compareTo(java.math.BigDecimal.ZERO) > 0) {
+                alreadySet++;
+                continue;
+            }
+
+            java.math.BigDecimal kgSum = recipe.getLines().stream()
+                    .filter(l -> l.getUnit() != null && l.getUnit().equalsIgnoreCase("KG"))
+                    .map(com.bakery.api.recipe.entity.RecipeLine::getQuantity)
+                    .filter(q -> q != null)
+                    .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+
+            if (kgSum.compareTo(java.math.BigDecimal.ZERO) <= 0) {
+                noKg++;
+                java.util.Map<String, Object> d = new java.util.LinkedHashMap<>();
+                d.put("itemCode", itemCode); d.put("itemName", itemName);
+                d.put("status", "NO_KG_INGREDIENTS");
+                details.add(d);
+                continue;
+            }
+
+            recipe.setYieldQuantity(kgSum.setScale(4, java.math.RoundingMode.HALF_UP));
+            recipeRepository.save(recipe);
+            filled++;
+            java.util.Map<String, Object> d = new java.util.LinkedHashMap<>();
+            d.put("itemCode", itemCode); d.put("itemName", itemName);
+            d.put("status", "FILLED");
+            d.put("yieldQuantity", kgSum.setScale(4, java.math.RoundingMode.HALF_UP).toPlainString() + " KG");
+            details.add(d);
+        }
+
+        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("total", recipes.size());
+        result.put("filled", filled);
+        result.put("alreadySet", alreadySet);
+        result.put("noKgIngredients", noKg);
+        result.put("details", details);
+        return result;
+    }
+
 }
