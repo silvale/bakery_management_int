@@ -90,6 +90,7 @@ public class RecipeService
         r.setVersion(recipe.getVersion());
         r.setActive(recipe.isActive());
         r.setNote(recipe.getNote());
+        r.setYieldQuantity(recipe.getYieldQuantity());
         if (recipe.getParentRecipe() != null) {
             r.setParentRecipeId(recipe.getParentRecipe().getId());
         }

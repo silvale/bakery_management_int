@@ -3,6 +3,7 @@
  */
 package com.bakery.api.recipe.dto;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,6 +28,12 @@ public class RecipeResponse extends BaseResponse {
     private boolean active;
 
     private String note;
+
+    /**
+     * Tổng khối lượng sản phẩm tạo ra từ 1 mẻ (KG).
+     * null = tự tính từ tổng KG nguyên liệu trong công thức.
+     */
+    private BigDecimal yieldQuantity;
 
     /** ID recipe gốc nếu đây là bản clone */
     private UUID parentRecipeId;
