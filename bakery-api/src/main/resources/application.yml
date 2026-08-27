@@ -126,7 +126,7 @@ bakery:
       refresh-token-expire-ms: ${JWT_REFRESH_EXPIRE_MS:604800000}
 
   upload:
-    dir: ${UPLOAD_DIR:/var/bakery/uploads}
+    dir: ${UPLOAD_DIR:${user.home}/bakery/uploads}
     max-size-mb: ${UPLOAD_MAX_SIZE_MB:5}
     allowed-types:
       - jpg
