@@ -34,6 +34,11 @@ spring:
     keep-alive: true
     allow-bean-definition-overriding: false
     lazy-initialization: false
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: ${UPLOAD_MAX_SIZE_MB:5}MB
+      max-request-size: ${UPLOAD_MAX_SIZE_MB:5}MB
   web:
     resources:
       add-mappings: false
@@ -119,3 +124,12 @@ bakery:
       secret-key: ${JWT_SECRET_KEY:changeme-please-use-a-32-char-min-key}
       access-token-expire-ms: ${JWT_ACCESS_EXPIRE_MS:3600000}
       refresh-token-expire-ms: ${JWT_REFRESH_EXPIRE_MS:604800000}
+
+  upload:
+    dir: ${UPLOAD_DIR:/var/bakery/uploads}
+    max-size-mb: ${UPLOAD_MAX_SIZE_MB:5}
+    allowed-types:
+      - jpg
+      - jpeg
+      - png
+      - webp

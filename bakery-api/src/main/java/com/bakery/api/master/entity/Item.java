@@ -69,4 +69,11 @@ public abstract class Item extends BaseEntity {
      */
     @Column(name = "unit_cost", precision = 15, scale = 4)
     private java.math.BigDecimal unitCost;
+
+    /**
+     * Đường dẫn ảnh đại diện của sản phẩm (optional).
+     * VD: "/api/v1/uploads/abc123.jpg"
+     */
+    @Column(name = "image_url", length = 500)
+    private String imageUrl;
 }

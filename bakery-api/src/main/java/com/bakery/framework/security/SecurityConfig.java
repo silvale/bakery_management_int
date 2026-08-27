@@ -34,7 +34,8 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
     private static final String[] PUBLIC_PATHS = {
-        "/api/v1/auth/**", "/actuator/health", "/actuator/info", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html"
+        "/api/v1/auth/**", "/actuator/health", "/actuator/info", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html",
+        "/api/v1/uploads/**"
     };
 
     /**

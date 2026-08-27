@@ -156,9 +156,11 @@ public class RecipeCostService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(COST_SCALE, RoundingMode.HALF_UP);
 
-        // Product & SemiProduct: normalize totalCost về cost/KG (chia yieldQuantity thực tế)
-        // → totalCostPerUnit luôn có nghĩa là "giá 1 đơn vị đầu ra" cho cả Product lẫn BTP
-        if (item instanceof SemiProduct || item instanceof Product) {
+        // SemiProduct: normalize totalCost về cost/KG (chia yieldQuantity thực tế)
+        // → totalCostPerUnit = "giá 1 KG BTP đầu ra"
+        // Product KHÔNG chia yield — cost = tổng NL cho 1 đơn vị sản xuất (hộp/cái/KG recipe).
+        // yieldQuantity của Product chỉ dùng để tính hao hụt hiển thị trên UI.
+        if (item instanceof SemiProduct) {
             BigDecimal yield = recipe.getYieldQuantity();
             if (yield == null || yield.compareTo(BigDecimal.ZERO) <= 0) {
                 // Fallback: tổng KG nguyên liệu (có áp dụng unit_conversion)

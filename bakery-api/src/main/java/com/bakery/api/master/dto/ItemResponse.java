@@ -57,6 +57,10 @@ public class ItemResponse extends BaseResponse {
      */
     private BigDecimal unitCost;
 
+    // ── Image ────────────────────────────────────────────────
+    /** Đường dẫn ảnh đại diện (optional). null = chưa có ảnh. */
+    private String imageUrl;
+
     // ── Recipe (Product + SemiProduct) ────────────────────────
     /** Công thức active; nếu chưa active thì là phiên bản mới nhất */
     private RecipeResponse recipe;

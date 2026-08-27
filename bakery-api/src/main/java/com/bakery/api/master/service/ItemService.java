@@ -239,6 +239,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         r.setUnit(item.getUnit());
         r.setSplittable(item.isSplittable());
         r.setUnitCost(item.getUnitCost());
+        r.setImageUrl(item.getImageUrl());
         if (item.getItemGroup() != null) {
             r.setItemGroup(new ReferenceValue(
                     item.getItemGroup().getCode(), item.getItemGroup().getName()));
