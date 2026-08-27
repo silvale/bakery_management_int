@@ -156,11 +156,15 @@ public class RecipeCostService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(COST_SCALE, RoundingMode.HALF_UP);
 
-        // SemiProduct: normalize totalCost về cost/KG (chia yieldQuantity thực tế)
-        // → totalCostPerUnit = "giá 1 KG BTP đầu ra"
-        // Product KHÔNG chia yield — cost = tổng NL cho 1 đơn vị sản xuất (hộp/cái/KG recipe).
-        // yieldQuantity của Product chỉ dùng để tính hao hụt hiển thị trên UI.
-        if (item instanceof SemiProduct) {
+        // SemiProduct: normalize totalCost về cost/1-đơn-vị-đầu-ra.
+        //
+        // Chỉ chia yieldQuantity khi BTP có đơn vị trọng lượng/thể tích (KG, G, L, ML...).
+        // Với đơn vị đếm (LONG_DO, QUA, CAI, HOP...) totalCost đã là giá/1 đơn vị — không chia.
+        //
+        // Ví dụ:
+        //   BTP "Kem bơ" (KG): nguyên liệu 50.000đ, yieldQty=1.2 KG → cost = 50.000/1.2 = 41.667đ/KG ✓
+        //   BTP "Lòng đỏ trứng" (LONG_DO): nguyên liệu 2.333đ → cost = 2.333đ/LONG_DO ✓ (không chia)
+        if (item instanceof SemiProduct && isWeightOrVolumeUnit(item.getUnit())) {
             BigDecimal yield = recipe.getYieldQuantity();
             if (yield == null || yield.compareTo(BigDecimal.ZERO) <= 0) {
                 // Fallback: tổng KG nguyên liệu (có áp dụng unit_conversion)
@@ -292,6 +296,22 @@ public class RecipeCostService {
 
     /** Nội bộ: kết quả tra bảng unit_conversion. */
     private record ConversionResult(BigDecimal factor, String source) {}
+
+    // ── Unit helpers ─────────────────────────────────────────────
+
+    /**
+     * Trả về {@code true} nếu {@code unit} là đơn vị trọng lượng hoặc thể tích.
+     * Chỉ các đơn vị này mới cần chia {@code yieldQuantity} khi tính cost/unit cho SemiProduct.
+     */
+    private static boolean isWeightOrVolumeUnit(String unit) {
+        if (unit == null) return false;
+        return switch (unit.toUpperCase()) {
+            case "KG", "G", "MG", "LB", "OZ",          // trọng lượng
+                 "L", "ML", "CC", "DL", "CL"            // thể tích
+                    -> true;
+            default -> false;
+        };
+    }
 
     // ── Unit conversion ───────────────────────────────────────────
 
