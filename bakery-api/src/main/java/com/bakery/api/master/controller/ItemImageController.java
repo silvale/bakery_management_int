@@ -2,7 +2,7 @@ package com.bakery.api.master.controller;
 
 import com.bakery.api.master.dto.UploadProperties;
 import com.bakery.api.master.entity.Item;
-import com.bakery.api.master.repository.ItemRepository;
+import com.bakery.api.master.repository.ItemLookupRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
@@ -27,7 +27,7 @@ import java.util.UUID;
 public class ItemImageController {
 
     private final UploadProperties uploadProps;
-    private final ItemRepository itemRepository;
+    private final ItemLookupRepository itemRepository;
 
     private Path uploadDir;
 
@@ -62,8 +62,7 @@ public class ItemImageController {
         }
 
         // Tìm item
-        Item item = itemRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Item không tồn tại: " + id));
+        Item item = itemRepository.findById(id).orElse(null);
 
         // Xóa ảnh cũ nếu có
         deleteOldFile(item.getImageUrl());
