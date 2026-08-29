@@ -240,6 +240,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         r.setSplittable(item.isSplittable());
         r.setUnitCost(item.getUnitCost());
         r.setImageUrl(item.getImageUrl());
+        r.setMinStockQuantity(item.getMinStockQuantity());
         if (item.getItemGroup() != null) {
             r.setItemGroup(new ReferenceValue(
                     item.getItemGroup().getCode(), item.getItemGroup().getName()));
@@ -474,6 +475,10 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         // SEMI_PRODUCT / PRODUCT được tính lại trong afterApprove → không ghi đè ở đây.
         if ("INGREDIENT".equalsIgnoreCase(req.itemType())) {
             e.setUnitCost(req.unitCost());
+        }
+        // minStockQuantity — chỉ áp dụng cho INGREDIENT và SEMI_PRODUCT
+        if (!"PRODUCT".equalsIgnoreCase(req.itemType())) {
+            e.setMinStockQuantity(req.minStockQuantity());
         }
     }
 

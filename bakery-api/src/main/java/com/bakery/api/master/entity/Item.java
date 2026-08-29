@@ -76,4 +76,8 @@ public abstract class Item extends BaseEntity {
      */
     @Column(name = "image_url", length = 500)
     private String imageUrl;
+
+    /** Ngưỡng tồn kho tối thiểu — cảnh báo khi tồn thực tế < giá trị này. Chỉ dùng cho INGREDIENT và SEMI_PRODUCT. */
+    @Column(name = "min_stock_quantity", precision = 15, scale = 4)
+    private java.math.BigDecimal minStockQuantity;
 }

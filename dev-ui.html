@@ -592,6 +592,7 @@
       <div class="nav-label">Kho</div>
       <div class="nav-item" data-screen="STOCK_SUMMARY" onclick="nav('stock-summary')">📦 Tồn kho</div>
       <div class="nav-item" data-screen="INVENTORY_REQUESTS" onclick="nav('inventory-requests')">📋 Phiếu kho</div>
+      <div class="nav-item" data-screen="STOCK_SUMMARY" id="nav-low-stock" onclick="nav('stock-summary');setTimeout(()=>switchToLowStockTab(),300)">⚠️ Hàng cần nhập <span id="low-stock-badge" style="display:none;background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:4px">0</span></div>
     </div>
     <div class="nav-group">
       <div class="nav-label">Báo cáo</div>
@@ -856,7 +857,7 @@
       'suppliers': 'Nhà cung cấp', 'product-mapping': 'Product Mapping', 'item-groups': 'Item Groups',
       'sx-config': 'Cấu hình sản xuất', 'prod-groups': 'Production Groups', 'threshold-rules': 'Threshold Rules', 'prod-plans': 'Kế hoạch sản xuất',
       'prod-requests': 'Phiếu sản xuất', 'delivery-records': 'Giao nhận bếp → shop', 'prod-adjustments': 'Điều chỉnh SX',
-      'stock-summary': 'Tồn kho', 'inventory-requests': 'Phiếu kho',
+      'stock-summary': 'Tồn kho / Hàng cần nhập', 'inventory-requests': 'Phiếu kho',
       'daily-report': 'Báo cáo ngày', 'pos-sales': 'POS Sales',
       'users': 'Tài khoản người dùng', 'roles': 'Phân quyền (Roles)', 'activity-log': 'Nhật ký hoạt động',
       'no-recipe': 'SP / BTP chưa có công thức',
@@ -1672,7 +1673,7 @@
         </select></div>
       <div class="field"><label>Code *</label><input id="f-code" value="${item.code ?? ''}"></div>
       <div class="field"><label>Tên *</label><input id="f-name" value="${item.name ?? ''}"></div>
-      <div class="field"><label>Đơn vị *</label><select id="f-unit">${unitSelectHtml(item.unit)}</select></div>
+      <div class="field"><label>Đơn vị *</label><select id="f-unit" onchange="const u=this.options[this.selectedIndex]?.text??this.value;const el=document.getElementById('f-min-stock-unit');if(el)el.textContent=u">${unitSelectHtml(item.unit)}</select></div>
       <div class="field" id="f-shelf-wrap" style="${item.itemType === 'PRODUCT' ? '' : 'display:none'}">
         <label>Hạn sử dụng (ngày) <small style="color:#94a3b8">0 = trong ngày</small></label>
         <input id="f-shelf" type="number" min="0" value="${item.shelfDays ?? ''}" placeholder="1"></div>
@@ -1700,6 +1701,15 @@
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div class="card-title" style="margin:0">📦 Đóng gói <small style="color:#94a3b8;font-size:12px;font-weight:400">(đơn vị: ${item.unit ?? '?'})</small></div>
         <button class="btn btn-ghost btn-sm" onclick="addPackagingRow()">+ Thêm</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px">
+        <span style="font-size:13px;color:#92400e;font-weight:600;white-space:nowrap">⚠️ Ngưỡng cảnh báo tồn kho</span>
+        <input type="number" id="f-min-stock" min="0" step="0.001"
+          value="${item.minStockQuantity ?? ''}"
+          placeholder="VD: 10"
+          style="width:110px;border:1px solid #fbbf24;border-radius:6px;padding:5px 8px;font-size:13px;font-weight:600">
+        <span id="f-min-stock-unit" style="font-size:12px;color:#92400e">${item.unit ?? 'đvt'}</span>
+        <span style="font-size:11px;color:#b45309">— Khi tồn kho thực tế xuống dưới mức này, hệ thống sẽ cảnh báo cần nhập thêm</span>
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:#f8fafc">
@@ -1910,6 +1920,11 @@
           return giaLe ? +giaLe : null;
         })(),
         shelfDays: document.getElementById('f-shelf')?.value !== '' && document.getElementById('f-shelf')?.value != null ? +document.getElementById('f-shelf').value : null,
+        minStockQuantity: (() => {
+          if (itemType === 'PRODUCT') return null;
+          const v = document.getElementById('f-min-stock')?.value;
+          return v !== '' && v != null ? +v : null;
+        })(),
         recipeNote: document.getElementById('f-rnote')?.value || null,
         recipeYieldQuantity: recipeYieldQty ?? null,
         recipeLines: recipeLines.filter(l => l.itemId).map(l => ({ itemId: l.itemId, quantity: +l.qty, unit: l.unit, sortOrder: l.sort }))
@@ -3948,9 +3963,10 @@
     async function pageStockSummary() {
       await Promise.all([loadAllWarehouses(), loadAllItems()]);
       document.getElementById('content').innerHTML = `
-  <div class="tabs">
+  <div class="tabs" id="stock-tabs">
     <div class="tab active" onclick="switchStockTab('tong-hop',this)">📦 Tồn kho</div>
     <div class="tab" onclick="switchStockTab('bao-cao-ngay',this)">📊 Báo cáo cuối ngày</div>
+    <div class="tab" id="tab-hang-can-nhap" onclick="switchStockTab('hang-can-nhap',this)">⚠️ Hàng cần nhập</div>
   </div>
   <div id="stock-tab-tong-hop">
     <div class="card">
@@ -3964,6 +3980,9 @@
       </div>
       <div id="stock-wrap"><div class="empty">Đang tải...</div></div>
     </div>
+  </div>
+  <div id="stock-tab-hang-can-nhap" style="display:none">
+    <div id="low-stock-wrap"><div class="empty">Đang tải...</div></div>
   </div>
   <div id="stock-tab-bao-cao-ngay" style="display:none">
     <div class="card">
@@ -3981,11 +4000,17 @@
       loadStock();
     }
     function switchStockTab(tab, el) {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      el.classList.add('active');
+      document.querySelectorAll('#stock-tabs .tab').forEach(t => t.classList.remove('active'));
+      if (el) el.classList.add('active');
       document.getElementById('stock-tab-tong-hop').style.display = tab === 'tong-hop' ? '' : 'none';
       document.getElementById('stock-tab-bao-cao-ngay').style.display = tab === 'bao-cao-ngay' ? '' : 'none';
+      document.getElementById('stock-tab-hang-can-nhap').style.display = tab === 'hang-can-nhap' ? '' : 'none';
       if (tab === 'bao-cao-ngay') loadKitchenDailyReport();
+      if (tab === 'hang-can-nhap') loadLowStock();
+    }
+    function switchToLowStockTab() {
+      const tabEl = document.getElementById('tab-hang-can-nhap');
+      if (tabEl) switchStockTab('hang-can-nhap', tabEl);
     }
 
     let _kitchenDailyRows = [];
@@ -4097,6 +4122,320 @@
       toast(`Đã nộp ${ok} sản phẩm${fail ? ` (${fail} lỗi)` : ''}. Cảm ơn!`);
       if (ok > 0) loadKitchenDailyReport();
     }
+    let _lowStockData = [];
+    let _lowStockGroups = {};  // supKey -> { supplier, warehouseId, warehouseName, items[] }
+    let _mainWh = null;
+
+    async function loadLowStock() {
+      const el = document.getElementById('low-stock-wrap'); if (!el) return;
+      el.innerHTML = '<div class="empty">Đang tải...</div>';
+      try {
+        const [data] = await Promise.all([
+          api('GET', '/api/v1/items/low-stock'),
+          loadAllWarehouses(), loadAllItems(), loadAllSuppliers()
+        ]);
+        _lowStockData = data ?? [];
+      } catch (e) {
+        el.innerHTML = '<div class="empty" style="color:#dc2626">Không thể tải dữ liệu — kiểm tra API</div>'; return;
+      }
+
+      const rows = _lowStockData;
+      // Update badge
+      const badge = document.getElementById('low-stock-badge');
+      if (badge) { badge.textContent = rows.length; badge.style.display = rows.length ? 'inline' : 'none'; }
+
+      if (!rows.length) {
+        el.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+          <div style="font-size:32px;margin-bottom:8px">✅</div>
+          <div style="font-weight:600;color:#16a34a;font-size:15px">Tất cả hàng đều đủ tồn kho</div>
+          <div style="color:#64748b;margin-top:4px;font-size:13px">Không có item nào dưới ngưỡng tối thiểu</div>
+        </div>`;
+        return;
+      }
+
+      // Find main warehouse
+      _mainWh = allWarehouses.find(w =>
+        (w.code ?? '').toUpperCase().includes('MAIN') ||
+        (w.code ?? '').toLowerCase().includes('kho-chinh') ||
+        (w.name ?? '').toLowerCase().includes('chính')
+      ) ?? allWarehouses[0];
+
+      // Build itemMap and group by supplier
+      const itemMap = {};
+      allItems.forEach(i => { itemMap[i.id] = i; });
+      // Build supplierMap by code (defaultSupplier trả về CodeValueDto có key = mã NCC)
+      const supplierByCode = {};
+      allSuppliers.forEach(s => { supplierByCode[s.code] = s; });
+      _lowStockGroups = {};
+      rows.forEach(r => {
+        const full = itemMap[r.itemId] ?? {};
+        const supCode = full.defaultSupplier?.key ?? full.defaultSupplier?.code;
+        const sup  = (supCode ? supplierByCode[supCode] : null) ?? null;
+        const key  = sup?.id ?? '__none__';
+        if (!_lowStockGroups[key]) {
+          _lowStockGroups[key] = {
+            supplier: sup,
+            warehouseId: _mainWh?.id ?? null,
+            warehouseName: _mainWh?.name ?? _mainWh?.code ?? 'Kho chính',
+            items: []
+          };
+        }
+        _lowStockGroups[key].items.push({
+          itemId:       r.itemId,
+          code:         r.code,
+          name:         r.name,
+          unit:         r.unit,
+          itemType:     r.itemType,
+          currentStock: r.currentStock,
+          minStockQuantity: r.minStockQuantity,
+          shortage:     r.shortage,
+          qty:          +(r.shortage > 0 ? r.shortage : r.minStockQuantity || 1),
+          currentPrice: full.unitCost ?? null,
+          newPrice:     full.unitCost ?? null,
+          priceChanged: false,
+        });
+      });
+
+      renderLowStockGrouped();
+    }
+
+    function renderLowStockGrouped() {
+      const el = document.getElementById('low-stock-wrap'); if (!el) return;
+      const rows = _lowStockData;
+      const keys = Object.keys(_lowStockGroups);
+      const critical = rows.filter(r => (r.currentStock ?? 0) <= 0);
+      const warning  = rows.filter(r => (r.currentStock ?? 0) > 0);
+      const fmtQty   = (v, u) => `<strong>${fmt(v ?? 0)}</strong> <small style="color:#94a3b8">${u ?? ''}</small>`;
+      const typeLabel = t => t === 'INGREDIENT' ? '<span class="badge b-ing">NL</span>' : '<span class="badge b-semi">BTP</span>';
+
+      el.innerHTML = `
+        <!-- Stat cards -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+          <div class="card" style="margin-bottom:0;text-align:center">
+            <div style="font-size:28px;font-weight:700;color:#dc2626">${rows.length}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:2px">Tổng hàng cần nhập</div>
+          </div>
+          <div class="card" style="margin-bottom:0;text-align:center;border-color:#fecaca">
+            <div style="font-size:28px;font-weight:700;color:#991b1b">${critical.length}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:2px">Hết hàng (tồn = 0)</div>
+          </div>
+          <div class="card" style="margin-bottom:0;text-align:center;border-color:#fef08a">
+            <div style="font-size:28px;font-weight:700;color:#b45309">${warning.length}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:2px">Sắp hết (tồn thấp)</div>
+          </div>
+        </div>
+
+        <!-- Header -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div>
+            <strong style="font-size:14px">📦 Phân loại theo nhà cung cấp</strong>
+            <span style="color:#64748b;font-size:12px;margin-left:8px">· ${keys.length} NCC · cập nhật lúc ${new Date().toLocaleTimeString('vi-VN')}</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="loadLowStock()">🔄 Làm mới</button>
+            <button class="btn btn-primary" onclick="createAllSupplierOrders()">🚀 Nhập tất cả (${keys.length} phiếu)</button>
+          </div>
+        </div>
+
+        <!-- Per-NCC group cards -->
+        ${keys.map(supKey => {
+          const g = _lowStockGroups[supKey];
+          const supLabel = g.supplier
+            ? `${g.supplier.code ? g.supplier.code + ' — ' : ''}${g.supplier.name ?? ''}`
+            : '⚠️ Chưa có nhà cung cấp';
+          const hasCritical = g.items.some(it => (it.currentStock ?? 0) <= 0);
+          return `
+          <div class="card" style="margin-bottom:14px;${hasCritical ? 'border-left:4px solid #dc2626' : 'border-left:4px solid #f59e0b'}">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+              <div>
+                <strong style="font-size:14px">🏭 ${supLabel}</strong>
+                <span style="font-size:12px;color:#64748b;margin-left:8px">${g.items.length} mặt hàng · Kho: ${g.warehouseName}</span>
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="navigateToIRCreate('${supKey}')">📥 Nhập hàng</button>
+            </div>
+            <table style="width:100%;font-size:12px">
+              <thead><tr>
+                <th>Loại</th>
+                <th>Tên</th>
+                <th style="text-align:right">Tồn hiện tại</th>
+                <th style="text-align:right">Ngưỡng</th>
+                <th style="text-align:right;color:#dc2626">Còn thiếu</th>
+              </tr></thead>
+              <tbody>
+                ${g.items.map(it => `<tr style="${(it.currentStock??0)<=0?'background:#fff5f5':'background:#fffbeb'}">
+                  <td>${typeLabel(it.itemType)}</td>
+                  <td><strong>${it.name}</strong> <small style="color:#94a3b8">${it.code}</small></td>
+                  <td style="text-align:right">${fmtQty(it.currentStock, it.unit)}</td>
+                  <td style="text-align:right">${fmtQty(it.minStockQuantity, it.unit)}</td>
+                  <td style="text-align:right;font-weight:700;color:#dc2626">${fmtQty(it.shortage, it.unit)}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`;
+        }).join('')}`;
+    }
+
+    function openLowStockOrderReview(supKey) {
+      const el = document.getElementById('low-stock-wrap'); if (!el) return;
+      const g = _lowStockGroups[supKey];
+      if (!g) { renderLowStockGrouped(); return; }
+      const supLabel = g.supplier
+        ? `${g.supplier.code ? g.supplier.code + ' — ' : ''}${g.supplier.name ?? ''}`
+        : 'Chưa có nhà cung cấp';
+
+      el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <button class="btn btn-ghost" onclick="renderLowStockGrouped()">← Quay lại</button>
+            <div>
+              <strong style="font-size:15px">📋 Tạo phiếu nhập hàng</strong>
+              <div style="font-size:12px;color:#64748b;margin-top:2px">🏭 ${supLabel} · Kho nhận: ${g.warehouseName}</div>
+            </div>
+          </div>
+          <button class="btn btn-success" id="btn-sup-${supKey}" onclick="createSingleSupplierOrder('${supKey}')">✅ Xác nhận tạo phiếu</button>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <table style="width:100%;font-size:13px">
+            <thead><tr>
+              <th>Mặt hàng</th>
+              <th style="text-align:right;width:150px">Số lượng nhập</th>
+              <th style="text-align:right;width:150px">Giá hiện tại</th>
+              <th style="text-align:right;width:160px">Giá nhập mới ✏️</th>
+            </tr></thead>
+            <tbody>
+              ${g.items.map((item, i) => `<tr>
+                <td>
+                  <strong>${item.name}</strong>
+                  <small style="color:#94a3b8;margin-left:4px">${item.code}</small>
+                  <div style="font-size:11px;color:#94a3b8;margin-top:2px">Tồn: ${fmt(item.currentStock??0)} · Thiếu: <span style="color:#dc2626;font-weight:600">${fmt(item.shortage??0)}</span> ${item.unit}</div>
+                </td>
+                <td style="text-align:right">
+                  <input type="number" step="0.001" min="0" value="${item.qty}"
+                    style="width:100px;text-align:right;border:1px solid #d1d5db;border-radius:4px;padding:4px 8px;font-size:13px"
+                    oninput="_lowStockGroups['${supKey}'].items[${i}].qty=+this.value">
+                  <small style="color:#94a3b8;display:block;margin-top:2px">${item.unit}</small>
+                </td>
+                <td style="text-align:right;color:#64748b;font-size:13px">
+                  ${item.currentPrice != null ? (+item.currentPrice).toLocaleString('vi-VN') + ' đ' : '—'}
+                </td>
+                <td style="text-align:right">
+                  <input type="number" step="1" min="0"
+                    value="${item.newPrice ?? ''}" placeholder="Nhập giá..."
+                    style="width:120px;text-align:right;border:1px solid #d1d5db;border-radius:4px;padding:4px 8px;font-size:13px"
+                    oninput="
+                      const v=this.value?+this.value:null;
+                      _lowStockGroups['${supKey}'].items[${i}].newPrice=v;
+                      _lowStockGroups['${supKey}'].items[${i}].priceChanged=(v!==_lowStockGroups['${supKey}'].items[${i}].currentPrice);
+                      this.style.borderColor=_lowStockGroups['${supKey}'].items[${i}].priceChanged?'#f59e0b':'#d1d5db'">
+                  <small style="color:#94a3b8;display:block;margin-top:2px">đ / ${item.unit}</small>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+          <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;gap:8px">
+            <button class="btn btn-ghost" onclick="renderLowStockGrouped()">Huỷ</button>
+            <button class="btn btn-success" onclick="createSingleSupplierOrder('${supKey}')">✅ Xác nhận tạo phiếu</button>
+          </div>
+        </div>`;
+    }
+
+    async function createSingleSupplierOrder(supKey) {
+      const group = _lowStockGroups[supKey]; if (!group) return;
+      // Disable all "tạo phiếu" buttons for this group
+      document.querySelectorAll(`[id="btn-sup-${supKey}"]`).forEach(b => { b.disabled = true; b.textContent = '⏳ Đang tạo...'; });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const lines = group.items.map((item, i) => ({
+        itemId: item.itemId, quantity: item.qty, unit: item.unit,
+        unitCost: item.newPrice ?? null, sortOrder: i + 1,
+        packagingId: null, purchaseQty: null
+      }));
+
+      try {
+        await api('POST', '/api/v1/inventory-requests', {
+          requestType: 'PURCHASE', requestDate: today,
+          supplierId: group.supplier?.id ?? null,
+          sourceWarehouseId: null, targetWarehouseId: group.warehouseId,
+          note: `Nhập hàng từ cảnh báo tồn kho${group.supplier ? ' — NCC: ' + group.supplier.name : ' — chưa chọn NCC'}`,
+          lines
+        });
+
+        // Cập nhật giá mới cho item nếu user đã chỉnh sửa
+        for (const item of group.items) {
+          if (item.priceChanged && item.newPrice != null) {
+            const full = allItems.find(it => it.id === item.itemId);
+            if (full) {
+              try {
+                await api('PUT', `/api/v1/items/${item.itemId}`, {
+                  itemType: full.itemType, code: full.code, name: full.name,
+                  unit: full.unit, itemGroupId: full.itemGroup?.id ?? null,
+                  splittable: full.splittable ?? true,
+                  defaultSupplierId: full.defaultSupplier?.id ?? null,
+                  unitCost: item.newPrice,
+                  shelfDays: full.shelfDays ?? null,
+                });
+                full.unitCost = item.newPrice;
+              } catch (_) { /* không block nếu update giá fail */ }
+            }
+          }
+        }
+
+        toast(`✅ Đã tạo phiếu nhập cho "${group.supplier?.name ?? 'chưa có NCC'}" (${group.items.length} mặt hàng)`);
+        delete _lowStockGroups[supKey];
+
+        // Khi tạo hết tất cả → chuyển sang list phiếu kho
+        if (!Object.keys(_lowStockGroups).length) {
+          setTimeout(() => nav('inventory-requests'), 900);
+        } else {
+          renderLowStockGrouped();
+        }
+      } catch (e) {
+        toast('Tạo phiếu thất bại: ' + (e?.message ?? e), 'err');
+        document.querySelectorAll(`[id="btn-sup-${supKey}"]`).forEach(b => { b.disabled = false; b.textContent = '✅ Xác nhận tạo phiếu'; });
+      }
+    }
+
+    async function createAllSupplierOrders() {
+      const keys = [...Object.keys(_lowStockGroups)];
+      for (const key of keys) await createSingleSupplierOrder(key);
+    }
+
+    async function navigateToIRCreate(supKey) {
+      await Promise.all([loadAllWarehouses(), loadAllItems(), loadAllSuppliers()]);
+      const g = _lowStockGroups[supKey];
+      if (!g) return;
+      _pendingIRPrefill = {
+        supplierId:  g.supplier?.id ?? null,
+        warehouseId: g.warehouseId,
+        note: `Nhập hàng từ cảnh báo tồn kho${g.supplier ? ' — NCC: ' + g.supplier.name : ''}`,
+        lines: g.items.map((item, i) => ({
+          itemId:      item.itemId,
+          qty:         +(item.shortage > 0 ? item.shortage : item.minStockQuantity || 1),
+          unit:        item.unit ?? '',
+          cost:        item.currentPrice ?? '',
+          sort:        i + 1,
+          _name:       item.name,
+          packagings:  [],
+          packagingId: null,
+          purchaseQty: null,
+          _qtyPerPack: null,
+        })),
+      };
+      nav('inventory-requests');
+    }
+
+    let _pendingIRPrefill = null; // giữ cho backward-compat
+
+    // Fetch low stock count for badge on page load
+    (async () => {
+      try {
+        const cnt = await api('GET', '/api/v1/items/low-stock/count');
+        const badge = document.getElementById('low-stock-badge');
+        const n = cnt?.count ?? (typeof cnt === 'number' ? cnt : 0);
+        if (badge && n > 0) { badge.textContent = n; badge.style.display = 'inline'; }
+      } catch (_) {}
+    })();
+
     async function loadStock() {
       const wh = document.getElementById('st-wh')?.value || '';
       const q = (document.getElementById('st-q')?.value || '').toLowerCase();
@@ -4177,11 +4516,64 @@
       <div class="action-row"><button class="btn btn-primary" onclick="saveIR()">Tạo phiếu</button></div>
     </div>
   </div>`;
-      irLines = []; renderIRLines(); loadIRs();
+      irLines = [];
+
+      if (_pendingIRPrefill) {
+        // Pre-fill từ "Nhập hàng" trên màn hình Hàng cần nhập
+        const prefill = _pendingIRPrefill;
+        _pendingIRPrefill = null;
+
+        irLines = prefill.lines;
+
+        // Switch sang tab Tạo phiếu
+        const createTab = document.querySelector('.tab[onclick*="create"]');
+        if (createTab) switchIRTab('create', createTab);
+
+        // Set nhà cung cấp
+        if (prefill.supplierId) {
+          const supSel = document.getElementById('ir-sup');
+          if (supSel) supSel.value = prefill.supplierId;
+        }
+
+        // Set kho nhận
+        const tgtSel = document.getElementById('ir-tgt');
+        if (tgtSel && prefill.warehouseId) {
+          for (const opt of tgtSel.options) {
+            if (opt.value === prefill.warehouseId || opt.dataset?.id === prefill.warehouseId) {
+              opt.selected = true; break;
+            }
+          }
+          // Fallback: match by id embedded in value
+          tgtSel.value = prefill.warehouseId;
+        }
+
+        // Set ghi chú
+        const noteEl = document.getElementById('ir-note');
+        if (noteEl) noteEl.value = prefill.note;
+
+        renderIRLines();
+
+        // Điền tên item vào các ô autocomplete sau khi DOM render
+        setTimeout(() => {
+          prefill.lines.forEach((l, i) => {
+            const acEl = document.getElementById('acir' + i);
+            if (acEl && l._name) acEl.value = l._name;
+          });
+        }, 50);
+
+        toast(`📋 Đã tạo phiếu nháp với ${prefill.lines.length} mặt hàng — kiểm tra và bấm "Tạo phiếu" để lưu`);
+      } else {
+        renderIRLines();
+      }
+
+      loadIRs();
     }
     function switchIRTab(tab, el) {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      el.classList.add('active');
+      // Chỉ remove active trong nhóm tabs của IR (tránh ảnh hưởng tabs khác)
+      if (el) {
+        el.closest('.tabs')?.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+      }
       document.getElementById('ir-list-tab').style.display = tab === 'list' ? '' : 'none';
       document.getElementById('ir-create-tab').style.display = tab === 'create' ? '' : 'none';
     }

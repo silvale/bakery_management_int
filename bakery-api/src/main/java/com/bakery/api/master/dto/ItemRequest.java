@@ -36,6 +36,13 @@ public record ItemRequest(
         /** Hạn sử dụng (ngày). 0 = bánh tươi trong ngày. null = không set. */
         Integer shelfDays,
 
+        // ── Stock threshold ─────────────────────────────────
+        /**
+         * Ngưỡng tồn kho tối thiểu — chỉ áp dụng cho INGREDIENT và SEMI_PRODUCT.
+         * Cảnh báo khi tồn thực tế (SUM stock_lot.qty_remaining) < minStockQuantity.
+         */
+        java.math.BigDecimal minStockQuantity,
+
         // ── Cost ─────────────────────────────────────────────
         /**
          * Giá vốn per unit — chỉ nhập trực tiếp cho INGREDIENT.
