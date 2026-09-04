@@ -60,6 +60,9 @@ public class ItemResponse extends BaseResponse {
     // ── Stock threshold
     private java.math.BigDecimal minStockQuantity;
 
+    /** Mức tồn kho mục tiêu sau khi nhập. */
+    private java.math.BigDecimal restockQuantity;
+
     // ── Image ────────────────────────────────────────────────
     /** Đường dẫn ảnh đại diện (optional). null = chưa có ảnh. */
     private String imageUrl;

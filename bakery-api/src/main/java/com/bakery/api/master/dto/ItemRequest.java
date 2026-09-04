@@ -43,6 +43,12 @@ public record ItemRequest(
          */
         java.math.BigDecimal minStockQuantity,
 
+        /**
+         * Mức tồn kho mục tiêu sau khi nhập — khi tạo phiếu nhập sẽ đặt hàng (restockQuantity - currentStock).
+         * Chỉ áp dụng cho INGREDIENT và SEMI_PRODUCT.
+         */
+        java.math.BigDecimal restockQuantity,
+
         // ── Cost ─────────────────────────────────────────────
         /**
          * Giá vốn per unit — chỉ nhập trực tiếp cho INGREDIENT.

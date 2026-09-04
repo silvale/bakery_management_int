@@ -241,6 +241,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         r.setUnitCost(item.getUnitCost());
         r.setImageUrl(item.getImageUrl());
         r.setMinStockQuantity(item.getMinStockQuantity());
+        r.setRestockQuantity(item.getRestockQuantity());
         if (item.getItemGroup() != null) {
             r.setItemGroup(new ReferenceValue(
                     item.getItemGroup().getCode(), item.getItemGroup().getName()));
@@ -479,6 +480,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         // minStockQuantity — chỉ áp dụng cho INGREDIENT và SEMI_PRODUCT
         if (!"PRODUCT".equalsIgnoreCase(req.itemType())) {
             e.setMinStockQuantity(req.minStockQuantity());
+            e.setRestockQuantity(req.restockQuantity());
         }
     }
 
