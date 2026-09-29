@@ -48,6 +48,7 @@ import com.bakery.api.recipe.entity.RecipeLine;
 import com.bakery.api.recipe.repository.RecipeRepository;
 import com.bakery.api.recipe.service.RecipeService;
 import com.bakery.framework.entity.ApprovalStatus;
+import com.bakery.framework.entity.EntityStatus;
 import com.bakery.framework.exception.ResourceNotFoundException;
 import com.bakery.framework.metadata.ReferenceValue;
 import com.bakery.framework.repository.BaseRepository;
@@ -706,7 +707,9 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     public byte[] exportIngredients() {
         // Query tất cả ingredient — dùng Specification để tận dụng ItemLookupRepository
         List<Item> ingredients = repository.findAll(
-                (root, query, cb) -> cb.equal(root.type(), Ingredient.class));
+                (root, query, cb) -> cb.and(
+                        cb.equal(root.type(), Ingredient.class),
+                        cb.equal(root.get("status"), EntityStatus.ACTIVE)));
 
         // Batch-fetch latest prices
         List<UUID> ids = ingredients.stream().map(Item::getId).toList();
