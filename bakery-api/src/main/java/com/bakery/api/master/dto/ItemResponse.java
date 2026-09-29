@@ -63,6 +63,10 @@ public class ItemResponse extends BaseResponse {
     /** Mức tồn kho mục tiêu sau khi nhập. */
     private java.math.BigDecimal restockQuantity;
 
+    // ── Selling price (PRODUCT only) ─────────────────────────
+    /** Giá bán — lấy từ ProductMapping (giá đầu tiên tìm thấy). null nếu chưa cấu hình. */
+    private BigDecimal sellingPrice;
+
     // ── Image ────────────────────────────────────────────────
     /** Đường dẫn ảnh đại diện (optional). null = chưa có ảnh. */
     private String imageUrl;

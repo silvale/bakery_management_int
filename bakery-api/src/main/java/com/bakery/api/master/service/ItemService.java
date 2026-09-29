@@ -35,6 +35,7 @@ import com.bakery.api.master.entity.SemiProduct;
 import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.repository.ItemLookupRepository;
 import com.bakery.api.master.repository.ItemPackagingRepository;
+import com.bakery.api.master.repository.ProductMappingRepository;
 import com.bakery.api.master.repository.ProductExpiryConfigRepository;
 import com.bakery.api.master.repository.SupplierRepository;
 import com.bakery.api.pricing.entity.IngredientPrice;
@@ -88,6 +89,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     private final ItemGroupRepository itemGroupRepository;
     private final ProductExpiryConfigRepository expiryConfigRepository;
     private final ItemPackagingRepository packagingRepository;
+    private final ProductMappingRepository productMappingRepository;
     private final BakeryActorResolver actorResolver;
     private final CommandRequestRepository commandRequestRepository;
 
@@ -293,6 +295,12 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             recipeRepository.findByProductIdAndActiveTrue(item.getId())
                     .or(() -> recipeRepository.findFirstByProductIdOrderByVersionDesc(item.getId()))
                     .ifPresent(recipe -> r.setRecipe(recipeService.mapToResponse(recipe)));
+            // Giá bán — lấy từ ProductMapping đầu tiên tìm thấy
+            productMappingRepository.findByItemId(item.getId())
+                    .stream()
+                    .filter(m -> m.getSellingPrice() != null)
+                    .findFirst()
+                    .ifPresent(m -> r.setSellingPrice(m.getSellingPrice()));
         }
 
         return r;
