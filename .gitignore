@@ -57,3 +57,10 @@ trash/API_Migration_Items.xlsx
 trash/BakeryAPI_Reference_v1.docx
 trash/BakeryFE_FlowDoc.docx
 trash/test_product_recipe.sh
+BakerySystem_VanHanh_API.docx
+00_cleanup.sql
+01_units.sql
+02_items_seed.sql
+bakery_workflow.svg
+nguyen-lieu-review.xlsx
+docs/project-research.md
