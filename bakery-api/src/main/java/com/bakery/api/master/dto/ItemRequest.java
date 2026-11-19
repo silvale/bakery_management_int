@@ -28,9 +28,15 @@ public record ItemRequest(
         // ── Ingredient only ──────────────────────────────────
         UUID defaultSupplierId,
 
+        /** Kho mặc định (tùy chọn, mọi loại item). null = xóa kho mặc định. */
+        UUID defaultWarehouseId,
+
         // ── Splittable ────────────────────────────────────────
         /** true (default) = có thể xuất lẻ. false = phải xuất nguyên pack. */
         boolean splittable,
+
+        /** Tặng kèm bánh kem (nến...). null = giữ nguyên (tạo mới: false). */
+        Boolean giftWithCake,
 
         // ── Product only ─────────────────────────────────────
         /** Hạn sử dụng (ngày). 0 = bánh tươi trong ngày. null = không set. */

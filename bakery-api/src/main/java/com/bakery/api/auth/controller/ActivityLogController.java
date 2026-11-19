@@ -31,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/activity-log")
 @RequiredArgsConstructor
+@com.bakery.framework.security.RequirePermission(screen = "ACTIVITY_LOG", action = "VIEW")
 public class ActivityLogController {
 
     private final CommandRequestRepository commandRequestRepository;

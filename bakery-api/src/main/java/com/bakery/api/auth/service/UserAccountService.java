@@ -28,6 +28,9 @@ public class UserAccountService extends AbstractBakeryAdminService<UserAccount, 
     private final CommandRequestRepository commandRequestRepository;
     private final BakeryActorResolver actorResolver;
     private final PasswordEncoder passwordEncoder;
+    private final RoleDefaultsService roleDefaults;
+    private final com.bakery.api.master.repository.WarehouseRepository warehouseRepository;
+    private final com.bakery.api.master.repository.SupplierRepository supplierRepository;
 
     @Override protected BaseRepository<UserAccount> getRepository() { return repository; }
     @Override protected BakeryActorResolver getActorResolver() { return actorResolver; }
@@ -47,6 +50,12 @@ public class UserAccountService extends AbstractBakeryAdminService<UserAccount, 
         if (req.roleId() != null) {
             e.setRole(findRole(req.roleId()));
         }
+        // 11/BE-2: không gửi → điền theo vai trò
+        e.getWarehouses().addAll(req.warehouseIds() != null ? findWarehouses(req.warehouseIds())
+                : roleDefaults.defaultWarehouses(e.getRole()));
+        e.getPriceSuppliers().addAll(req.priceSupplierIds() != null ? findSuppliers(req.priceSupplierIds())
+                : roleDefaults.defaultPriceSuppliers(e.getRole()));
+        requireWarehouse(e);
         return e;
     }
 
@@ -58,6 +67,33 @@ public class UserAccountService extends AbstractBakeryAdminService<UserAccount, 
             e.setPasswordHash(passwordEncoder.encode(req.password()));
         }
         e.setRole(req.roleId() != null ? findRole(req.roleId()) : null);
+        if (req.warehouseIds() != null) {   // có gửi → thay toàn bộ; không gửi → giữ nguyên
+            e.getWarehouses().clear();
+            e.getWarehouses().addAll(findWarehouses(req.warehouseIds()));
+        }
+        if (req.priceSupplierIds() != null) {
+            e.getPriceSuppliers().clear();
+            e.getPriceSuppliers().addAll(findSuppliers(req.priceSupplierIds()));
+        }
+        requireWarehouse(e);
+    }
+
+    /** User không phải Admin phải có ít nhất một kho (11/D2). */
+    private void requireWarehouse(UserAccount e) {
+        boolean admin = e.getRole() != null && AccessScope.SUPER_ADMIN.equalsIgnoreCase(e.getRole().getCode());
+        if (e.getRole() != null && !admin && e.getWarehouses().isEmpty()) {
+            throw new IllegalArgumentException("Phải gán ít nhất một kho");
+        }
+    }
+
+    private java.util.List<com.bakery.api.master.entity.Warehouse> findWarehouses(java.util.List<UUID> ids) {
+        return ids.stream().distinct().map(id -> warehouseRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Warehouse", id))).toList();
+    }
+
+    private java.util.List<com.bakery.api.master.entity.Supplier> findSuppliers(java.util.List<UUID> ids) {
+        return ids.stream().distinct().map(id -> supplierRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Supplier", id))).toList();
     }
 
     @Override

@@ -60,6 +60,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeResponse> {
 
+    @Override
+    protected String screenCode() { return "RECIPES"; }
+
+
     private final RecipeService service;
     private final RecipeCostService recipeCostService;
     private final ItemService itemService;
@@ -72,21 +76,25 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
         return service;
     }
 
+    @com.bakery.framework.security.RequirePermission(screen = "RECIPES", action = "UPDATE")
     @PostMapping("/{id}/activate")
     public RecipeResponse activate(@PathVariable UUID id) {
         return service.activate(id);
     }
 
+    @com.bakery.framework.security.RequirePermission(screen = "RECIPES", action = "CREATE")
     @PostMapping("/{id}/clone")
     public RecipeResponse clone(@PathVariable UUID id) {
         return service.clone(id);
     }
 
+    @com.bakery.framework.security.RequirePermission(screen = "RECIPES", action = "VIEW")
     @GetMapping("/by-product/{productId}")
     public List<RecipeResponse> byProduct(@PathVariable UUID productId) {
         return service.findByProduct(productId);
     }
 
+    @com.bakery.framework.security.RequirePermission(screen = "RECIPES", action = "VIEW")
     @GetMapping("/by-semi/{semiProductId}")
     public List<RecipeResponse> bySemiProduct(@PathVariable UUID semiProductId) {
         return service.findBySemiProduct(semiProductId);
@@ -96,6 +104,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
      * Tính giá cost cho 1 SP / BTP — chỉ đọc, không lưu vào DB.
      * Trả về breakdown chi tiết từng nguyên liệu + nguồn giá (CATALOG/STOCK_LOT_AVG/MISSING).
      */
+    @com.bakery.framework.security.RequirePermission(screen = "COST_PRICE", action = "VIEW")
     @GetMapping("/cost/{itemId}")
     public RecipeCostService.CostResult calculateCost(@PathVariable UUID itemId) {
         return recipeCostService.calculate(itemId);
@@ -106,6 +115,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
      * Chỉ lưu khi complete=true (tất cả NL đều tìm được giá).
      * Luôn trả về CostResult để UI biết kết quả.
      */
+    @com.bakery.framework.security.RequirePermission(screen = "COST_PRICE", action = "UPDATE")
     @PostMapping("/cost/{itemId}/apply")
     public RecipeCostService.CostResult applyCost(@PathVariable UUID itemId) {
         RecipeCostService.CostResult result = recipeCostService.calculate(itemId);
@@ -121,6 +131,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
      *
      * Dùng để chẩn đoán và sửa công thức / bổ sung unit_conversion.
      */
+    @com.bakery.framework.security.RequirePermission(screen = "RECIPES", action = "VIEW")
     @GetMapping("/unit-issues")
     public List<Map<String, Object>> unitIssues() {
         List<Object[]> rows = service.findUnitMismatchIssues();
@@ -143,6 +154,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
      * POST /api/v1/recipes/export
      * Body: ["uuid1", "uuid2", ...]
      */
+    @com.bakery.framework.security.RequirePermission(screen = "COST_PRICE", action = "VIEW")   // file xuất có chi phí công thức
     @PostMapping("/export")
     public ResponseEntity<byte[]> exportRecipes(@RequestBody List<UUID> itemIds) {
         byte[] data = recipeExportService.exportRecipes(itemIds);
@@ -159,6 +171,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
      * POST /api/v1/recipes/cost/apply-all
      * Trả về: { updated, skipped, noRecipe, errors[] }
      */
+    @com.bakery.framework.security.RequirePermission(screen = "COST_PRICE", action = "UPDATE")
     @PostMapping("/cost/apply-all")
     public Map<String, Object> applyAllCosts() {
         List<Item> all = Stream.concat(
@@ -209,6 +222,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
      * POST /api/v1/recipes/yield/auto-fill
      * Trả về: { total, filled, alreadySet, noKgIngredients, details[] }
      */
+    @com.bakery.framework.security.RequirePermission(screen = "RECIPES", action = "UPDATE")
     @PostMapping("/yield/auto-fill")
     public java.util.Map<String, Object> autoFillYield() {
         return service.autoFillYieldQuantity();
@@ -219,6 +233,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
      * GET /api/v1/recipes/usage/{itemId}
      * Trả về: [{ productId, productCode, productName, productType, recipeVersion, quantity, unit }]
      */
+    @com.bakery.framework.security.RequirePermission(screen = "RECIPES", action = "VIEW")
     @GetMapping("/usage/{itemId}")
     public List<Map<String, Object>> usageByItem(@PathVariable UUID itemId) {
         return service.findUsageByItem(itemId);

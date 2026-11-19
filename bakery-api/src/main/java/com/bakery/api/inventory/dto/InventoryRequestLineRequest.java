@@ -14,4 +14,8 @@ public record InventoryRequestLineRequest(
         /** ID của packaging được chọn (Bao 10kg, Thùng 12 chai...). null nếu không dùng packaging. */
         UUID packagingId,
         /** Số lượng theo đơn vị đóng gói (số bao, số thùng...). quantity = purchaseQty × packaging.qtyPerPack. */
-        BigDecimal purchaseQty) {}
+        BigDecimal purchaseQty,
+        /** ADJUSTMENT: số đếm thực tế (≥ 0). BE tự tính quantity = countedQty − tồn hệ thống, bỏ qua quantity FE gửi. */
+        BigDecimal countedQty,
+        /** ADJUSTMENT: mã lý do trong code_value ADJUSTMENT_REASON; OTHER bắt buộc có note. */
+        String reasonCode) {}

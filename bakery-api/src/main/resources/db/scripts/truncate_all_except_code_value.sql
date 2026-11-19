@@ -34,7 +34,6 @@ TRUNCATE TABLE
     product_mapping,
     item,
     supplier,
-    warehouse,
 
     -- Audit / command
     command_request,

@@ -62,4 +62,12 @@ public class DeliveryRecord extends BaseEntity {
      */
     @Column(name = "ex_code", length = 50)
     private String exCode;
+
+    /** true nếu mẫu bánh cửa hàng nhận khác mẫu bếp làm ra (bánh kem). Mẫu nằm ở delivery_record_design. */
+    @Column(name = "design_mismatch", nullable = false)
+    private boolean designMismatch = false;
+
+    /** 02/BE-13: phụ kiện theo mẫu đã trừ lúc bếp Hoàn thành → cửa hàng xác nhận không trừ nữa. false = phiếu hoàn thành trước BE-13. */
+    @Column(name = "accessories_deducted", nullable = false)
+    private boolean accessoriesDeducted = false;
 }

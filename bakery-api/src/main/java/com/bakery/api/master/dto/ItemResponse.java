@@ -39,9 +39,15 @@ public class ItemResponse extends BaseResponse {
     private BigDecimal lastPrice;
     private LocalDate lastPriceDate;
 
+    /** Kho mặc định (tùy chọn, mọi loại item). null = chưa đặt. */
+    private ReferenceValue defaultWarehouse;
+
     // ── Splittable ───────────────────────────────────────────────
     /** true = có thể xuất lẻ; false = phải xuất nguyên pack */
     private boolean splittable = true;
+
+    /** Phụ kiện tặng kèm bánh kem (nến...). */
+    private boolean giftWithCake;
 
     /** Danh sách đóng gói (chỉ có giá trị với INGREDIENT) */
     private List<PackagingResponse> packagings;
@@ -56,6 +62,8 @@ public class ItemResponse extends BaseResponse {
      * INGREDIENT = nhập tay; SEMI_PRODUCT / PRODUCT = tính từ công thức khi approve.
      */
     private BigDecimal unitCost;
+    /** 11/D6: giá vốn / giá nhập bị ẩn vì user không có quyền (unitCost, lastPrice là null). */
+    private boolean priceHidden;
 
     // ── Stock threshold
     private java.math.BigDecimal minStockQuantity;

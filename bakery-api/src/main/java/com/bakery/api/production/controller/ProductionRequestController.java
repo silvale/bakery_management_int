@@ -44,6 +44,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/production-requests")
 @RequiredArgsConstructor
+@com.bakery.api.auth.scope.RequireWarehouse(any = {"KITCHEN"})
 public class ProductionRequestController
         extends BakeryAdminResource<ProductionRequestRequest, ProductionRequestResponse> {
 
@@ -74,9 +75,11 @@ public class ProductionRequestController
             @RequestParam BigDecimal qtyProduced,
             @RequestParam(required = false) AdjustmentType adjustmentType,
             @RequestParam(required = false) String reason,
-            @RequestParam(required = false) String note) {
-        checkPermission("APPROVE");
-        return service.completeLine(id, lineId, qtyProduced, adjustmentType, reason, note);
+            @RequestParam(required = false) String note,
+            @RequestBody(required = false) com.bakery.api.production.dto.CompleteLineBody body) {
+        checkPermission("COMPLETE");   // 11/BE-4: tách khỏi APPROVE
+        return service.completeLine(id, lineId, qtyProduced, adjustmentType, reason, note,
+                body != null ? body.designs() : null);
     }
 
     /**
@@ -96,7 +99,7 @@ public class ProductionRequestController
     public ProductionRequestResponse completeLines(
             @PathVariable UUID id,
             @RequestBody List<CompleteLineRequest> items) {
-        checkPermission("APPROVE");
+        checkPermission("COMPLETE");
         return service.completeLines(id, items);
     }
 
@@ -125,6 +128,7 @@ public class ProductionRequestController
      * @param semiItemId ID của BTP cần sản xuất
      * @param date       ngày sản xuất (mặc định hôm nay)
      */
+    @com.bakery.framework.security.RequirePermission(screen = "PROD_REQUESTS", action = "VIEW")
     @GetMapping("/suggest-semi")
     public java.util.Map<String, Object> suggestSemi(
             @RequestParam UUID semiItemId,

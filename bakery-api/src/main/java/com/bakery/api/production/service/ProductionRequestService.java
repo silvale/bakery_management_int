@@ -8,12 +8,16 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 import com.bakery.api.inventory.entity.StockLot;
+import com.bakery.api.inventory.service.ProductionZone;
 import com.bakery.api.inventory.entity.StockMovement;
 import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.inventory.repository.StockMovementRepository;
 import com.bakery.api.master.entity.Warehouse;
 import com.bakery.api.master.repository.ItemLookupRepository;
 import com.bakery.api.master.repository.WarehouseRepository;
+import com.bakery.api.cake.dto.DeliveryRecordAccessoryResponse;
+import com.bakery.api.cake.dto.DeliveryRecordDesignResponse;
+import com.bakery.api.cake.dto.DesignQtyRequest;
 import com.bakery.api.production.dto.DeliveryRecordResponse;
 import com.bakery.api.production.dto.CompleteLineRequest;
 import com.bakery.api.production.entity.ItemGroup;
@@ -89,6 +93,7 @@ public class ProductionRequestService
     private final CommandRequestRepository commandRequestRepository;
     private final UnitConversionRepository unitConversionRepository;
     private final ProductMappingRepository productMappingRepository;
+    private final com.bakery.api.cake.service.DeliveryDesignService designService;
     private final BakeryActorResolver actorResolver;
 
     // ── Framework wiring ─────────────────────────────────────────
@@ -199,11 +204,17 @@ public class ProductionRequestService
         r.setProductionType(e.getProductionType());
         r.setProductionDate(e.getProductionDate());
         r.setNote(e.getNote());
-        r.setLines(e.getLines().stream().map(this::toLineResponse).toList());
+        List<UUID> recordIds = e.getLines().stream().map(ProductionRequestLine::getDeliveryRecord)
+                .filter(java.util.Objects::nonNull).map(DeliveryRecord::getId).toList();
+        Map<UUID, List<DeliveryRecordDesignResponse>> designs = designService.responsesFor(recordIds);
+        Map<UUID, List<DeliveryRecordAccessoryResponse>> accessories = designService.accessoriesFor(recordIds);
+        r.setLines(e.getLines().stream().map(l -> toLineResponse(l, designs, accessories)).toList());
         return r;
     }
 
-    private ProductionRequestLineResponse toLineResponse(ProductionRequestLine line) {
+    private ProductionRequestLineResponse toLineResponse(ProductionRequestLine line,
+            Map<UUID, List<DeliveryRecordDesignResponse>> designs,
+            Map<UUID, List<DeliveryRecordAccessoryResponse>> accessories) {
         ProductionRequestLineResponse lr = new ProductionRequestLineResponse();
         lr.applyFrom(line);
         if (line.getProduct() != null) {
@@ -218,7 +229,7 @@ public class ProductionRequestService
         lr.setSortOrder(line.getSortOrder());
         lr.setNote(line.getNote());
         if (line.getDeliveryRecord() != null) {
-            lr.setDeliveryRecord(toDeliveryResponse(line.getDeliveryRecord()));
+            lr.setDeliveryRecord(toDeliveryResponse(line.getDeliveryRecord(), designs, accessories));
         }
         return lr;
     }
@@ -226,15 +237,21 @@ public class ProductionRequestService
     /** Lấy danh sách giao nhận theo ngày sản xuất. */
     @Transactional(readOnly = true)
     public List<DeliveryRecordResponse> findDeliveryRecordsByDate(java.time.LocalDate date) {
-        return deliveryRecordRepository
-                .findByProductionRequestLine_ProductionRequest_ProductionDate(date)
-                .stream()
-                .map(this::toDeliveryResponse)
-                .toList();
+        List<DeliveryRecord> records = deliveryRecordRepository
+                .findByProductionRequestLine_ProductionRequest_ProductionDate(date);
+        List<UUID> ids = records.stream().map(DeliveryRecord::getId).toList();
+        Map<UUID, List<DeliveryRecordDesignResponse>> designs = designService.responsesFor(ids);
+        Map<UUID, List<DeliveryRecordAccessoryResponse>> accessories = designService.accessoriesFor(ids);
+        return records.stream().map(dr -> toDeliveryResponse(dr, designs, accessories)).toList();
     }
 
-    private DeliveryRecordResponse toDeliveryResponse(DeliveryRecord dr) {
+    private DeliveryRecordResponse toDeliveryResponse(DeliveryRecord dr,
+            Map<UUID, List<DeliveryRecordDesignResponse>> designs,
+            Map<UUID, List<DeliveryRecordAccessoryResponse>> accessories) {
         DeliveryRecordResponse r = new DeliveryRecordResponse();
+        r.setDesigns(designs.getOrDefault(dr.getId(), List.of()));
+        r.setAccessories(accessories.getOrDefault(dr.getId(), List.of()));
+        r.setDesignMismatch(dr.isDesignMismatch());
         r.setId(dr.getId());
         r.setQtyProduced(dr.getQtyProduced());
         r.setQtyReceived(dr.getQtyReceived());
@@ -399,11 +416,11 @@ public class ProductionRequestService
         return recipeRepository.findByProductIdAndActiveTrue(line.getProduct().getId()).orElse(null);
     }
 
-    private void deductFromKitchen(BigDecimal needed, UUID itemId, String itemName, Warehouse kitchen, ProductionRequest e) {
+    private void deductFromKitchen(BigDecimal needed, UUID itemId, String itemName, ProductionRequest e) {
         List<StockLot> lots = stockLotRepository
                 .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(itemId, BigDecimal.ZERO)
                 .stream()
-                .filter(l -> l.getWarehouse() != null && l.getWarehouse().getId().equals(kitchen.getId()))
+                .filter(ProductionZone::contains) // KITCHEN + COLD, giữ thứ tự FIFO
                 .toList();
 
         BigDecimal remaining = needed;
@@ -427,7 +444,7 @@ public class ProductionRequestService
 
         if (remaining.compareTo(BigDecimal.ZERO) > 0) {
             throw new IllegalStateException(
-                    "Kho bếp không đủ nguyên liệu: " + itemName + " (thiếu " + remaining + ")");
+                    "Kho bếp + phòng lạnh không đủ nguyên liệu: " + itemName + " (thiếu " + remaining + ")");
         }
     }
 
@@ -444,6 +461,30 @@ public class ProductionRequestService
     @Transactional
     public ProductionRequestResponse completeLine(UUID requestId, UUID lineId,
             BigDecimal qtyProduced, AdjustmentType adjustmentType, String reason, String note) {
+        return completeLine(requestId, lineId, qtyProduced, adjustmentType, reason, note, null);
+    }
+
+    /**
+     * @param designs số bánh theo mẫu (kèm phụ kiện thực dùng) — áp dụng cho phiếu DAILY và ORDER có thành phẩm có mẫu
+     *                đang dùng (02/BE-2, BE-12); phiếu SEMI và thành phẩm không mẫu bỏ qua tham số này.
+     */
+    @Transactional
+    public ProductionRequestResponse completeLine(UUID requestId, UUID lineId,
+            BigDecimal qtyProduced, AdjustmentType adjustmentType, String reason, String note,
+            List<DesignQtyRequest> designs) {
+        Completion done = doCompleteLine(requestId, lineId, qtyProduced, adjustmentType, reason, note, designs);
+        ProductionRequestResponse resp = toResponse(done.saved());
+        resp.setStockWarnings(done.warnings());
+        return resp;
+    }
+
+    /** Kết quả hoàn thành một line: phiếu đã lưu + cảnh báo thiếu phụ kiện (02/BE-13). */
+    private record Completion(ProductionRequest saved, List<String> warnings) {}
+
+    private Completion doCompleteLine(UUID requestId, UUID lineId,
+            BigDecimal qtyProduced, AdjustmentType adjustmentType, String reason, String note,
+            List<DesignQtyRequest> designs) {
+        List<String> stockWarnings = new java.util.ArrayList<>();
         ProductionRequest e = repository.findById(requestId)
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionRequest", requestId));
 
@@ -455,6 +496,12 @@ public class ProductionRequestService
         if (line.getLineStatus() == ProductionLineStatus.COMPLETED) {
             throw new IllegalStateException("Line đã Completed rồi.");
         }
+
+        // Mẫu bánh: kiểm trước khi động đến tồn kho (lỗi → 400, không đổi gì)
+        Map<UUID, BigDecimal> producedDesigns = designService.validateProduced(
+                line.getProduct().getId(), e.getProductionType(), qtyProduced, designs);
+        // Phụ kiện bếp dùng: kiểm hợp lệ cũng TRƯỚC khi động đến tồn kho (02/BE-13)
+        var accessoryPlan = designService.planAccessories(producedDesigns, designs);
 
         // plannedQty = 0 nghĩa là open-qty (FREE_GROUP) — bếp fill tự do, không check deviation
         BigDecimal plannedQty = line.getPlannedQty();
@@ -477,18 +524,20 @@ public class ProductionRequestService
                 BigDecimal convFactor = resolveConversionFactor(
                         rl.getUnit(), rl.getItem().getUnit());
                 BigDecimal needed = rl.getQuantity().multiply(qtyProduced).multiply(convFactor);
-                deductFromKitchen(needed, rl.getItem().getId(), rl.getItem().getName(), kitchen, e);
+                deductFromKitchen(needed, rl.getItem().getId(), rl.getItem().getName(), e);
             }
         } else {
             log.warn("completeLine: không tìm thấy recipe cho sản phẩm {} — bỏ qua NL deduct",
                     line.getProduct() != null ? line.getProduct().getCode() : "unknown");
         }
 
-        // Tạo StockLot bánh thành phẩm tại KITCHEN
+        // Lô đầu ra: BTP có kho mặc định ở khu sản xuất (vd Phòng lạnh) vào kho đó; còn lại vào KITCHEN
+        Warehouse outputWarehouse = ProductionZone.outputWarehouse(
+                e.getProductionType() == ProductionType.SEMI, line.getProduct().getDefaultWarehouse(), kitchen);
 
         StockLot productLot = new StockLot();
         productLot.setItem(line.getProduct());
-        productLot.setWarehouse(kitchen);
+        productLot.setWarehouse(outputWarehouse);
         productLot.setQtyInitial(qtyProduced);
         productLot.setQtyRemaining(qtyProduced);
         productLot.setUnitCost(BigDecimal.ZERO);
@@ -515,6 +564,10 @@ public class ProductionRequestService
             dr.setDeliveryStatus(DeliveryStatus.READY);
             dr.setNote(note);
             DeliveryRecord savedDr = deliveryRecordRepository.save(dr);
+            designService.saveProduced(savedDr, producedDesigns);
+            // 02/BE-13 (D16): phụ kiện theo mẫu trừ NGAY lúc bếp Hoàn thành, theo danh sách bếp đã sửa
+            stockWarnings.addAll(designService.applyAccessories(savedDr,
+                    producedDesigns != null && !producedDesigns.isEmpty(), accessoryPlan, e.getProductionDate()));
 
             // Nếu lệch → tạo ProductionAdjustment chờ bếp trưởng duyệt
             if (hasDeviation) {
@@ -540,7 +593,7 @@ public class ProductionRequestService
         ProductionRequest saved = repository.save(e);
         log(CommandAction.COMPLETE, requestId, saved.getCode(),
                 line.getProduct() != null ? line.getProduct().getCode() + " × " + qtyProduced : null);
-        return toResponse(saved);
+        return new Completion(saved, stockWarnings);
     }
 
     /**
@@ -556,16 +609,21 @@ public class ProductionRequestService
         if (items == null || items.isEmpty()) {
             throw new IllegalArgumentException("Danh sách line không được để trống.");
         }
-        ProductionRequestResponse response = null;
+        Completion last = null;
+        List<String> warnings = new java.util.ArrayList<>();
         for (CompleteLineRequest item : items) {
-            response = completeLine(
+            last = doCompleteLine(
                     requestId,
                     item.lineId(),
                     item.qtyProduced(),
                     item.adjustmentType(),
                     item.reason(),
-                    item.note());
+                    item.note(),
+                    item.designs());
+            warnings.addAll(last.warnings());
         }
+        ProductionRequestResponse response = toResponse(last.saved());
+        response.setStockWarnings(warnings);   // gom cảnh báo của cả phiếu
         return response;
     }
 
@@ -581,13 +639,20 @@ public class ProductionRequestService
      * </ol>
      */
     @Transactional
-    public DeliveryRecordResponse confirmDelivery(UUID deliveryRecordId, BigDecimal qtyReceived, String note) {
+    public DeliveryRecordResponse confirmDelivery(UUID deliveryRecordId, BigDecimal qtyReceived, String note,
+            List<DesignQtyRequest> designs) {
         DeliveryRecord dr = deliveryRecordRepository.findById(deliveryRecordId)
                 .orElseThrow(() -> new ResourceNotFoundException("DeliveryRecord", deliveryRecordId));
 
         if (dr.getDeliveryStatus() == DeliveryStatus.CONFIRMED) {
             throw new IllegalStateException("DeliveryRecord đã được confirm rồi.");
         }
+
+        // Mẫu bánh: kiểm + ghi số nhận theo mẫu + trừ phụ kiện (không ném lỗi khi thiếu tồn)
+        var drLine = dr.getProductionRequestLine();
+        com.bakery.api.cake.service.DeliveryDesignService.ConfirmResult designResult = designService.confirm(
+                dr, drLine.getProduct().getId(), drLine.getProduct().getCode(),
+                drLine.getProductionRequest().getProductionDate(), qtyReceived, designs);
 
         BigDecimal discrepancy = dr.getQtyProduced().subtract(qtyReceived);
         dr.setQtyReceived(qtyReceived);
@@ -690,6 +755,10 @@ public class ProductionRequestService
             }
         }
 
-        return toDeliveryResponse(deliveryRecordRepository.findById(deliveryRecordId).orElseThrow());
+        DeliveryRecord fresh = deliveryRecordRepository.findById(deliveryRecordId).orElseThrow();
+        DeliveryRecordResponse resp = toDeliveryResponse(fresh, designService.responsesFor(List.of(deliveryRecordId)),
+                designService.accessoriesFor(List.of(deliveryRecordId)));
+        resp.setStockWarnings(designResult.stockWarnings());
+        return resp;
     }
 }

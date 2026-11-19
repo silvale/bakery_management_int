@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserRoleController extends BakeryAdminResource<UserRoleRequest, UserRoleResponse> {
 
     private final UserRoleService service;
+    private final com.bakery.api.auth.repository.UserRoleRepository roleRepository;
+    private final com.bakery.api.auth.service.RoleDefaultsService roleDefaults;
 
     @Override
     protected String screenCode() { return "ROLES"; }
@@ -22,5 +24,13 @@ public class UserRoleController extends BakeryAdminResource<UserRoleRequest, Use
     @Override
     protected BakeryAdminService<UserRoleRequest, UserRoleResponse> getService() {
         return service;
+    }
+
+    /** 11/BE-2: kho và NCC xem giá điền sẵn khi chọn vai trò này cho user. */
+    @org.springframework.web.bind.annotation.GetMapping("/{id}/defaults")
+    public com.bakery.api.auth.dto.RoleDefaults defaults(@org.springframework.web.bind.annotation.PathVariable java.util.UUID id) {
+        checkPermission("VIEW");
+        return roleDefaults.defaults(roleRepository.findById(id)
+                .orElseThrow(() -> new com.bakery.framework.exception.ResourceNotFoundException("UserRole", id)));
     }
 }

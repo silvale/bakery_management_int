@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1")
 @RequiredArgsConstructor
+@com.bakery.framework.security.RequirePermission(screen = "ROLES", action = "VIEW")
 public class PermissionController {
 
     private final RolePermissionService rolePermissionService;
@@ -41,6 +42,7 @@ public class PermissionController {
      * Body: { "permissions": [{ "screenCode": "ITEMS", "actionCode": "VIEW" }, ...] }
      */
     @PutMapping("/user-roles/{id}/permissions")
+    @com.bakery.framework.security.RequirePermission(screen = "ROLES", action = "UPDATE")
     public ResponseEntity<Map<String, Set<String>>> setPermissions(
             @PathVariable UUID id,
             @RequestBody RolePermissionRequest req) {

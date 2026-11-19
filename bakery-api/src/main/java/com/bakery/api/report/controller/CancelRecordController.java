@@ -28,26 +28,28 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/v1/cancel-records")
 @RequiredArgsConstructor
-@RequirePermission(screen = "DAILY_REPORT", action = "VIEW")
+@RequirePermission(screen = "HUY_BANH", action = "VIEW")
+@com.bakery.api.auth.scope.RequireWarehouse(any = {"SHOP"})
 public class CancelRecordController {
 
     private final CancelRecordService cancelRecordService;
     private final DailyReportRepository reportRepository;
 
-    /** Lấy danh sách hủy theo ngày (mặc định hôm nay). Tự init report nếu chưa có. */
+    /** Lấy danh sách hủy theo ngày (mặc định hôm nay). Chưa có báo cáo ngày → trả danh sách rỗng. */
     @GetMapping
     public List<Map<String, Object>> getCancelList(
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         LocalDate target = date != null ? date : LocalDate.now();
-        DailyReport report = reportRepository.findByReportDate(target)
-                .orElseThrow(() -> new ResourceNotFoundException("DailyReport for date " + target));
-        return cancelRecordService.getCancelList(report.getId(), target);
+        // Chưa có báo cáo ngày = chưa có gì để hủy → trả rỗng thay vì 404
+        return reportRepository.findByReportDate(target)
+                .map(report -> cancelRecordService.getCancelList(report.getId(), target))
+                .orElseGet(List::of);
     }
 
     /** NV tick xác nhận đã hủy đúng hoặc nhập số lượng thực tế khác. */
     @PutMapping("/{id}/confirm")
-    @RequirePermission(screen = "DAILY_REPORT", action = "EDIT")
+    @RequirePermission(screen = "HUY_BANH", action = "CREATE")
     public CancelRecord confirm(
             @PathVariable UUID id,
             @RequestParam(required = false) BigDecimal qtyCancelActual,
@@ -57,7 +59,7 @@ public class CancelRecordController {
 
     /** NV thêm hủy vượt (DAMAGED / OTHER) */
     @PostMapping("/extra")
-    @RequirePermission(screen = "DAILY_REPORT", action = "EDIT")
+    @RequirePermission(screen = "HUY_BANH", action = "CREATE")
     public CancelRecord addExtra(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @RequestParam String exCode,
@@ -71,7 +73,7 @@ public class CancelRecordController {
 
     /** Xóa hủy vượt (chỉ DAMAGED/OTHER, không xóa EXPIRED) */
     @DeleteMapping("/{id}")
-    @RequirePermission(screen = "DAILY_REPORT", action = "EDIT")
+    @RequirePermission(screen = "HUY_BANH", action = "CREATE")
     public ResponseEntity<Void> remove(@PathVariable UUID id) {
         cancelRecordService.remove(id);
         return ResponseEntity.noContent().build();

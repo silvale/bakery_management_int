@@ -54,6 +54,7 @@ public class ItemController extends BakeryAdminResource<ItemRequest, ItemRespons
      * Upsert toàn bộ packaging list cho 1 item.
      * PUT /api/v1/items/{id}/packagings
      */
+    @com.bakery.framework.security.RequirePermission(screen = "ITEMS", action = "UPDATE")
     @PutMapping("/{id}/packagings")
     public ResponseEntity<List<ItemResponse.PackagingResponse>> upsertPackagings(
             @PathVariable UUID id,
@@ -65,6 +66,7 @@ public class ItemController extends BakeryAdminResource<ItemRequest, ItemRespons
      * Gợi ý packaging phù hợp cho số lượng cần mua.
      * GET /api/v1/items/{id}/suggest-packaging?neededQty=15
      */
+    @com.bakery.framework.security.RequirePermission(screen = "ITEMS", action = "VIEW")
     @GetMapping("/{id}/suggest-packaging")
     public ResponseEntity<SuggestPackagingResponse> suggestPackaging(
             @PathVariable UUID id,
@@ -72,7 +74,19 @@ public class ItemController extends BakeryAdminResource<ItemRequest, ItemRespons
         SuggestPackagingResponse res = service.suggestPackaging(id, neededQty);
         if (res == null) return ResponseEntity.noContent().build();
         return ResponseEntity.ok(res);
+    
     }
+
+    /**
+     * 12/BE-1: mặt hàng thuộc một NCC (NCC mặc định hoặc có trong bảng giá), không kèm giá — để lọc dropdown ở phiếu nhập.
+     * GET /api/v1/items/by-supplier?supplierId=...
+     */
+    @com.bakery.framework.security.RequirePermission(screen = "INVENTORY_REQUESTS", action = "CREATE")
+    @GetMapping("/by-supplier")
+    public List<com.bakery.api.master.dto.ItemBySupplierResponse> bySupplier(@RequestParam UUID supplierId) {
+        return service.findBySupplier(supplierId);
+    }
+
 
     /**
      * Xuất toàn bộ nguyên liệu ra Excel.
@@ -80,6 +94,7 @@ public class ItemController extends BakeryAdminResource<ItemRequest, ItemRespons
      *
      * <p>GET /api/v1/items/export
      */
+    @com.bakery.framework.security.RequirePermission(screen = "COST_PRICE", action = "VIEW")   // 11/D5: file có giá vốn, giá nhập
     @GetMapping("/export")
     public ResponseEntity<byte[]> export() {
         byte[] data = service.exportIngredients();
@@ -96,6 +111,7 @@ public class ItemController extends BakeryAdminResource<ItemRequest, ItemRespons
      * DELETE /api/v1/items/bulk
      * Body: ["uuid1", "uuid2", ...]
      */
+    @com.bakery.framework.security.RequirePermission(screen = "ITEMS", action = "DELETE")
     @DeleteMapping("/bulk")
     public ResponseEntity<Map<String, Object>> bulkDelete(@RequestBody List<UUID> ids) {
         int count = service.bulkDelete(ids);

@@ -36,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/production/plans")
 @RequiredArgsConstructor
 @RequirePermission(screen = "PROD_PLANS", action = "VIEW")
+@com.bakery.api.auth.scope.RequireWarehouse(any = {"KITCHEN"})
 public class ProductionPlanController {
 
     private final ProductionPlanService service;

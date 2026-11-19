@@ -53,12 +53,22 @@ public abstract class Item extends BaseEntity {
     @JoinColumn(name = "item_group_id")
     private ItemGroup itemGroup;
 
+    /** Kho mặc định để điền sẵn kho nhận khi lập phiếu. Chỉ gợi ý, BE không ràng buộc phiếu theo kho này. */
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "default_warehouse_id")
+    private Warehouse defaultWarehouse;
+
     /**
      * true (default) = có thể xuất lẻ từ kho tổng.
      * false = phải xuất theo bội số của unitSize.
      */
     @Column(name = "is_splittable", nullable = false)
     private boolean splittable = true;
+
+    /** Nến/phụ kiện tặng kèm bánh kem — dùng để cảnh báo nến 0đ vượt số bánh kem bán khi chốt ngày. */
+    @Column(name = "gift_with_cake", nullable = false)
+    private boolean giftWithCake = false;
 
     /**
      * Giá vốn per unit (đơn vị tính của item).

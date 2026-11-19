@@ -14,6 +14,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class ProductExpiryConfigController extends BakeryAdminResource<ProductExpiryConfigRequest, ProductExpiryConfigResponse> {
 
+    @Override
+    protected String screenCode() { return "SX_CONFIG"; }
+
+
     private final ProductExpiryConfigService service;
 
     @Override

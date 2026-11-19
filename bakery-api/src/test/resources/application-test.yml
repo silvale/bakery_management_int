@@ -1,0 +1,13 @@
+# Profile "test" (10/BE-1): KHÔNG kế thừa nhóm dev/local nên không trỏ DB dev (localhost:5432/bakery_db)
+# và không chạy Flyway. Test cần Spring context + DB (BakeryApplicationTest) chỉ chạy khi bật cờ -Dit=true,
+# kèm DB tạm riêng, ví dụ:
+#   mvn -pl bakery-api test -Dit=true -Dspring.flyway.enabled=true \
+#       -Dspring.datasource.url=jdbc:postgresql://localhost:5544/bakery_it \
+#       -Dspring.datasource.username=postgres -Dspring.datasource.password=x
+spring:
+  flyway:
+    enabled: false
+  datasource:
+    url: jdbc:postgresql://localhost:5999/bakery_test_unused   # cố ý không tồn tại: lỡ chạy mà quên cấu hình DB thì lỗi kết nối, không đụng DB dev
+    username: test
+    password: test

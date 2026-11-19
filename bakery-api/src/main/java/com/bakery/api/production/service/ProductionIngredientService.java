@@ -11,6 +11,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.bakery.api.inventory.entity.InventoryRequest;
+import com.bakery.api.inventory.service.ProductionZone;
 import com.bakery.api.inventory.entity.InventoryRequestLine;
 import com.bakery.api.inventory.repository.InventoryRequestLineRepository;
 import com.bakery.api.inventory.repository.InventoryRequestRepository;
@@ -476,8 +477,10 @@ public class ProductionIngredientService {
                 ));
     }
 
+    /** Tồn khu sản xuất (KITCHEN + COLD) theo item. Tên giữ nguyên vì nhiều chỗ gọi. */
     private Map<UUID, BigDecimal> currentKitchenStock() {
-        return stockLotRepository.findByWarehouseCode(KITCHEN_CODE).stream()
+        return ProductionZone.CODES.stream()
+                .flatMap(code -> stockLotRepository.findByWarehouseCode(code).stream())
                 .filter(lot -> lot.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
                 .collect(Collectors.groupingBy(
                         lot -> lot.getItem().getId(),
@@ -530,11 +533,13 @@ public class ProductionIngredientService {
             }
         }
 
-        // Tồn KITCHEN của BTP này
+        // Tồn khu sản xuất (KITCHEN + COLD) của BTP này
         Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
                 .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
-        BigDecimal kitchenStock = stockLotRepository.findByItemIdAndWarehouseId(semiItemId, kitchen.getId())
-                .stream()
+        BigDecimal kitchenStock = ProductionZone.CODES.stream()
+                .map(warehouseRepository::findByCode)
+                .flatMap(java.util.Optional::stream)
+                .flatMap(w -> stockLotRepository.findByItemIdAndWarehouseId(semiItemId, w.getId()).stream())
                 .filter(l -> l.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
                 .map(com.bakery.api.inventory.entity.StockLot::getQtyRemaining)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -588,7 +593,8 @@ public class ProductionIngredientService {
         // So sánh với tồn KITCHEN — chỉ xuất phần thiếu
         Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
                 .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
-        Map<UUID, BigDecimal> kitchenStock = stockLotRepository.findByWarehouseCode(KITCHEN_CODE).stream()
+        Map<UUID, BigDecimal> kitchenStock = ProductionZone.CODES.stream()
+                .flatMap(code -> stockLotRepository.findByWarehouseCode(code).stream())
                 .filter(l -> l.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
                 .collect(Collectors.groupingBy(
                         l -> l.getItem().getId(),

@@ -558,6 +558,7 @@
       margin-top: 2px
     }
   </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 
 <body>
@@ -1026,6 +1027,7 @@
       <button class="btn btn-primary" onclick="nav('item-form',{})">+ Tạo mới</button>
       <button class="btn btn-ghost" id="btn-recalc-all" onclick="recalcAllCosts()" title="Tính lại giá vốn cho toàn bộ Sản Phẩm + Bán Thành Phẩm" style="color:#0ea5e9;border-color:#0ea5e9">🔄 Tính lại giá vốn tất cả</button>
       <button class="btn btn-ghost" id="btn-dl-all" onclick="downloadAllRecipes()" title="Tải công thức tất cả sản phẩm/bán thành phẩm hiện tại" style="color:#7c3aed;border-color:#7c3aed;display:none">⬇ Tải công thức tất cả</button>
+      <button class="btn btn-ghost" onclick="exportItemsExcel()" title="Xuất danh sách ra file Excel" style="color:#059669;border-color:#059669">📊 Xuất Excel</button>
     </div>
     <div id="items-wrap"><div class="empty">Đang tải...</div></div>
     <div id="items-pag" style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:10px"></div>
@@ -1127,6 +1129,45 @@
       itemsActiveGroup = code;
       itemsPage = 0;
       renderGroupTabs();
+
+    // ── Export Items to Excel ──────────────────────────────────────────
+    async function exportItemsExcel() {
+      if (typeof XLSX === 'undefined') { toast('SheetJS chưa load xong, thử lại sau giây lát', 'err'); return; }
+      await loadAllItems();
+      const type = itemsActiveType;
+      let items = allItems.filter(i => i.itemType === type);
+      if (itemsActiveGroup) items = items.filter(i => i.itemGroup?.key === itemsActiveGroup);
+
+      let ws_data, fileName;
+      if (type === 'INGREDIENT') {
+        ws_data = [['STT', 'Tên Nguyên Liệu', 'Giá Nhập (đ)', 'Hình Ảnh']];
+        items.forEach((item, idx) => {
+          ws_data.push([idx + 1, item.name, item.unitCost != null ? Number(item.unitCost) : '', '']);
+        });
+        fileName = 'nguyen-lieu';
+      } else {
+        const label = type === 'SEMI_PRODUCT' ? 'ban-thanh-pham' : 'san-pham';
+        ws_data = [['STT', 'Nhóm', 'Tên Sản Phẩm', 'Giá Bán (đ)', 'Hình Ảnh']];
+        items.forEach((item, idx) => {
+          const nhom = item.itemGroup?.value ?? item.itemGroup?.name ?? '';
+          ws_data.push([idx + 1, nhom, item.name, item.unitCost != null ? Number(item.unitCost) : '', '']);
+        });
+        fileName = label;
+      }
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+
+      // Column widths
+      ws['!cols'] = type === 'INGREDIENT'
+        ? [{wch:6},{wch:36},{wch:18},{wch:24}]
+        : [{wch:6},{wch:20},{wch:36},{wch:18},{wch:24}];
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Danh sách');
+      const dateStr = new Date().toISOString().slice(0,10);
+      XLSX.writeFile(wb, `${fileName}-${dateStr}.xlsx`);
+      toast(`✅ Đã xuất ${items.length} dòng ra Excel`);
+    }
       loadItems();
     }
 

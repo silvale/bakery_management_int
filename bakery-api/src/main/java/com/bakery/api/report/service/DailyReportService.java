@@ -29,6 +29,7 @@ import com.bakery.api.report.entity.PosDailySale;
 import com.bakery.api.report.repository.DailyReportLineRepository;
 import com.bakery.api.report.repository.DailyReportRepository;
 import com.bakery.api.report.repository.PosDailySaleRepository;
+import com.bakery.api.cake.service.DailyReportDesignService.DesignRow;
 import com.bakery.framework.entity.DailyReportStatus;
 import com.bakery.framework.entity.DeliveryStatus;
 import com.bakery.framework.entity.MovementType;
@@ -69,6 +70,8 @@ public class DailyReportService {
     private final ProductionPlannerService productionPlannerService;
     private final com.bakery.framework.repository.CommandRequestRepository commandRequestRepository;
     private final CancelRecordService cancelRecordService;
+    private final com.bakery.api.cake.service.DailyReportDesignService designService;
+    private final com.bakery.api.cake.service.DeliveryDesignService deliveryDesignService;
 
     // ── Get / Create ─────────────────────────────────────────────
 
@@ -102,6 +105,117 @@ public class DailyReportService {
         return lineRepository.findByDailyReportIdWithItem(reportId);
     }
 
+    /** Dòng báo cáo + số liệu theo mẫu của từng thành phẩm (productId → mẫu); thành phẩm không mẫu không có key. */
+    public record LinesView(List<DailyReportLine> lines, Map<UUID, List<DesignRow>> designs) {}
+
+    /** Tồn đầu theo thành phẩm = còn lại đã nhập ở báo cáo gần nhất trước {@code date} (D13, không đòi FINALIZED, D12). */
+    private Map<UUID, BigDecimal> openingByItem(LocalDate date) {
+        return reportRepository.findFirstByReportDateLessThanOrderByReportDateDesc(date)
+                .map(prev -> lineRepository.findByDailyReportIdWithItem(prev.getId()).stream()
+                        .filter(l -> l.getItem() != null && l.getQtyRemainingActual() != null)
+                        .collect(Collectors.toMap(l -> l.getItem().getId(),
+                                DailyReportLine::getQtyRemainingActual, (a, b) -> a)))
+                .orElse(Collections.emptyMap());
+    }
+
+    /** Báo cáo gần nhất có ngày &lt; {@code date}. */
+    public Optional<DailyReport> findPrevious(LocalDate date) {
+        return reportRepository.findFirstByReportDateLessThanOrderByReportDateDesc(date);
+    }
+
+    /**
+     * 02/BE-9: số liệu của một ngày, tính MỘT lần và dùng chung cho {@code GET /lines} DRAFT lẫn {@code finalize}
+     * (không ghi DB, không set lên entity).
+     *
+     * @param opening  thành phẩm → còn lại đã nhập ở báo cáo gần nhất trước D
+     * @param received tổng qty_received của delivery có ngày SX = D
+     * @param produced tổng qty_produced của delivery có ngày SX = D
+     * @param pos      item → tổng bán POS ngày D (qua product_mapping)
+     */
+    private record DayBasis(List<DeliveryRecord> deliveries, Map<UUID, BigDecimal> opening,
+                            Map<UUID, BigDecimal> received, Map<UUID, BigDecimal> produced,
+                            List<PosDailySale> posSales, Map<UUID, BigDecimal> pos,
+                            List<UUID> designedProducts, Map<UUID, List<DesignRow>> designs) {
+        /** D14: đã upload POS của ngày thì qtySoldPos có số (0 nếu không bán); chưa upload → null. */
+        boolean posUploaded() { return !posSales.isEmpty(); }
+
+        /** Item cần có dòng ngoài các dòng đã lưu: tồn đầu &gt; 0 (D13), nhận &gt; 0, bán POS &gt; 0, hoặc có số theo mẫu. */
+        Set<UUID> candidateItemIds() {
+            Set<UUID> ids = new LinkedHashSet<>();
+            opening.forEach((id, q) -> { if (q.signum() > 0) ids.add(id); });
+            received.forEach((id, q) -> { if (q.signum() > 0) ids.add(id); });
+            pos.forEach((id, q) -> { if (q.signum() > 0) ids.add(id); });
+            ids.addAll(designs.keySet());
+            return ids;
+        }
+    }
+
+    private DayBasis dayBasis(DailyReport report) {
+        LocalDate date = report.getReportDate();
+        List<DeliveryRecord> deliveries = deliveryRecordRepository
+                .findByProductionRequestLine_ProductionRequest_ProductionDate(date);
+        Map<UUID, BigDecimal> received = new HashMap<>();
+        Map<UUID, BigDecimal> produced = new HashMap<>();
+        for (DeliveryRecord dr : deliveries) {
+            if (dr.getProductionRequestLine() == null || dr.getProductionRequestLine().getProduct() == null) continue;
+            UUID id = dr.getProductionRequestLine().getProduct().getId();
+            produced.merge(id, dr.getQtyProduced() != null ? dr.getQtyProduced() : BigDecimal.ZERO, BigDecimal::add);
+            received.merge(id, dr.getQtyReceived() != null ? dr.getQtyReceived() : BigDecimal.ZERO, BigDecimal::add);
+        }
+        List<PosDailySale> posSales = posSaleRepository.findBySaleDate(date);
+        List<UUID> designed = designService.allDesignedProductIds();
+        return new DayBasis(deliveries, openingByItem(date), received, produced, posSales,
+                posQtyByItem(posSales), designed, designService.compute(report, designed));
+    }
+
+    /**
+     * 02/BE-4, 02/BE-8. FINALIZED đọc từ snapshot. DRAFT tính ngay lúc đọc, không ghi DB: điền tồn đầu và
+     * số nhận mới nhất vào dòng đã lưu, và thêm dòng "ảo" (id null) cho mọi thành phẩm có tồn đầu &gt; 0
+     * hoặc nhận &gt; 0 hoặc có bán trên POS mà chưa có dòng; điền {@code qtySoldPos} (D14). Sắp theo tên item.
+     */
+    @Transactional(readOnly = true)   // readOnly: các setter dưới đây trên entity đã nạp không bao giờ được flush
+    public LinesView getLinesWithDesigns(UUID reportId) {
+        DailyReport report = getById(reportId);
+        List<DailyReportLine> lines = new ArrayList<>(lineRepository.findByDailyReportIdWithItem(reportId));
+        if (report.getStatus() == DailyReportStatus.FINALIZED) {
+            return new LinesView(lines, designService.stored(report));
+        }
+        DayBasis b = dayBasis(report);
+        Map<UUID, BigDecimal> opening = b.opening();
+        Map<UUID, BigDecimal> received = b.received();
+        Map<UUID, BigDecimal> posByItem = b.pos();
+        boolean posUploaded = b.posUploaded();
+        Map<UUID, List<DesignRow>> designs = b.designs();
+
+        Set<UUID> have = new HashSet<>();
+        for (DailyReportLine l : lines) {
+            if (l.getItem() == null) continue;
+            UUID id = l.getItem().getId();
+            have.add(id);
+            l.setQtyRemainingOpening(opening.getOrDefault(id, BigDecimal.ZERO));
+            l.setQtyReceived(received.getOrDefault(id, BigDecimal.ZERO));
+            l.setQtySoldPos(posUploaded ? posByItem.getOrDefault(id, BigDecimal.ZERO) : null);
+        }
+        Set<UUID> candidates = b.candidateItemIds();
+        candidates.removeAll(have);
+        if (!candidates.isEmpty()) {
+            Set<UUID> productIds = new HashSet<>(itemRepository.findProductIdsIn(candidates));
+            for (var item : itemRepository.findAllById(productIds)) {
+                DailyReportLine v = new DailyReportLine();
+                v.setDailyReport(report);
+                v.setItem(item);
+                v.setQtyRemainingOpening(opening.getOrDefault(item.getId(), BigDecimal.ZERO));
+                v.setQtyReceived(received.getOrDefault(item.getId(), BigDecimal.ZERO));
+                v.setQtySoldPos(posUploaded ? posByItem.getOrDefault(item.getId(), BigDecimal.ZERO) : null);
+                lines.add(v);
+            }
+        }
+        java.text.Collator vi = java.text.Collator.getInstance(Locale.forLanguageTag("vi"));
+        lines.sort(Comparator.comparing(l -> l.getItem() != null && l.getItem().getName() != null
+                ? l.getItem().getName() : "", vi));
+        return new LinesView(lines, designs);
+    }
+
     // ── Nhân viên nhập qty_remaining_actual + qty_cancelled ─────
 
     /**
@@ -113,8 +227,22 @@ public class DailyReportService {
     @Transactional
     public DailyReportLine updateRemainingQty(UUID reportId, UUID itemId,
             BigDecimal qtyRemainingActual, BigDecimal qtyCancelled, String note) {
+        return updateRemainingQty(reportId, itemId, qtyRemainingActual, qtyCancelled, note, null);
+    }
+
+    /**
+     * @param designs còn lại/hủy theo mẫu — bắt buộc khi thành phẩm có mẫu (khi đó {@code qtyRemainingActual}
+     *                và {@code qtyCancelled} bị bỏ qua, dòng thành phẩm lấy tổng các mẫu).
+     */
+    @Transactional
+    public DailyReportLine updateRemainingQty(UUID reportId, UUID itemId,
+            BigDecimal qtyRemainingActual, BigDecimal qtyCancelled, String note,
+            List<com.bakery.api.cake.dto.SubmitLineBody.DesignRemaining> designs) {
         DailyReport report = getById(reportId);
         assertNotFinalized(report);
+        if (itemRepository.findProductIdsIn(List.of(itemId)).isEmpty()) {
+            throw new IllegalStateException("Báo cáo ngày chỉ dành cho thành phẩm");
+        }
 
         DailyReportLine line = lineRepository
                 .findByDailyReportIdAndItemId(reportId, itemId)
@@ -125,17 +253,31 @@ public class DailyReportService {
                     return l;
                 });
 
+        line.setNote(note);
+        line.setUpdatedAt(Instant.now());
+
+        if (!designService.designedProductIdsAmong(List.of(itemId)).isEmpty()) {
+            DailyReportLine saved = lineRepository.save(line);   // cần id cho dòng mẫu
+            BigDecimal[] totals = designService.submit(saved, itemId, designs);
+            saved.setQtyRemainingActual(totals[0]);
+            saved.setQtyCancelled(totals[1]);
+            return lineRepository.save(saved);
+        }
+        if (qtyRemainingActual == null) {
+            throw new IllegalArgumentException("qtyRemainingActual là bắt buộc");
+        }
         line.setQtyRemainingActual(qtyRemainingActual);
         if (qtyCancelled != null) {
             line.setQtyCancelled(qtyCancelled);
         }
-        line.setNote(note);
-        line.setUpdatedAt(Instant.now());
 
         return lineRepository.save(line);
     }
 
     // ── Admin FINALIZE ───────────────────────────────────────────
+
+    /** Kết quả chốt ngày: báo cáo + cảnh báo tồn phụ kiện (không chặn chốt, D18). */
+    public record FinalizeResult(DailyReport report, List<String> stockWarnings) {}
 
     /**
      * Admin chốt báo cáo ngày:
@@ -146,49 +288,30 @@ public class DailyReportService {
      * 5. Status → FINALIZED
      */
     @Transactional
-    public DailyReport finalize(UUID reportId) {
+    public FinalizeResult finalize(UUID reportId) {
         DailyReport report = getById(reportId);
         assertNotFinalized(report);
 
         LocalDate date = report.getReportDate();
 
-        // ── Bước 1: Tổng hợp DeliveryRecord theo ngày ───────────
-        List<DeliveryRecord> deliveries = deliveryRecordRepository
-                .findByProductionRequestLine_ProductionRequest_ProductionDate(date);
+        // ── Bước 1+2+3b: số liệu của ngày (giao nhận, POS, tồn đầu, mẫu) — CÙNG hàm với GET /lines (02/BE-9) ──
+        DayBasis basis = dayBasis(report);
+        List<DeliveryRecord> deliveries = basis.deliveries();
+        Map<UUID, BigDecimal> posByItem = basis.pos();
+        List<PosDailySale> posSales = basis.posSales();
+        List<UUID> designedProducts = basis.designedProducts();
+        Map<UUID, List<DesignRow>> designsByProduct = basis.designs();
+        Map<UUID, BigDecimal> openingByItem = basis.opening();
 
-        // group by item → sum qtyProduced, sum qtyReceived
-        Map<UUID, BigDecimal[]> byItem = deliveries.stream()
-                .filter(dr -> dr.getProductionRequestLine() != null
-                        && dr.getProductionRequestLine().getProduct() != null)
-                .collect(Collectors.groupingBy(
-                        dr -> dr.getProductionRequestLine().getProduct().getId(),
-                        Collectors.collectingAndThen(Collectors.toList(), list -> {
-                            BigDecimal produced = list.stream()
-                                    .map(DeliveryRecord::getQtyProduced)
-                                    .filter(q -> q != null)
-                                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-                            BigDecimal received = list.stream()
-                                    .map(DeliveryRecord::getQtyReceived)
-                                    .filter(q -> q != null)
-                                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-                            return new BigDecimal[]{produced, received};
-                        })
-                ));
-
-        // ── Bước 2: Tổng hợp POS theo ngày ──────────────────────
-        List<PosDailySale> posSales = posSaleRepository.findBySaleDate(date);
-        // Map EX_CODE → item_id (qua product_mapping)
-        Map<UUID, BigDecimal> posByItem = posSales.stream()
-                .map(ps -> {
-                    Optional<ProductMapping> mapping = productMappingRepository.findByExCode(ps.getExCode());
-                    return mapping.map(m -> Map.entry(m.getItem().getId(), ps.getQtySold())).orElse(null);
-                })
-                .filter(e -> e != null)
-                .collect(Collectors.toMap(
-                        Map.Entry::getKey,
-                        Map.Entry::getValue,
-                        BigDecimal::add
-                ));
+        // Tập dòng = dòng đã lưu ∪ PRODUCT có tồn đầu/nhận/POS (như GET /lines) ∪ thành phẩm có phiếu giao (giữ chênh lệch bếp)
+        Set<UUID> itemIds = new LinkedHashSet<>();
+        lineRepository.findByDailyReportIdWithItem(reportId).forEach(l -> {
+            if (l.getItem() != null) itemIds.add(l.getItem().getId());
+        });
+        Set<UUID> extra = basis.candidateItemIds();
+        itemIds.forEach(extra::remove);
+        if (!extra.isEmpty()) itemIds.addAll(itemRepository.findProductIdsIn(extra));
+        itemIds.addAll(basis.produced().keySet());
 
         // ── Bước 3: Load expiry config + tồn SHOP ───────────────────
         Map<UUID, Integer> shelfDaysByItem = expiryConfigRepository.findAll().stream()
@@ -214,23 +337,10 @@ public class DailyReportService {
                                 Collectors.reducing(BigDecimal.ZERO,
                                         l -> l.getQtyRemaining(), BigDecimal::add)));
 
-        // ── Bước 3b: Opening stock từ ngày hôm trước ─────────────
-        // qty_remaining_actual của ngày trước = qty_remaining_opening hôm nay
-        Map<UUID, BigDecimal> openingByItem = reportRepository.findByReportDate(date.minusDays(1))
-                .map(prevReport -> lineRepository.findByDailyReportIdWithItem(prevReport.getId())
-                        .stream()
-                        .filter(l -> l.getItem() != null && l.getQtyRemainingActual() != null)
-                        .collect(Collectors.toMap(
-                                l -> l.getItem().getId(),
-                                DailyReportLine::getQtyRemainingActual,
-                                (a, b) -> a)))
-                .orElse(Collections.emptyMap());
-
         // ── Bước 4: Upsert DailyReportLine cho từng item ─────────
-        for (Map.Entry<UUID, BigDecimal[]> entry : byItem.entrySet()) {
-            UUID itemId = entry.getKey();
-            BigDecimal qtyProduced = entry.getValue()[0];
-            BigDecimal qtyReceived = entry.getValue()[1];
+        for (UUID itemId : itemIds) {
+            BigDecimal qtyProduced = basis.produced().getOrDefault(itemId, BigDecimal.ZERO);
+            BigDecimal qtyReceived = basis.received().getOrDefault(itemId, BigDecimal.ZERO);
 
             DailyReportLine line = lineRepository
                     .findByDailyReportIdAndItemId(reportId, itemId)
@@ -243,6 +353,15 @@ public class DailyReportService {
 
             line.setQtyProduced(qtyProduced);
             line.setQtyReceived(qtyReceived);
+
+            // Bánh có mẫu: còn lại/hủy của dòng thành phẩm = tổng các mẫu
+            List<DesignRow> designRows = designsByProduct.getOrDefault(itemId, List.of());
+            if (designRows.stream().anyMatch(r -> r.remaining() != null)) {
+                line.setQtyRemainingActual(designRows.stream().map(DesignRow::remaining)
+                        .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add));
+                line.setQtyCancelled(designRows.stream().map(DesignRow::cancelled)
+                        .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add));
+            }
 
             // Opening stock (tồn đầu ngày từ ngày hôm trước)
             BigDecimal qtyRemainingOpening = openingByItem.getOrDefault(itemId, BigDecimal.ZERO);
@@ -279,11 +398,11 @@ public class DailyReportService {
             // Chênh lệch bếp (qty_produced - qty_received)
             line.setDiscrepancyKitchen(qtyProduced.subtract(qtyReceived));
 
-            // qty_sold_implied = opening + received - remaining (công thức mới)
-            // discrepancy_pos = sold_implied - sold_pos
+            // qty_sold_implied = opening + received - remaining - cancelled (D7 mới, 02/BE-11: hủy là mất, không phải bán)
+            // — cùng hàm với số bán theo mẫu. discrepancy_pos = sold_implied - sold_pos
             if (line.getQtyRemainingActual() != null) {
-                BigDecimal qtySoldImplied = qtyRemainingOpening.add(qtyReceived)
-                        .subtract(line.getQtyRemainingActual());
+                BigDecimal qtySoldImplied = com.bakery.api.cake.service.DailyReportDesignService.soldImplied(
+                        qtyRemainingOpening, qtyReceived, line.getQtyRemainingActual(), line.getQtyCancelled());
                 line.setQtySoldImplied(qtySoldImplied);
                 line.setDiscrepancyPos(qtySoldImplied.subtract(qtySoldPos));
             }
@@ -305,7 +424,8 @@ public class DailyReportService {
             }
 
             line.setUpdatedAt(Instant.now());
-            lineRepository.save(line);
+            DailyReportLine savedLine = lineRepository.save(line);
+            if (!designRows.isEmpty()) designService.snapshot(savedLine, designRows);
         }
 
         // ── Bước 4: FINALIZE ─────────────────────────────────────
@@ -314,6 +434,15 @@ public class DailyReportService {
         report.setFinalizedBy(actorResolver.currentUserId());
         report.setUpdatedAt(Instant.now());
         DailyReport saved = reportRepository.save(report);
+
+        // ── Bước 4b: Trừ tồn phụ kiện (không phải PRODUCT) theo POS ─────
+        // Không bọc try/catch: lỗi khác ngoài thiếu tồn thì cả finalize rollback, tránh trừ nửa chừng.
+        List<String> stockWarnings = new ArrayList<>(deductPosAccessories(saved, date, posByItem));
+
+        // 02/BE-5: nến tặng 0đ vượt số bánh kem bán; giao sai mẫu (không chặn)
+        String gift = giftCandleWarning(posSales, posByItem, designedProducts);
+        if (gift != null) stockWarnings.add(gift);
+        stockWarnings.addAll(deliveryDesignService.mismatchWarnings(date));
 
         // Log finalize activity
         try {
@@ -324,6 +453,7 @@ public class DailyReportService {
                     .actor(actorResolver.currentUserId())
                     .actorName(actorResolver.currentUsername())
                     .entityLabel("Báo cáo ngày " + date)
+                    .note(stockWarnings.isEmpty() ? null : truncate("Cảnh báo tồn: " + String.join("; ", stockWarnings), 500))
                     .status(com.bakery.framework.entity.CommandStatus.SUCCESS)
                     .createdAt(Instant.now())
                     .build());
@@ -347,7 +477,109 @@ public class DailyReportService {
             log.error("Lỗi tạo kế hoạch SX sau finalize báo cáo {}: {}", saved.getId(), ex.getMessage(), ex);
         }
 
-        return saved;
+        return new FinalizeResult(saved, stockWarnings);
+    }
+
+    /** EX_CODE → item id qua product_mapping (EX_CODE chưa map thì không có key). */
+    private Map<String, UUID> itemsByExCode(List<PosDailySale> posSales) {
+        Map<String, UUID> m = new HashMap<>();
+        for (PosDailySale ps : posSales) {
+            if (m.containsKey(ps.getExCode())) continue;
+            productMappingRepository.findItemIdByExCode(ps.getExCode()).ifPresent(id -> m.put(ps.getExCode(), id));
+        }
+        return m;
+    }
+
+    /**
+     * 02/D8: tổng nến tặng (item giftWithCake, dòng POS 0đ) &gt; tổng bánh kem bán (thành phẩm có mẫu)
+     * thì trả cảnh báo, ngược lại null. Không chặn chốt ngày.
+     */
+    private String giftCandleWarning(List<PosDailySale> posSales, Map<UUID, BigDecimal> posByItem, Collection<UUID> designedProducts) {
+        BigDecimal cakes = designedProducts.stream().map(id -> posByItem.getOrDefault(id, BigDecimal.ZERO))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        Map<String, UUID> itemByExCode = itemsByExCode(posSales);
+        Map<UUID, BigDecimal> zeroByItem = new HashMap<>();
+        for (PosDailySale ps : posSales) {
+            UUID itemId = itemByExCode.get(ps.getExCode());
+            if (itemId != null && ps.getTotalAmount() != null && ps.getTotalAmount().signum() == 0) {
+                zeroByItem.merge(itemId, ps.getQtySold() != null ? ps.getQtySold() : BigDecimal.ZERO, BigDecimal::add);
+            }
+        }
+        if (zeroByItem.isEmpty()) return null;
+        BigDecimal gifts = itemRepository.findAllById(zeroByItem.keySet()).stream()
+                .filter(com.bakery.api.master.entity.Item::isGiftWithCake)
+                .map(i -> zeroByItem.get(i.getId()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (gifts.compareTo(cakes) <= 0) return null;
+        return "Nến tặng 0đ: " + fmt(gifts) + ", bánh kem bán " + fmt(cakes) + ", vượt " + fmt(gifts.subtract(cakes));
+    }
+
+    /** Cộng {@code qty_sold} theo item qua product_mapping (kể cả dòng 0đ). EX_CODE chưa map thì bỏ qua. */
+    private Map<UUID, BigDecimal> posQtyByItem(List<PosDailySale> posSales) {
+        Map<String, UUID> itemByExCode = itemsByExCode(posSales);
+        Map<UUID, BigDecimal> result = new LinkedHashMap<>();
+        for (PosDailySale ps : posSales) {
+            UUID itemId = itemByExCode.get(ps.getExCode());
+            if (itemId != null) {
+                result.merge(itemId, ps.getQtySold() != null ? ps.getQtySold() : BigDecimal.ZERO, BigDecimal::add);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * D17/D18: trừ FIFO lô tại kho Cửa Hàng cho item không phải PRODUCT theo số POS bán trong ngày.
+     * Thiếu tồn → trừ hết phần có, không âm, thêm cảnh báo.
+     */
+    private List<String> deductPosAccessories(DailyReport report, LocalDate date, Map<UUID, BigDecimal> posByItem) {
+        if (posByItem.isEmpty()) return List.of();
+        Set<UUID> productIds = new HashSet<>(itemRepository.findProductIdsIn(posByItem.keySet()));
+        List<UUID> accessoryIds = posByItem.keySet().stream().filter(id -> !productIds.contains(id)).toList();
+        if (accessoryIds.isEmpty()) return List.of();
+
+        List<Warehouse> shops = warehouseRepository.findByWarehouseType(WarehouseType.SHOP);
+        Warehouse shop = shops.isEmpty() ? null : shops.get(0);
+        Map<UUID, String> nameById = itemRepository.findAllById(accessoryIds).stream()
+                .collect(Collectors.toMap(i -> i.getId(), i -> i.getName()));
+
+        List<String> warnings = new ArrayList<>();
+        for (UUID itemId : accessoryIds) {
+            BigDecimal sold = posByItem.get(itemId);
+            if (sold.signum() <= 0) continue;
+            List<StockLot> lots = shop == null ? List.of()
+                    : stockLotRepository.findByItemIdAndWarehouseIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
+                            itemId, shop.getId(), BigDecimal.ZERO);
+            BigDecimal available = lots.stream().map(StockLot::getQtyRemaining).reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal shortfall = deductFifo(lots, sold, (lot, qty) -> {
+                StockMovement out = new StockMovement();
+                out.setLot(lot);
+                out.setMovementType(MovementType.OUT);
+                out.setQty(qty);
+                out.setRefType("POS_SALE");
+                out.setRefId(report.getId());
+                out.setNote("Bán POS ngày " + date);
+                stockMovementRepository.save(out);
+                stockLotRepository.save(lot);
+            });
+            if (shortfall.signum() > 0) {
+                warnings.add(nameById.getOrDefault(itemId, itemId.toString()) + ": POS bán " + fmt(sold)
+                        + ", tồn " + fmt(available) + ", thiếu " + fmt(shortfall));
+            }
+        }
+        return warnings;
+    }
+
+    /** Xem {@link com.bakery.api.inventory.service.StockFifo#deduct}. */
+    static BigDecimal deductFifo(List<StockLot> lots, BigDecimal qty, java.util.function.BiConsumer<StockLot, BigDecimal> onDeduct) {
+        return com.bakery.api.inventory.service.StockFifo.deduct(lots, qty, onDeduct);
+    }
+
+    private static String fmt(BigDecimal v) {
+        return v.stripTrailingZeros().toPlainString();
+    }
+
+    private static String truncate(String v, int max) {
+        return v.length() <= max ? v : v.substring(0, max);
     }
 
     /**
@@ -557,8 +789,12 @@ public class DailyReportService {
         Warehouse shopWarehouse = shopWarehouses.get(0);
 
         List<DailyReportLine> lines = lineRepository.findByDailyReportIdWithItem(report.getId());
+        // D16: chỉ thành phẩm. Dòng cũ của hàng khác (nến...) giữ nguyên lô, HSD, giá nhập.
+        Set<UUID> productIds = new HashSet<>(itemRepository.findProductIdsIn(
+                lines.stream().filter(l -> l.getItem() != null).map(l -> l.getItem().getId()).toList()));
         for (DailyReportLine line : lines) {
             if (line.getQtyRemainingActual() == null || line.getItem() == null) continue;
+            if (!productIds.contains(line.getItem().getId())) continue;
 
             UUID itemId = line.getItem().getId();
 

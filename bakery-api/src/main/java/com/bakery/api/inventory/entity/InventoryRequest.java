@@ -4,6 +4,7 @@ import org.hibernate.envers.Audited;
 import org.hibernate.envers.RelationTargetAuditMode;
 import org.hibernate.envers.NotAudited;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,6 +23,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
@@ -77,6 +79,32 @@ public class InventoryRequest extends BaseEntity {
 
     @Column(name = "note", length = 500)
     private String note;
+
+    /** Chỉ có ở PURCHASE: UNPAID | PAID. Phiếu loại khác để null. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_status", length = 10)
+    private PaymentStatus paymentStatus;
+
+    @Column(name = "paid_at")
+    private Instant paidAt;
+
+    @Column(name = "paid_by", length = 100)
+    private String paidBy;
+
+    /** Ngày thực nhận (giờ Asia/Ho_Chi_Minh), chỉ PURCHASE đã nhận. Tháng của báo cáo nhập hàng tính theo ngày này. */
+    @Column(name = "received_date")
+    private LocalDate receivedDate;
+
+    @Column(name = "received_by", length = 100)
+    private String receivedBy;
+
+    /** Đặt ở @PrePersist vì phiếu sinh từ generate-purchase không đi qua beforeCreate. */
+    @PrePersist
+    void initPaymentStatus() {
+        if (requestType == InventoryRequestType.PURCHASE && paymentStatus == null) {
+            paymentStatus = PaymentStatus.UNPAID;
+        }
+    }
 
     /**
      * Lines của phiếu. Cascade ALL + orphanRemoval cho phép save toàn bộ graph

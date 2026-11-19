@@ -36,9 +36,20 @@ public class UserRoleService extends AbstractBakeryAdminService<UserRole, UserRo
 
     @Override
     protected void applyUpdate(UserRole e, UserRoleRequest req) {
+        requireNotSystem(e);
         e.setCode(req.code());
         e.setName(req.name());
         e.setDescription(req.description());
+    }
+
+    @Override
+    protected void beforeDelete(UserRole e) {
+        requireNotSystem(e);
+    }
+
+    /** 11/D1: giai đoạn 1 không sửa/xóa vai trò hệ thống → 422. */
+    public static void requireNotSystem(UserRole e) {
+        if (e.isSystem()) throw new IllegalStateException("Vai trò hệ thống không sửa được");
     }
 
     @Override

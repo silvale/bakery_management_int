@@ -39,6 +39,7 @@ public class ItemImageController {
 
     // ── Upload ────────────────────────────────────────────────────────────────
 
+    @com.bakery.framework.security.RequirePermission(screen = "ITEMS", action = "UPDATE")
     @PostMapping("/api/v1/items/{id}/image")
     public ResponseEntity<?> uploadImage(
             @PathVariable UUID id,
@@ -82,6 +83,7 @@ public class ItemImageController {
 
     // ── Delete ────────────────────────────────────────────────────────────────
 
+    @com.bakery.framework.security.RequirePermission(screen = "ITEMS", action = "UPDATE")
     @DeleteMapping("/api/v1/items/{id}/image")
     public ResponseEntity<?> deleteImage(@PathVariable UUID id) {
         Item item = itemRepository.findById(id)

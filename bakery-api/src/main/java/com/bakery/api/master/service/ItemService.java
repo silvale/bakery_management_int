@@ -6,6 +6,8 @@ package com.bakery.api.master.service;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -25,6 +27,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import com.bakery.api.master.dto.ItemRequest;
+import com.bakery.api.master.dto.ItemBySupplierResponse;
 import com.bakery.api.master.dto.ItemResponse;
 import com.bakery.api.master.entity.Ingredient;
 import com.bakery.api.master.entity.Item;
@@ -38,6 +41,7 @@ import com.bakery.api.master.repository.ItemPackagingRepository;
 import com.bakery.api.master.repository.ProductMappingRepository;
 import com.bakery.api.master.repository.ProductExpiryConfigRepository;
 import com.bakery.api.master.repository.SupplierRepository;
+import com.bakery.api.master.repository.WarehouseRepository;
 import com.bakery.api.pricing.entity.IngredientPrice;
 import com.bakery.api.pricing.repository.IngredientPriceRepository;
 import com.bakery.api.production.entity.ItemGroup;
@@ -56,10 +60,17 @@ import com.bakery.framework.repository.CommandRequestRepository;
 import com.bakery.framework.security.BakeryActorResolver;
 import com.bakery.framework.service.AbstractBakeryAdminService;
 import com.bakery.framework.util.SpecificationBuilder;
+import jakarta.persistence.criteria.Expression;
+import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Order;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -88,11 +99,13 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     private final RecipeService recipeService;
     private final ItemCostHelper itemCostHelper;
     private final ItemGroupRepository itemGroupRepository;
+    private final WarehouseRepository warehouseRepository;
     private final ProductExpiryConfigRepository expiryConfigRepository;
     private final ItemPackagingRepository packagingRepository;
     private final ProductMappingRepository productMappingRepository;
     private final BakeryActorResolver actorResolver;
     private final CommandRequestRepository commandRequestRepository;
+    private final com.bakery.api.auth.service.AccessScope scope;
 
     /**
      * ThreadLocal chuyển ItemRequest xuống lifecycle hooks (afterCreate / afterUpdate).
@@ -149,6 +162,14 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             spec = spec.and((root, query, cb) -> cb.equal(root.type(), typeClass));
         }
 
+        // sort=<field>,<asc|desc>: tự áp ORDER BY trong spec (null cuối, id làm tiêu chí phụ).
+        // Không truyền sort → giữ nguyên hành vi cũ.
+        if (pageable.getSort().isSorted()) {
+            validateSort(pageable.getSort());
+            spec = spec.and(sortSpec(pageable.getSort()));
+            pageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+        }
+
         Page<Item> page = repository.findAll(spec, pageable);
 
         // Batch-fetch latest price cho tất cả ingredients trong page — tránh N+1
@@ -168,6 +189,139 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             return page.map(this::toResponse);
         } finally {
             priceMapLocal.remove();
+        }
+    }
+
+    /**
+     * 12/BE-1: mặt hàng thuộc NCC (mặc định hoặc có trong bảng giá), không kèm giá. NCC không tồn tại → 404.
+     * Sắp theo tên (collation tiếng Việt).
+     */
+    @Transactional(readOnly = true)
+    public List<ItemBySupplierResponse> findBySupplier(UUID supplierId) {
+        supplierRepository.findById(supplierId)
+                .orElseThrow(() -> new ResourceNotFoundException("Supplier", supplierId));
+        Map<UUID, String> matched = new java.util.LinkedHashMap<>();
+        for (Object[] row : repository.findIdsBySupplier(supplierId)) {
+            matched.put((UUID) row[0], (String) row[1]);
+        }
+        if (matched.isEmpty()) return List.of();
+        // Nạp item TRƯỚC quy cách: ItemPackaging.item là proxy lazy, nạp trước sẽ khiến findAllById trả proxy (instanceof Ingredient sai)
+        List<Item> loaded = repository.findAllById(matched.keySet());
+        Map<UUID, List<ItemResponse.PackagingResponse>> packs = new java.util.HashMap<>();
+        packagingRepository.findByItemIdInOrderByQtyPerPackAsc(matched.keySet()).forEach(p -> {
+            ItemResponse.PackagingResponse pr = new ItemResponse.PackagingResponse();
+            pr.setId(p.getId());
+            pr.setCode(p.getCode());
+            pr.setName(p.getName());
+            pr.setQtyPerPack(p.getQtyPerPack());
+            pr.setDefault(p.isDefault());
+            packs.computeIfAbsent(p.getItem().getId(), k -> new java.util.ArrayList<>()).add(pr);
+        });
+        java.text.Collator vi = java.text.Collator.getInstance(java.util.Locale.forLanguageTag("vi"));
+        return loaded.stream().map(i0 -> {
+            Item i = org.hibernate.Hibernate.unproxy(i0, Item.class) instanceof Item real ? real : i0;
+            ItemBySupplierResponse r = new ItemBySupplierResponse();
+            r.setId(i.getId());
+            r.setCode(i.getCode());
+            r.setName(i.getName());
+            r.setUnit(i.getUnit());
+            r.setImageUrl(i.getImageUrl());
+            r.setItemType(i instanceof SemiProduct ? "SEMI_PRODUCT" : "INGREDIENT");
+            if (i.getItemGroup() != null) {
+                r.setItemGroup(new ReferenceValue(i.getItemGroup().getCode(), i.getItemGroup().getName()));
+            }
+            if (i instanceof Ingredient ing && ing.getDefaultSupplier() != null) {
+                r.setDefaultSupplier(new ReferenceValue(ing.getDefaultSupplier().getCode(), ing.getDefaultSupplier().getName()));
+            }
+            r.setPackagings(packs.getOrDefault(i.getId(), List.of()));
+            r.setMatchedBy(matched.get(i.getId()));
+            return r;
+        }).sorted(java.util.Comparator.comparing(ItemBySupplierResponse::getName, vi)).toList();
+    }
+
+    // ── Sort theo cột (kể cả cột join) ────────────────────────────────────────
+
+    /** Field thuộc chính Item. */
+    private static final java.util.Set<String> SORT_PLAIN = java.util.Set.of(
+            "code", "name", "unit", "unitCost", "splittable",
+            "minStockQuantity", "restockQuantity", "approvalStatus", "status");
+
+    /** Field join/tính toán — xử lý riêng trong {@link #sortExpression}. */
+    private static final java.util.Set<String> SORT_JOINED = java.util.Set.of(
+            "itemGroup.name", "defaultSupplier.name",
+            "defaultPackaging.name", "defaultPackaging.qtyPerPack", "lastPrice");
+
+    private void validateSort(Sort sort) {
+        for (Sort.Order o : sort) {
+            String f = o.getProperty();
+            if (!SORT_PLAIN.contains(f) && !SORT_JOINED.contains(f)) {
+                throw new IllegalArgumentException("Không hỗ trợ sort theo '" + f + "'. Hỗ trợ: "
+                        + String.join(", ", new java.util.TreeSet<>(SORT_PLAIN))
+                        + ", " + String.join(", ", new java.util.TreeSet<>(SORT_JOINED)));
+            }
+        }
+    }
+
+    private Specification<Item> sortSpec(Sort sort) {
+        return (root, query, cb) -> {
+            if (Long.class.equals(query.getResultType())) return null; // count query
+            List<Order> orders = new ArrayList<>();
+            for (Sort.Order o : sort) {
+                Expression<?> e = sortExpression(o.getProperty(), root, query, cb);
+                // null luôn cuối, bất kể asc/desc
+                orders.add(cb.asc(cb.<Integer>selectCase().when(cb.isNull(e), 1).otherwise(0)));
+                orders.add(o.isAscending() ? cb.asc(e) : cb.desc(e));
+            }
+            orders.add(cb.asc(root.get("id")));
+            query.orderBy(orders);
+            return null;
+        };
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private Expression<?> sortExpression(String field, Root<Item> root,
+            jakarta.persistence.criteria.CriteriaQuery<?> query,
+            jakarta.persistence.criteria.CriteriaBuilder cb) {
+        switch (field) {
+            case "itemGroup.name":
+                return root.join("itemGroup", JoinType.LEFT).get("name");
+            case "defaultSupplier.name": { // chỉ Ingredient có; loại khác → null
+                Subquery<String> sq = query.subquery(String.class);
+                Root<Ingredient> ing = sq.from(Ingredient.class);
+                sq.select(ing.get("defaultSupplier").get("name"))
+                        .where(cb.equal(ing.get("id"), root.get("id")));
+                return sq;
+            }
+            case "defaultPackaging.name": {
+                Subquery<String> sq = query.subquery(String.class);
+                Root<ItemPackaging> pk = sq.from(ItemPackaging.class);
+                sq.select(cb.least(pk.<String>get("name")))
+                        .where(cb.equal(pk.get("item").get("id"), root.get("id")),
+                                cb.isTrue(pk.get("isDefault")));
+                return sq;
+            }
+            case "defaultPackaging.qtyPerPack": {
+                Subquery<BigDecimal> sq = query.subquery(BigDecimal.class);
+                Root<ItemPackaging> pk = sq.from(ItemPackaging.class);
+                sq.select(cb.min(pk.<BigDecimal>get("qtyPerPack")))
+                        .where(cb.equal(pk.get("item").get("id"), root.get("id")),
+                                cb.isTrue(pk.get("isDefault")));
+                return sq;
+            }
+            case "lastPrice": { // giá của dòng có effectiveDate mới nhất
+                Subquery<BigDecimal> sq = query.subquery(BigDecimal.class);
+                Root<IngredientPrice> ip = sq.from(IngredientPrice.class);
+                Subquery<LocalDate> latest = sq.subquery(LocalDate.class);
+                Root<IngredientPrice> ip2 = latest.from(IngredientPrice.class);
+                latest.select(cb.greatest(ip2.<LocalDate>get("effectiveDate")))
+                        .where(cb.equal(ip2.get("item").get("id"), root.get("id")));
+                sq.select(cb.max(ip.<BigDecimal>get("price")))
+                        .where(cb.equal(ip.get("item").get("id"), root.get("id")),
+                                cb.equal(ip.get("effectiveDate"), latest));
+                return sq;
+            }
+            default:
+                return root.get(field);
         }
     }
 
@@ -241,13 +395,23 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         r.setName(item.getName());
         r.setUnit(item.getUnit());
         r.setSplittable(item.isSplittable());
-        r.setUnitCost(item.getUnitCost());
+        r.setGiftWithCake(item.isGiftWithCake());
+        // 11/D5: giá vốn chỉ Admin
+        if (scope.canSeeCost()) {
+            r.setUnitCost(item.getUnitCost());
+        } else if (item.getUnitCost() != null) {
+            r.setPriceHidden(true);
+        }
         r.setImageUrl(item.getImageUrl());
         r.setMinStockQuantity(item.getMinStockQuantity());
         r.setRestockQuantity(item.getRestockQuantity());
         if (item.getItemGroup() != null) {
             r.setItemGroup(new ReferenceValue(
                     item.getItemGroup().getCode(), item.getItemGroup().getName()));
+        }
+        if (item.getDefaultWarehouse() != null) {
+            r.setDefaultWarehouse(new ReferenceValue(
+                    item.getDefaultWarehouse().getCode(), item.getDefaultWarehouse().getName()));
         }
 
         if (item instanceof Ingredient ing) {
@@ -264,8 +428,13 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                     : ingredientPriceRepository.findByItemIdOrderByEffectiveDateDesc(ing.getId())
                             .stream().findFirst();
             latestPrice.ifPresent(p -> {
-                        r.setLastPrice(p.getPrice());
-                        r.setLastPriceDate(p.getEffectiveDate());
+                        // 11/D3: giá nhập gần nhất chỉ hiện với NCC mà user được xem giá
+                        if (scope.canSeePurchasePrice(p.getSupplier() != null ? p.getSupplier().getId() : null)) {
+                            r.setLastPrice(p.getPrice());
+                            r.setLastPriceDate(p.getEffectiveDate());
+                        } else {
+                            r.setPriceHidden(true);
+                        }
                     });
             // Packagings — luôn query riêng (không batch vì thường chỉ vài dòng/item)
             List<ItemResponse.PackagingResponse> packagings = packagingRepository
@@ -474,12 +643,19 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         e.setName(req.name());
         e.setUnit(req.unit());
         e.setSplittable(req.splittable());
+        if (req.giftWithCake() != null) e.setGiftWithCake(req.giftWithCake());
         if (req.itemGroupId() != null) {
             ItemGroup ig = itemGroupRepository.findById(req.itemGroupId())
                     .orElseThrow(() -> new ResourceNotFoundException("ItemGroup", req.itemGroupId()));
             e.setItemGroup(ig);
         } else {
             e.setItemGroup(null);
+        }
+        if (req.defaultWarehouseId() != null) {
+            e.setDefaultWarehouse(warehouseRepository.findById(req.defaultWarehouseId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Warehouse", req.defaultWarehouseId())));
+        } else {
+            e.setDefaultWarehouse(null);
         }
         // unitCost: chỉ áp dụng cho INGREDIENT (nhập tay).
         // SEMI_PRODUCT / PRODUCT được tính lại trong afterApprove → không ghi đè ở đây.

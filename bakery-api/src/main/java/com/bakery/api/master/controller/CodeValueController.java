@@ -14,6 +14,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class CodeValueController extends BakeryAdminResource<CodeValueRequest, CodeValueResponse> {
 
+    @Override
+    protected String screenCode() { return "CODE_VALUES"; }
+
+
     private final CodeValueService service;
 
     @Override

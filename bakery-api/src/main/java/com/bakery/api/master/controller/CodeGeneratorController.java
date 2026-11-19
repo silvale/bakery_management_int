@@ -37,6 +37,7 @@ public class CodeGeneratorController {
             "unit",        "unit"
     );
 
+    @com.bakery.framework.security.RequirePermission(screen = "ITEMS", action = "VIEW")
     @GetMapping("/api/v1/codes/generate")
     public ResponseEntity<?> generate(
             @RequestParam String prefix,

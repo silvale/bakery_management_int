@@ -8,4 +8,6 @@ public record SupplierRequest(
         String contactName,
         String phone,
         String email,
-        String address) {}
+        String address,
+        /** "Mua lẻ / trả ngay" — JSON {@code isCashPurchase}. null = giữ nguyên khi sửa, false khi tạo. */
+        Boolean isCashPurchase) {}

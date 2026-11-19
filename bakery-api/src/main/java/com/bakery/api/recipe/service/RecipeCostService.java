@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import com.bakery.api.inventory.entity.StockLot;
+import com.bakery.api.inventory.service.ProductionZone;
 import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.master.entity.*;
 import com.bakery.api.master.repository.ItemLookupRepository;
@@ -46,7 +47,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true, noRollbackFor = Exception.class)
 public class RecipeCostService {
 
-    private static final String KITCHEN_CODE = "KITCHEN";
     private static final int COST_SCALE = 4;
 
     private final RecipeRepository recipeRepository;
@@ -210,13 +210,12 @@ public class RecipeCostService {
             return new PriceResolution(prices.get(0).getPrice(), "CATALOG");
         }
 
-        // 2. Weighted average stock lot cost (KITCHEN only)
+        // 2. Weighted average stock lot cost (khu sản xuất: KITCHEN + COLD)
         List<StockLot> lots = stockLotRepository
                 .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
                         itemId, BigDecimal.ZERO)
                 .stream()
-                .filter(l -> l.getWarehouse() != null
-                        && KITCHEN_CODE.equals(l.getWarehouse().getCode()))
+                .filter(ProductionZone::contains)
                 .toList();
 
         if (!lots.isEmpty()) {

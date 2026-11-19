@@ -9,4 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface DailyReportRepository extends JpaRepository<DailyReport, UUID> {
     Optional<DailyReport> findByReportDate(LocalDate reportDate);
+
+    /** Báo cáo gần nhất có ngày &lt; {@code date} (02/BE-7, D13). Dùng unique index report_date. */
+    Optional<DailyReport> findFirstByReportDateLessThanOrderByReportDateDesc(LocalDate date);
 }

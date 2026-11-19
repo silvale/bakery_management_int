@@ -1,7 +1,9 @@
 package com.bakery.api.inventory.repository;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 import java.util.Optional;
 
 import com.bakery.api.inventory.entity.InventoryRequest;
@@ -34,4 +36,18 @@ public interface InventoryRequestRepository extends BaseRepository<InventoryRequ
     List<InventoryRequest> findByWarehouseAndStatus(
             @Param("warehouseCode") String warehouseCode,
             @Param("approvalStatus") String approvalStatus);
+
+    /**
+     * Nạp sẵn lines (+ item, packaging) cho cả trang danh sách bằng 1 query, tránh N+1.
+     * Gọi trong cùng session sau findAll(spec, pageable): fetch join khởi tạo collection
+     * của các phiếu đã nằm trong persistence context (không cần phân trang trên collection).
+     */
+    @Query("""
+            SELECT DISTINCT r FROM InventoryRequest r
+            LEFT JOIN FETCH r.lines l
+            LEFT JOIN FETCH l.item
+            LEFT JOIN FETCH l.packaging
+            WHERE r.id IN :ids
+            """)
+    List<InventoryRequest> findWithLinesByIdIn(@Param("ids") Collection<UUID> ids);
 }

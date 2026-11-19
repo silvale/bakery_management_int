@@ -44,6 +44,7 @@ import com.bakery.framework.security.RequirePermission;
 @RequestMapping("/api/v1/daily-reports")
 @RequiredArgsConstructor
 @RequirePermission(screen = "DAILY_REPORT", action = "VIEW")
+@com.bakery.api.auth.scope.RequireWarehouse(any = {"SHOP"})
 public class DailyReportController {
 
     private final DailyReportService service;
@@ -58,7 +59,8 @@ public class DailyReportController {
 
     @GetMapping("/{id}/lines")
     public List<Map<String, Object>> getLines(@PathVariable UUID id) {
-        return service.getLines(id).stream().map(l -> {
+        DailyReportService.LinesView view = service.getLinesWithDesigns(id);
+        return view.lines().stream().map(l -> {
             Map<String, Object> m = new java.util.LinkedHashMap<>();
             m.put("id", l.getId());
             if (l.getItem() != null) {
@@ -84,6 +86,10 @@ public class DailyReportController {
             m.put("discrepancyRemaining", l.getDiscrepancyRemaining());
             m.put("sellingPrice",         l.getSellingPrice());
             m.put("note",                 l.getNote() != null ? l.getNote() : "");
+            // Số liệu theo mẫu (bánh kem); [] khi thành phẩm không có mẫu
+            m.put("designs", l.getItem() == null ? List.of()
+                    : view.designs().getOrDefault(l.getItem().getId(), List.of()).stream()
+                            .map(com.bakery.api.cake.service.DailyReportDesignService::toResponse).toList());
             return m;
         }).toList();
     }
@@ -102,7 +108,7 @@ public class DailyReportController {
      * Có thể gọi nhiều lần (upsert), nhận một hoặc cả hai giá trị.
      *
      * @param itemId             ID sản phẩm
-     * @param qtyRemainingActual số bánh còn lại thực tế
+     * @param qtyRemainingActual số bánh còn lại thực tế (bắt buộc trừ thành phẩm có mẫu — khi đó dùng body {@code designs})
      * @param qtyCancelled       số bánh đã hủy (null nếu sản phẩm không cần hủy)
      * @param note               ghi chú tuỳ chọn
      */
@@ -111,10 +117,13 @@ public class DailyReportController {
     public ResponseEntity<Void> submitLine(
             @PathVariable UUID id,
             @RequestParam UUID itemId,
-            @RequestParam BigDecimal qtyRemainingActual,
+            @RequestParam(required = false) BigDecimal qtyRemainingActual,
             @RequestParam(required = false) BigDecimal qtyCancelled,
-            @RequestParam(required = false) String note) {
-        service.updateRemainingQty(id, itemId, qtyRemainingActual, qtyCancelled, note);
+            @RequestParam(required = false) String note,
+            @org.springframework.web.bind.annotation.RequestBody(required = false)
+            com.bakery.api.cake.dto.SubmitLineBody body) {
+        service.updateRemainingQty(id, itemId, qtyRemainingActual, qtyCancelled, note,
+                body != null ? body.designs() : null);
         return ResponseEntity.noContent().build();
     }
 
@@ -125,15 +134,29 @@ public class DailyReportController {
     @PostMapping("/{id}/finalize")
     @RequirePermission(screen = "DAILY_REPORT", action = "FINALIZE")
     public Map<String, Object> finalize(@PathVariable UUID id) {
-        DailyReport r = service.finalize(id);
+        DailyReportService.FinalizeResult res = service.finalize(id);
+        DailyReport r = res.report();
         return Map.of("id", r.getId(), "reportDate", r.getReportDate(),
                 "status", r.getStatus(),
-                "finalizedBy", r.getFinalizedBy() != null ? r.getFinalizedBy() : "");
+                "finalizedBy", r.getFinalizedBy() != null ? r.getFinalizedBy() : "",
+                "stockWarnings", res.stockWarnings());
     }
 
     @GetMapping("/{id}")
     public Map<String, Object> getById(@PathVariable UUID id) {
         DailyReport r = service.getById(id);
+        return Map.of("id", r.getId(), "reportDate", r.getReportDate(),
+                "status", r.getStatus(),
+                "finalizedBy", r.getFinalizedBy() != null ? r.getFinalizedBy() : "");
+    }
+
+    /** Báo cáo gần nhất có ngày < {@code date} (02/BE-7); 404 nếu chưa có. */
+    @GetMapping("/previous")
+    public Map<String, Object> previous(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        DailyReport r = service.findPrevious(date).orElseThrow(() ->
+                new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Chưa có báo cáo nào trước ngày " + date));
         return Map.of("id", r.getId(), "reportDate", r.getReportDate(),
                 "status", r.getStatus(),
                 "finalizedBy", r.getFinalizedBy() != null ? r.getFinalizedBy() : "");

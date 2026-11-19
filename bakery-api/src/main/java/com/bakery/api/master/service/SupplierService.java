@@ -35,6 +35,7 @@ public class SupplierService extends AbstractBakeryAdminService<Supplier, Suppli
         e.setPhone(req.phone());
         e.setEmail(req.email());
         e.setAddress(req.address());
+        if (req.isCashPurchase() != null) e.setCashPurchase(req.isCashPurchase());
         return e;
     }
 
@@ -46,6 +47,7 @@ public class SupplierService extends AbstractBakeryAdminService<Supplier, Suppli
         e.setPhone(req.phone());
         e.setEmail(req.email());
         e.setAddress(req.address());
+        if (req.isCashPurchase() != null) e.setCashPurchase(req.isCashPurchase());
     }
 
     @Override
@@ -58,6 +60,7 @@ public class SupplierService extends AbstractBakeryAdminService<Supplier, Suppli
         r.setPhone(e.getPhone());
         r.setEmail(e.getEmail());
         r.setAddress(e.getAddress());
+        r.setCashPurchase(e.isCashPurchase());
         return r;
     }
 }

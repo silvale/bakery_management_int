@@ -37,7 +37,8 @@ public class JwtTokenService {
     }
 
     public String generateRefreshToken(String userId) {
-        return buildToken(userId, Map.of(), jwtProperties.refreshTokenExpireMs());
+        // jti ngẫu nhiên: hai lần đăng nhập cùng giây của một user không được sinh ra cùng một refresh token (cột token unique)
+        return buildToken(userId, Map.of("jti", java.util.UUID.randomUUID().toString()), jwtProperties.refreshTokenExpireMs());
     }
 
     public Claims parseToken(String token) {

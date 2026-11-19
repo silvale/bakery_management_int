@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/delivery-records")
 @RequiredArgsConstructor
 @RequirePermission(screen = "DELIVERY_RECORDS", action = "VIEW")
+@com.bakery.api.auth.scope.RequireWarehouse(any = {"KITCHEN", "SHOP"})
 public class DeliveryRecordController {
 
     private final ProductionRequestService service;
@@ -41,16 +42,22 @@ public class DeliveryRecordController {
     /**
      * Shop bấm "Xác nhận nhận" → cập nhật qtyReceived, tính discrepancy.
      *
-     * @param id          DeliveryRecord ID
-     * @param qtyReceived số lượng shop thực nhận
-     * @param note        ghi chú (optional)
+     * <p>Body JSON: {@code {"qtyReceived":3,"note":"...","designs":[{"designId":"..","qty":1}]}}.
+     * Bánh kem có mẫu: {@code designs} bắt buộc, tổng = qtyReceived; response có {@code stockWarnings}.
+     *
+     * @param id DeliveryRecord ID
      */
+    @com.bakery.api.auth.scope.RequireWarehouse(any = {"SHOP"})
     @PostMapping("/{id}/confirm")
     @RequirePermission(screen = "DELIVERY_RECORDS", action = "APPROVE")
     public DeliveryRecordResponse confirm(
             @PathVariable UUID id,
-            @RequestParam BigDecimal qtyReceived,
-            @RequestParam(required = false) String note) {
-        return service.confirmDelivery(id, qtyReceived, note);
+            @org.springframework.web.bind.annotation.RequestBody(required = false)
+            com.bakery.api.production.dto.ConfirmDeliveryRequest request) {
+        if (request == null || request.qtyReceived() == null) {
+            throw new IllegalArgumentException(
+                    "Body JSON bắt buộc: {\"qtyReceived\": số, \"note\": ..., \"designs\": [...]}");
+        }
+        return service.confirmDelivery(id, request.qtyReceived(), request.note(), request.designs());
     }
 }

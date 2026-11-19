@@ -1,9 +1,24 @@
 package com.bakery.api.auth.service;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.UUID;
 
+
+import com.bakery.api.auth.dto.AuthProfile;
 import com.bakery.api.auth.dto.LoginRequest;
 import com.bakery.api.auth.dto.LoginResponse;
+import com.bakery.api.auth.dto.RefInfo;
+import com.bakery.api.master.entity.Supplier;
+import com.bakery.api.master.entity.Warehouse;
+import com.bakery.framework.metadata.ReferenceValue;
+import com.bakery.api.auth.repository.RolePermissionRepository;
+import com.bakery.api.auth.repository.ScreenRegistryRepository;
 import com.bakery.api.auth.entity.RefreshToken;
 import com.bakery.api.auth.entity.UserAccount;
 import com.bakery.api.auth.repository.RefreshTokenRepository;
@@ -31,6 +46,8 @@ public class AuthService {
     private final JwtProperties jwtProperties;
     private final PasswordEncoder passwordEncoder;
     private final CommandRequestRepository commandRequestRepository;
+    private final RolePermissionRepository rolePermissionRepository;
+    private final ScreenRegistryRepository screenRegistryRepository;
 
     /**
      * Đăng nhập — trả về access token + refresh token.
@@ -66,7 +83,7 @@ public class AuthService {
         activityLog(CommandAction.LOGIN, account.getUsername(), account.getId().toString(),
                 account.getUsername() + " (" + roleName + ")", null, CommandStatus.SUCCESS);
 
-        return new LoginResponse(
+        return LoginResponse.of(
                 account.getId(),
                 account.getUsername(),
                 account.getFullName(),
@@ -74,7 +91,8 @@ public class AuthService {
                 roleCode,
                 roleName,
                 accessToken,
-                refreshTokenStr
+                refreshTokenStr,
+                profileOf(account)
         );
     }
 
@@ -100,7 +118,7 @@ public class AuthService {
         String newAccessToken = jwtTokenService.generateAccessToken(
                 account.getId().toString(), account.getUsername(), roleCode);
 
-        return new LoginResponse(
+        return LoginResponse.of(
                 account.getId(),
                 account.getUsername(),
                 account.getFullName(),
@@ -108,7 +126,8 @@ public class AuthService {
                 roleCode,
                 roleName,
                 newAccessToken,
-                refreshToken
+                refreshToken,
+                profileOf(account)
         );
     }
 
@@ -127,6 +146,40 @@ public class AuthService {
                         account.getUsername(), null, CommandStatus.SUCCESS)
             );
         });
+    }
+
+    /** {@code GET /auth/me}: hồ sơ phân quyền của user trong token. */
+    @Transactional(readOnly = true)
+    public AuthProfile me(UUID userId) {
+        UserAccount account = userAccountRepository.findWithScopeById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("Tài khoản không tồn tại."));
+        return profileOf(account);
+    }
+
+    /** Kho được gán, NCC xem giá, permissionMap (Admin: mọi screen × mọi action đã đăng ký). */
+    private AuthProfile profileOf(UserAccount a) {
+        // load lại kèm kho/NCC (login/refresh nạp account không fetch sẵn)
+        UserAccount u = userAccountRepository.findWithScopeById(a.getId()).orElse(a);
+        String roleCode = u.getRole() != null ? u.getRole().getCode() : "USER";
+        boolean admin = AccessScope.SUPER_ADMIN.equalsIgnoreCase(roleCode);
+        Map<String, List<String>> perms = new TreeMap<>();
+        if (admin) {
+            screenRegistryRepository.findAllByOrderBySortOrderAsc()
+                    .forEach(s -> perms.put(s.getCode(), s.getAvailableActionList()));
+        } else if (u.getRole() != null) {
+            rolePermissionRepository.findByIdRoleId(u.getRole().getId()).forEach(p ->
+                    perms.computeIfAbsent(p.getId().getScreenCode(), k -> new ArrayList<>()).add(p.getId().getActionCode()));
+            perms.values().forEach(Collections::sort);
+        }
+        List<RefInfo> warehouses = (admin ? u.getWarehouses() : u.getWarehouses()).stream()
+                .sorted(Comparator.comparing(Warehouse::getCode))
+                .map(w -> new RefInfo(w.getId(), w.getCode(), w.getName(),
+                        w.getWarehouseType() != null ? w.getWarehouseType().name() : null))
+                .toList();
+        List<UUID> suppliers = u.getPriceSuppliers().stream().map(Supplier::getId).toList();
+        return new AuthProfile(u.getId(), u.getUsername(), u.getFullName(),
+                u.getRole() != null ? new ReferenceValue(roleCode, u.getRole().getName()) : null,
+                admin, warehouses, suppliers, perms);
     }
 
     // ── Internal helper ───────────────────────────────────────────

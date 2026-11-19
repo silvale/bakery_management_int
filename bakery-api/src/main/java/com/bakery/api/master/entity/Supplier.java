@@ -33,4 +33,8 @@ public class Supplier extends BaseEntity {
 
     @Column(name = "address", length = 500)
     private String address;
+
+    /** 11/D3: NCC "Mua lẻ / trả ngay" (chợ) — tự điền vào danh sách NCC xem giá khi gán vai trò có quyền giá. */
+    @Column(name = "is_cash_purchase", nullable = false)
+    private boolean cashPurchase = false;
 }

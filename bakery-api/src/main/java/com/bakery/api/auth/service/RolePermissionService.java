@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import com.bakery.api.auth.dto.RolePermissionRequest;
 import com.bakery.api.auth.dto.ScreenResponse;
 import com.bakery.api.auth.entity.RolePermission;
+import com.bakery.api.auth.entity.UserRole;
 import com.bakery.api.auth.repository.RolePermissionRepository;
 import com.bakery.api.auth.repository.ScreenRegistryRepository;
 import com.bakery.api.auth.repository.UserRoleRepository;
@@ -51,8 +52,9 @@ public class RolePermissionService {
     @Transactional
     public Map<String, Set<String>> setPermissions(UUID roleId, RolePermissionRequest req) {
         // Validate role exists
-        userRoleRepository.findById(roleId)
+        UserRole role = userRoleRepository.findById(roleId)
                 .orElseThrow(() -> new ResourceNotFoundException("UserRole", roleId));
+        UserRoleService.requireNotSystem(role);   // 11/D1: vai trò hệ thống không đổi bộ quyền ở giai đoạn 1
 
         // Load valid screen+action combos để validate
         var validActions = screenRegistryRepository.findAllByOrderBySortOrderAsc()

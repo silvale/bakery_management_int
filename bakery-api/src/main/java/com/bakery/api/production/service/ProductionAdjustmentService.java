@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.bakery.api.inventory.entity.StockLot;
+import com.bakery.api.inventory.service.ProductionZone;
 import com.bakery.api.inventory.entity.StockMovement;
 import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.inventory.repository.StockMovementRepository;
@@ -165,7 +166,7 @@ public class ProductionAdjustmentService {
 
             if (nlDelta.compareTo(BigDecimal.ZERO) > 0) {
                 // Tăng sản lượng → trừ thêm NL từ KITCHEN (FIFO)
-                deductFromKitchen(nlDelta, rl.getItem().getId(), kitchen, adj.getId());
+                deductFromKitchen(nlDelta, rl.getItem().getId(), adj.getId());
             } else if (nlDelta.compareTo(BigDecimal.ZERO) < 0) {
                 // Giảm sản lượng → hoàn NL về KITCHEN (tạo lot mới)
                 returnToKitchen(nlDelta.abs(), rl.getItem().getId(), kitchen, adj.getId());
@@ -178,11 +179,11 @@ public class ProductionAdjustmentService {
         return recipeRepository.findByProductIdAndActiveTrue(line.getProduct().getId()).orElse(null);
     }
 
-    private void deductFromKitchen(BigDecimal needed, UUID itemId, Warehouse kitchen, UUID refId) {
+    private void deductFromKitchen(BigDecimal needed, UUID itemId, UUID refId) {
         List<StockLot> lots = stockLotRepository
                 .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(itemId, BigDecimal.ZERO)
                 .stream()
-                .filter(l -> l.getWarehouse().getId().equals(kitchen.getId()))
+                .filter(ProductionZone::contains) // KITCHEN + COLD, giữ thứ tự FIFO
                 .toList();
 
         BigDecimal remaining = needed;
@@ -207,7 +208,7 @@ public class ProductionAdjustmentService {
         if (remaining.compareTo(BigDecimal.ZERO) > 0) {
             Item item = entityManager.find(Item.class, itemId);
             String itemName = (item != null) ? item.getName() : itemId.toString();
-            throw new IllegalStateException("Kho bếp không đủ NL để bù adjustment: " + itemName + " (thiếu " + remaining + ")");
+            throw new IllegalStateException("Kho bếp + phòng lạnh không đủ NL để bù adjustment: " + itemName + " (thiếu " + remaining + ")");
         }
     }
 

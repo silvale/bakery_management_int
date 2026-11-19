@@ -12,6 +12,9 @@ public interface IngredientPriceRepository extends BaseRepository<IngredientPric
     List<IngredientPrice> findByItemIdOrderByEffectiveDateDesc(UUID itemId);
     List<IngredientPrice> findByItemIdAndSupplierIdOrderByEffectiveDateDesc(UUID itemId, UUID supplierId);
 
+    /** Dòng lịch sử giá sinh ra khi nhận hàng của một phiếu (lot_ref = mã phiếu) — để Admin sửa giá sau nhận (11/BE-6). */
+    List<IngredientPrice> findByLotRefAndItemId(String lotRef, UUID itemId);
+
     /**
      * Lấy giá mới nhất của từng item trong danh sách — 1 query duy nhất thay vì N+1.
      * Dùng PostgreSQL DISTINCT ON để lấy row đầu tiên (effective_date DESC) per item_id.

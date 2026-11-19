@@ -16,4 +16,7 @@ public class SupplierResponse extends BaseResponse {
     private String phone;
     private String email;
     private String address;
+    /** "Mua lẻ / trả ngay" (chợ) — JSON {@code isCashPurchase} (contract 11 §7). */
+    @com.fasterxml.jackson.annotation.JsonProperty("isCashPurchase")
+    private boolean cashPurchase;
 }

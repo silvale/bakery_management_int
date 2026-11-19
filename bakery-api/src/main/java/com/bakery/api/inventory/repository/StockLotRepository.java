@@ -17,22 +17,50 @@ public interface StockLotRepository extends BaseRepository<StockLot> {
 
     List<StockLot> findByItemIdAndWarehouseId(UUID itemId, UUID warehouseId);
 
+    /**
+     * 08/D6 (sửa 2026-11-12): giá lô gần nhất của item ở mọi kho (received_date, rồi created_at) cho điều chỉnh tăng,
+     * BỎ QUA lô sinh từ phiếu kho loại ADJUSTMENT và lô có unit_cost = 0 (kể cả null). Không có → rỗng (giá 0).
+     */
+    @Query(value = """
+            SELECT l.unit_cost FROM stock_lot l
+             WHERE l.item_id = :itemId AND l.unit_cost > 0
+               AND NOT EXISTS (SELECT 1 FROM stock_movement m
+                                 JOIN inventory_request r ON r.id = m.ref_id
+                                WHERE m.lot_id = l.id AND m.movement_type = 'IN'
+                                  AND m.ref_type = 'INVENTORY_REQUEST' AND r.request_type = 'ADJUSTMENT')
+             ORDER BY l.received_date DESC, l.created_at DESC
+             LIMIT 1
+            """, nativeQuery = true)
+    java.util.Optional<BigDecimal> findLatestNonAdjustmentUnitCost(@Param("itemId") UUID itemId);
+
+    /** 08: tồn (tổng qty_remaining) theo item tại một kho — [itemId, sum]. Một query cho cả danh sách. */
+    @Query("SELECT l.item.id, SUM(l.qtyRemaining) FROM StockLot l "
+            + "WHERE l.warehouse.id = :warehouseId AND l.item.id IN :itemIds GROUP BY l.item.id")
+    List<Object[]> sumRemainingByItem(@Param("warehouseId") UUID warehouseId,
+                                      @Param("itemIds") java.util.Collection<UUID> itemIds);
+
+    /** FIFO trong một kho: lô còn hàng, nhập sớm nhất trước. */
+    List<StockLot> findByItemIdAndWarehouseIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
+            UUID itemId, UUID warehouseId, BigDecimal minQty);
+
     List<StockLot> findByWarehouseCode(String warehouseCode);
 
     /**
      * Tổng tồn kho theo item × warehouse — gộp tất cả lot còn hàng.
-     * Trả Object[]: [itemCode, itemName, warehouseCode, warehouseName, totalQtyRemaining]
+     * Trả Object[]: [itemCode, itemName, warehouseCode, warehouseName, totalQtyRemaining,
+     *                itemUnit, itemClass, itemGroupCode, itemGroupName, minStockQuantity, restockQuantity]
      */
     @Query("""
-            SELECT s.item.code, s.item.name,
+            SELECT i.code, i.name,
                    s.warehouse.code, s.warehouse.name,
-                   SUM(s.qtyRemaining)
-            FROM StockLot s
+                   SUM(s.qtyRemaining),
+                   i.unit, TYPE(i), g.code, g.name, i.minStockQuantity, i.restockQuantity
+            FROM StockLot s JOIN s.item i LEFT JOIN i.itemGroup g
             WHERE s.qtyRemaining > 0
               AND (:warehouseCode IS NULL OR s.warehouse.code = :warehouseCode)
-            GROUP BY s.item.id, s.item.code, s.item.name,
+            GROUP BY i.id, i.code, i.name, i.unit, TYPE(i), g.code, g.name, i.minStockQuantity, i.restockQuantity,
                      s.warehouse.id, s.warehouse.code, s.warehouse.name
-            ORDER BY s.item.code, s.warehouse.code
+            ORDER BY i.code, s.warehouse.code
             """)
     List<Object[]> findStockSummaryRaw(@Param("warehouseCode") String warehouseCode);
 }

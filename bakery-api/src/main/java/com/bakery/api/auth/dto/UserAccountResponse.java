@@ -18,6 +18,10 @@ public class UserAccountResponse extends BaseResponse {
     private UUID roleId;
     private String roleCode;
     private String roleName;
+    /** {key = mã vai trò, name = tên}. */
+    private com.bakery.framework.metadata.ReferenceValue role;
+    private java.util.List<RefInfo> warehouses = new java.util.ArrayList<>();
+    private java.util.List<RefInfo> priceSuppliers = new java.util.ArrayList<>();
 
     public static UserAccountResponse from(UserAccount a) {
         UserAccountResponse res = new UserAccountResponse();
@@ -28,7 +32,13 @@ public class UserAccountResponse extends BaseResponse {
             res.roleId = a.getRole().getId();
             res.roleCode = a.getRole().getCode();
             res.roleName = a.getRole().getName();
+            res.role = new com.bakery.framework.metadata.ReferenceValue(a.getRole().getCode(), a.getRole().getName());
         }
+        a.getWarehouses().stream().sorted(java.util.Comparator.comparing(com.bakery.api.master.entity.Warehouse::getCode))
+                .forEach(w -> res.warehouses.add(new RefInfo(w.getId(), w.getCode(), w.getName(),
+                        w.getWarehouseType() != null ? w.getWarehouseType().name() : null)));
+        a.getPriceSuppliers().stream().sorted(java.util.Comparator.comparing(com.bakery.api.master.entity.Supplier::getCode))
+                .forEach(s -> res.priceSuppliers.add(RefInfo.of(s.getId(), s.getCode(), s.getName())));
         return res;
     }
 }

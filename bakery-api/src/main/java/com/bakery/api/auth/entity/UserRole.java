@@ -21,4 +21,16 @@ public class UserRole extends BaseEntity {
 
     @Column(name = "description", length = 500)
     private String description;
+
+    /** 11/D1: 7 vai trò hệ thống không sửa/xóa được ở giai đoạn 1. */
+    @Column(name = "is_system", nullable = false)
+    private boolean system = false;
+
+    /** Kho gán mặc định khi chọn vai trò, vd "KITCHEN,COLD". */
+    @Column(name = "default_warehouse_codes", length = 200)
+    private String defaultWarehouseCodes;
+
+    /** Vai trò có quyền xem/nhập giá theo NCC (D3). */
+    @Column(name = "price_by_supplier", nullable = false)
+    private boolean priceBySupplier = false;
 }

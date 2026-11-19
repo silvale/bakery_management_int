@@ -60,6 +60,30 @@ public class InventoryRequestLine extends BaseEntity {
     @Column(name = "purchase_qty", precision = 15, scale = 4)
     private BigDecimal purchaseQty;
 
+    /**
+     * Số thực nhận theo line.unit (PURCHASE). null cho tới khi phiếu được xác nhận;
+     * 0 ≤ receivedQty ≤ quantity (không cho giao dư).
+     */
+    @Column(name = "received_qty", precision = 15, scale = 4)
+    private BigDecimal receivedQty;
+
+    // ── ADJUSTMENT (08): quantity = countedQty − systemQty ───────
+    /** Tồn hệ thống của item tại kho lúc lưu phiếu. */
+    @Column(name = "system_qty", precision = 15, scale = 4)
+    private BigDecimal systemQty;
+
+    /** Số đếm thực tế. */
+    @Column(name = "counted_qty", precision = 15, scale = 4)
+    private BigDecimal countedQty;
+
+    /** code_value ADJUSTMENT_REASON. */
+    @Column(name = "reason_code", length = 30)
+    private String reasonCode;
+
+    /** Giá trị điều chỉnh, tính và lưu lúc duyệt: tăng dương, giảm âm. */
+    @Column(name = "amount", precision = 15, scale = 2)
+    private BigDecimal amount;
+
     @Column(name = "sort_order")
     private Integer sortOrder;
 

@@ -18,4 +18,6 @@ public class ProductionRequestResponse extends BaseResponse {
     private LocalDate productionDate;
     private String note;
     private List<ProductionRequestLineResponse> lines;
+    /** 02/BE-13: cảnh báo thiếu phụ kiện lúc bếp Hoàn thành (không chặn); luôn có, rỗng nếu đủ. Batch gom cả phiếu. */
+    private List<String> stockWarnings = new java.util.ArrayList<>();
 }

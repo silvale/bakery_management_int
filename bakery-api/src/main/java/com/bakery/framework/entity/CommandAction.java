@@ -11,5 +11,8 @@ public enum CommandAction {
     UPLOAD,
     GENERATE,
     LOGIN,
-    LOGOUT
+    LOGOUT,
+    MARK_PAID,
+    MARK_UNPAID,
+    CONFIRM
 }
