@@ -164,8 +164,24 @@ public class AccessScope {
     /** Giá vốn, chi phí, giá trị điều chỉnh, doanh thu... — chỉ Admin (D5). */
     public boolean canSeeCost() { return isAdmin(); }
 
-    /** Xem công thức và danh mục bán thành phẩm (17/D1): quyền RECIPES:VIEW, Admin luôn có. Theo quyền, không theo tên vai trò. */
+    /** Xem công thức (17/D1): quyền RECIPES:VIEW, Admin luôn có. Theo quyền, không theo tên vai trò. Danh mục BTP theo {@link #canViewItemType} (19). */
     public boolean canViewRecipes() { return can("RECIPES", "VIEW"); }
+
+    /**
+     * Xem tab loại mặt hàng ở màn Sản phẩm (19/D2): ITEMS_PRODUCT | ITEMS_SEMI | ITEMS_INGREDIENT :VIEW.
+     * Độc lập với {@link #canViewRecipes()}. {@code itemType}: PRODUCT, SEMI_PRODUCT, INGREDIENT (không phân biệt hoa thường).
+     */
+    public boolean canViewItemType(String itemType) { return can(itemTypeScreen(itemType), "VIEW"); }
+
+    /** Mã màn hình (quyền tab) của loại mặt hàng. Loại lạ → 400. */
+    public static String itemTypeScreen(String itemType) {
+        return switch (itemType.toUpperCase()) {
+            case "PRODUCT"      -> "ITEMS_PRODUCT";
+            case "SEMI_PRODUCT" -> "ITEMS_SEMI";
+            case "INGREDIENT"   -> "ITEMS_INGREDIENT";
+            default -> throw new IllegalArgumentException("Unknown itemType: " + itemType);
+        };
+    }
 
     // ── nội bộ ───────────────────────────────────────────────
 

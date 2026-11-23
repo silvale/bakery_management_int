@@ -161,12 +161,21 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
         if (itemType != null && !itemType.isBlank()) {
             Class<? extends Item> typeClass = resolveClass(itemType);
+            // 19/D5: hỏi thẳng tab PRODUCT/INGREDIENT mà không có quyền tab → 403 (BTP giữ như 17: rỗng)
+            if (typeClass != SemiProduct.class && !scope.canViewItemType(itemType)) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.FORBIDDEN,
+                        "Không có quyền xem tab này [" + com.bakery.api.auth.service.AccessScope.itemTypeScreen(itemType) + ":VIEW]");
+            }
             spec = spec.and((root, query, cb) -> cb.equal(root.type(), typeClass));
         }
 
-        // 17/D1: không có RECIPES:VIEW thì không thấy BTP (AND thêm nên không lách được bằng param)
-        if (!scope.canViewRecipes()) {
-            spec = spec.and((root, query, cb) -> cb.notEqual(root.type(), SemiProduct.class));
+        // 19/D2: chỉ trả các loại có quyền tab (AND thêm nên không lách được bằng param). BTP: 17 → 19 đổi sang ITEMS_SEMI
+        for (String t : List.of("PRODUCT", "SEMI_PRODUCT", "INGREDIENT")) {
+            if (!scope.canViewItemType(t)) {
+                Class<? extends Item> hidden = resolveClass(t);
+                spec = spec.and((root, query, cb) -> cb.notEqual(root.type(), hidden));
+            }
         }
 
         // sort=<field>,<asc|desc>: tự áp ORDER BY trong spec (null cuối, id làm tiêu chí phụ).
@@ -199,17 +208,17 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         }
     }
 
-    /** 17/D1: /items/all — không có RECIPES:VIEW thì bỏ BTP. */
+    /** /items/all — không có ITEMS_SEMI:VIEW thì bỏ BTP (17 → 19); PRODUCT/INGREDIENT không lọc (19/D5, dropdown vận hành). */
     @Override
     public List<ItemResponse> findAll() {
-        boolean semi = scope.canViewRecipes();
+        boolean semi = scope.canViewItemType("SEMI_PRODUCT");
         return repository.findAllByStatus(EntityStatus.ACTIVE).stream()
                 .filter(i -> semi || !isSemi(i))
                 .map(this::toResponse)
                 .toList();
     }
 
-    /** 17/D1: /items/{id} của BTP → 403 khi không có RECIPES:VIEW. */
+    /** /items/{id} của BTP → 403 khi không có ITEMS_SEMI:VIEW (17 → 19). */
     @Override
     public Optional<ItemResponse> findById(UUID id) {
         return repository.findById(id).map(i -> { requireVisible(i); return toResponse(i); });
@@ -227,10 +236,10 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     }
 
     private void requireVisible(Item i) {
-        if (isSemi(i) && !scope.canViewRecipes()) {
+        if (isSemi(i) && !scope.canViewItemType("SEMI_PRODUCT")) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.FORBIDDEN,
-                    "Không có quyền xem bán thành phẩm [RECIPES:VIEW]");
+                    "Không có quyền xem bán thành phẩm [ITEMS_SEMI:VIEW]");
         }
     }
 
@@ -248,7 +257,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         }
         if (matched.isEmpty()) return List.of();
         // Nạp item TRƯỚC quy cách: ItemPackaging.item là proxy lazy, nạp trước sẽ khiến findAllById trả proxy (instanceof Ingredient sai)
-        boolean semiOk = scope.canViewRecipes();   // 17/D1
+        boolean semiOk = scope.canViewItemType("SEMI_PRODUCT");   // 17/D1 → 19
         List<Item> loaded = repository.findAllById(matched.keySet()).stream()
                 .filter(i -> semiOk || !isSemi(i)).toList();
         Map<UUID, List<ItemResponse.PackagingResponse>> packs = new java.util.HashMap<>();

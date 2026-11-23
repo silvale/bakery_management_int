@@ -124,6 +124,25 @@ class AccessScopeTest {
     }
 
     @Test
+    void itemTabPermissionIsIndependentOfRecipes() {   // 19/D3: ITEMS_SEMI tách khỏi RECIPES
+        scopeFor("KITCHEN_STAFF");   // khởi tạo id user/role như test 17
+        SecurityContextHolder.clearContext();
+        AccessScope semiOnly = new AccessScope(new BakeryActorResolver(), null, null,
+                stub(UserRoleRepository.class, (n, a) -> Optional.of(role)),
+                stub(RolePermissionRepository.class, (n, a) -> List.of(
+                        new RolePermission(role.getId(), "ITEMS_SEMI", "VIEW"),
+                        new RolePermission(role.getId(), "ITEMS_PRODUCT", "VIEW"))));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new BakeryUserPrincipal(user.getId().toString(), "u", "ANY_ROLE_NAME"), null, List.of()));
+        assertThat(semiOnly.canViewItemType("SEMI_PRODUCT")).isTrue();
+        assertThat(semiOnly.canViewItemType("product")).isTrue();            // không phân biệt hoa thường
+        assertThat(semiOnly.canViewItemType("INGREDIENT")).isFalse();
+        assertThat(semiOnly.canViewRecipes()).isFalse();                      // thấy tab BTP nhưng không thấy công thức
+        assertThatThrownBy(() -> semiOnly.canViewItemType("CAKE")).isInstanceOf(IllegalArgumentException.class);
+        assertThat(scopeFor(AccessScope.SUPER_ADMIN).canViewItemType("INGREDIENT")).isTrue();   // Admin bypass
+    }
+
+    @Test
     void adminSeesEverything() {
         AccessScope s = scopeFor(AccessScope.SUPER_ADMIN);
         assertThat(s.isAdmin()).isTrue();
