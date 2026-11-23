@@ -95,6 +95,7 @@ public class ProductionRequestService
     private final ProductMappingRepository productMappingRepository;
     private final com.bakery.api.cake.service.DeliveryDesignService designService;
     private final BakeryActorResolver actorResolver;
+    private final ProductionMaterialService materialService;
 
     // ── Framework wiring ─────────────────────────────────────────
 
@@ -209,6 +210,7 @@ public class ProductionRequestService
         Map<UUID, List<DeliveryRecordDesignResponse>> designs = designService.responsesFor(recordIds);
         Map<UUID, List<DeliveryRecordAccessoryResponse>> accessories = designService.accessoriesFor(recordIds);
         r.setLines(e.getLines().stream().map(l -> toLineResponse(l, designs, accessories)).toList());
+        r.setMaterialStatus(materialService.statusOf(e));   // 20: chỉ phiếu SEMI
         return r;
     }
 
@@ -448,6 +450,76 @@ public class ProductionRequestService
         }
     }
 
+    /** 20/D8: hủy/từ chối phiếu SEMI còn bảng tạm > 0 phải đối soát trước. */
+    @Override
+    protected void beforeDelete(ProductionRequest e) { materialService.requireSettled(e); }
+
+    @Override
+    protected void afterReject(ProductionRequest e) { materialService.requireSettled(e); }
+
+    /** 20/D7: bếp trưởng đóng phiếu SEMI. */
+    @Transactional
+    public ProductionRequestResponse closeRequest(UUID id) {
+        ProductionRequest e = repository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("ProductionRequest", id));
+        materialService.close(e);
+        return toResponse(e);
+    }
+
+    // ── Lọc theo materialStatus (20/BE-3) ────────────────────────
+
+    private static final Set<String> MATERIAL_STATUSES =
+            Set.of("NONE", "IN_PROGRESS", "TO_SETTLE", "READY_TO_CLOSE", "CLOSED");
+
+    /** {@code materialStatus=} không phải cột: SpecificationBuilder sẽ nuốt, nên tách ra và dựng điều kiện riêng. */
+    @Override
+    public org.springframework.data.domain.Page<ProductionRequestResponse> findAll(
+            org.springframework.util.MultiValueMap<String, String> params,
+            org.springframework.data.domain.Pageable pageable) {
+        String ms = params.getFirst("materialStatus");
+        if (ms == null || ms.isBlank()) return super.findAll(params, pageable);
+        String status = ms.trim().toUpperCase();
+        if (!MATERIAL_STATUSES.contains(status)) {
+            throw new IllegalArgumentException("materialStatus không hợp lệ (" + String.join(", ", new java.util.TreeSet<>(MATERIAL_STATUSES)) + ")");
+        }
+        var rest = new org.springframework.util.LinkedMultiValueMap<>(params);
+        rest.remove("materialStatus");
+        var spec = com.bakery.framework.util.SpecificationBuilder.<ProductionRequest>from(rest)
+                .and(materialStatusSpec(status));
+        return repository.findAll(spec, pageable).map(this::toResponse);
+    }
+
+    /** Cùng định nghĩa với {@link ProductionMaterialService#statusOf}, viết lại thành điều kiện SQL. */
+    private static org.springframework.data.jpa.domain.Specification<ProductionRequest> materialStatusSpec(String status) {
+        return (root, q, cb) -> {
+            var anyMat = q.subquery(Long.class);
+            var m = anyMat.from(com.bakery.api.production.entity.ProductionMaterial.class);
+            anyMat.select(cb.literal(1L)).where(cb.equal(m.get("productionRequestId"), root.get("id")));
+
+            var leftMat = q.subquery(Long.class);
+            var m2 = leftMat.from(com.bakery.api.production.entity.ProductionMaterial.class);
+            var remaining = cb.diff(cb.diff(cb.diff(m2.<BigDecimal>get("qtyPicked"), m2.<BigDecimal>get("qtyConsumed")),
+                    m2.<BigDecimal>get("qtyReturned")), m2.<BigDecimal>get("qtyWrittenOff"));
+            leftMat.select(cb.literal(1L)).where(cb.equal(m2.get("productionRequestId"), root.get("id")),
+                    cb.greaterThan(remaining, BigDecimal.ZERO));
+
+            var openLine = q.subquery(Long.class);
+            var l = openLine.from(ProductionRequestLine.class);
+            openLine.select(cb.literal(1L)).where(cb.equal(l.get("productionRequest"), root),
+                    cb.notEqual(l.get("lineStatus"), ProductionLineStatus.COMPLETED));
+
+            var semi = cb.equal(root.get("productionType"), ProductionType.SEMI);
+            var open = cb.isNull(root.get("closedAt"));
+            return switch (status) {
+                case "CLOSED" -> cb.and(semi, cb.isNotNull(root.get("closedAt")));
+                case "NONE" -> cb.and(semi, open, cb.not(cb.exists(anyMat)), cb.exists(openLine));
+                case "IN_PROGRESS" -> cb.and(semi, open, cb.exists(anyMat), cb.exists(openLine));
+                case "TO_SETTLE" -> cb.and(semi, open, cb.not(cb.exists(openLine)), cb.exists(leftMat));
+                default -> cb.and(semi, open, cb.not(cb.exists(openLine)), cb.not(cb.exists(leftMat)));   // READY_TO_CLOSE
+            };
+        };
+    }
+
     // ── Business actions ─────────────────────────────────────────
 
     /**
@@ -515,20 +587,25 @@ public class ProductionRequestService
         Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
                 .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
 
-        // Trừ NL kho KITCHEN theo recipe × qtyProduced (đơn vị được quy đổi)
-        Recipe recipe = resolveRecipe(line);
-        if (recipe != null) {
-            List<RecipeLine> recipeLines = recipeLineRepository.findByRecipeIdOrderBySortOrderAsc(recipe.getId());
-            for (RecipeLine rl : recipeLines) {
-                if (rl.getItem() == null) continue;
-                BigDecimal convFactor = resolveConversionFactor(
-                        rl.getUnit(), rl.getItem().getUnit());
-                BigDecimal needed = rl.getQuantity().multiply(qtyProduced).multiply(convFactor);
-                deductFromKitchen(needed, rl.getItem().getId(), rl.getItem().getName(), e);
-            }
+        if (e.getProductionType() == ProductionType.SEMI) {
+            // 20/D5: phiếu BTP trừ NL từ bảng tạm (đã OUT lúc lấy), thiếu → 422 "Bấm Lấy thêm"
+            materialService.consume(e, line, qtyProduced);
         } else {
-            log.warn("completeLine: không tìm thấy recipe cho sản phẩm {} — bỏ qua NL deduct",
-                    line.getProduct() != null ? line.getProduct().getCode() : "unknown");
+            // DAILY/ORDER giữ nguyên: trừ NL kho KITCHEN + COLD theo recipe × qtyProduced (đơn vị được quy đổi)
+            Recipe recipe = resolveRecipe(line);
+            if (recipe != null) {
+                List<RecipeLine> recipeLines = recipeLineRepository.findByRecipeIdOrderBySortOrderAsc(recipe.getId());
+                for (RecipeLine rl : recipeLines) {
+                    if (rl.getItem() == null) continue;
+                    BigDecimal convFactor = resolveConversionFactor(
+                            rl.getUnit(), rl.getItem().getUnit());
+                    BigDecimal needed = rl.getQuantity().multiply(qtyProduced).multiply(convFactor);
+                    deductFromKitchen(needed, rl.getItem().getId(), rl.getItem().getName(), e);
+                }
+            } else {
+                log.warn("completeLine: không tìm thấy recipe cho sản phẩm {} — bỏ qua NL deduct",
+                        line.getProduct() != null ? line.getProduct().getCode() : "unknown");
+            }
         }
 
         // Lô đầu ra: BTP có kho mặc định ở khu sản xuất (vd Phòng lạnh) vào kho đó; còn lại vào KITCHEN

@@ -50,6 +50,7 @@ public class ProductionRequestController
 
     private final ProductionRequestService service;
     private final ProductionIngredientService ingredientService;
+    private final com.bakery.api.production.service.ProductionMaterialService materialService;
 
     @Override
     protected String screenCode() { return "PROD_REQUESTS"; }
@@ -136,6 +137,49 @@ public class ProductionRequestController
         return ingredientService.suggestSemiQty(semiItemId, date != null ? date : LocalDate.now());
     }
 
+    // ── 20: lấy NL cho phiếu SX bán thành phẩm (bảng tạm "Đang sản xuất") ──
+
+    /** Danh sách lấy NL: cần / đã lấy / còn phải lấy / tồn từng kho / ai lấy. Chỉ phiếu SEMI. */
+    @GetMapping("/{id}/materials")
+    public com.bakery.api.production.dto.ProductionMaterialDto.Materials materials(@PathVariable UUID id) {
+        checkPermission("VIEW");
+        return materialService.materials(id);
+    }
+
+    /** Nhân viên xác nhận lấy NL ở một kho (Kho Tổng/Bếp/Phòng Lạnh): trừ tồn ngay, vào bảng tạm của phiếu. */
+    @PostMapping("/{id}/materials/pick")
+    public com.bakery.api.production.dto.ProductionMaterialDto.Materials pickMaterials(
+            @PathVariable UUID id,
+            @RequestBody com.bakery.api.production.dto.ProductionMaterialDto.PickRequest body) {
+        checkPermission("COMPLETE");   // 20/D9: quyền đi theo phiếu SX, không đòi được gán Kho Tổng
+        return materialService.pick(id, body);
+    }
+
+    /** Trả NL dư về đúng lô đã lấy. */
+    @PostMapping("/{id}/materials/return")
+    public com.bakery.api.production.dto.ProductionMaterialDto.Materials returnMaterials(
+            @PathVariable UUID id,
+            @RequestBody com.bakery.api.production.dto.ProductionMaterialDto.ReturnRequest body) {
+        checkPermission("COMPLETE");
+        return materialService.giveBack(id, body);
+    }
+
+    /** Ghi hao hụt NL dư (lý do ADJUSTMENT_REASON, OTHER bắt buộc ghi chú). */
+    @PostMapping("/{id}/materials/write-off")
+    public com.bakery.api.production.dto.ProductionMaterialDto.Materials writeOffMaterials(
+            @PathVariable UUID id,
+            @RequestBody com.bakery.api.production.dto.ProductionMaterialDto.WriteOffRequest body) {
+        checkPermission("COMPLETE");
+        return materialService.writeOff(id, body);
+    }
+
+    /** Bếp trưởng đóng phiếu SEMI: mọi dòng xong và bảng tạm về 0. */
+    @PostMapping("/{id}/close")
+    public ProductionRequestResponse close(@PathVariable UUID id) {
+        checkPermission("APPROVE");
+        return service.closeRequest(id);
+    }
+
     /**
      * Tạo phiếu xuất kho MAIN → KITCHEN cho nguyên liệu cần để sản xuất BTP.
      *
@@ -144,6 +188,8 @@ public class ProductionRequestController
      *
      * @param id ID Phiếu SX BTP (productionType = SEMI)
      */
+    /** @deprecated 20/D3: NL đi thẳng vào bảng tạm của phiếu qua {@code /materials/pick}, không qua phiếu điều chuyển. */
+    @Deprecated
     @PostMapping("/{id}/transfer-ingredients")
     public java.util.Map<String, Object> transferIngredients(@PathVariable UUID id) {
         checkPermission("CREATE");

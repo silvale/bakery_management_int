@@ -698,6 +698,10 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         } else {
             e.setDefaultWarehouse(null);
         }
+        // 20/D10: BTP bắt buộc có kho mặc định ở khu sản xuất (lô BTP làm xong vào kho này). Chỉ chặn khi tạo/sửa, không đụng dữ liệu cũ.
+        if (isSemi(e) && !com.bakery.api.inventory.service.ProductionZone.contains(e.getDefaultWarehouse())) {
+            throw new IllegalArgumentException("Bán thành phẩm phải có kho mặc định (Kho Bếp hoặc Phòng Lạnh)");
+        }
         // unitCost: chỉ áp dụng cho INGREDIENT (nhập tay).
         // SEMI_PRODUCT / PRODUCT được tính lại trong afterApprove → không ghi đè ở đây.
         if ("INGREDIENT".equalsIgnoreCase(req.itemType())) {

@@ -50,6 +50,15 @@ public class ProductionRequest extends BaseEntity {
     @Column(name = "note", length = 500)
     private String note;
 
+    /** 20/D7: bếp trưởng xác nhận đóng phiếu SEMI (mọi dòng xong, bảng tạm về 0). */
+    @NotAudited
+    @Column(name = "closed_at")
+    private java.time.Instant closedAt;
+
+    @NotAudited
+    @Column(name = "closed_by", length = 100)
+    private String closedBy;
+
     @NotAudited
     @OneToMany(mappedBy = "productionRequest", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("sortOrder ASC")

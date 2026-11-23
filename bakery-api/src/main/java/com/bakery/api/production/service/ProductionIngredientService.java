@@ -329,6 +329,23 @@ public class ProductionIngredientService {
         return saved;
     }
 
+    /** NL gốc một dòng phiếu SX BTP cần (20): đã quy đổi về đơn vị kho. */
+    public record Need(Item item, BigDecimal qty) {}
+
+    /**
+     * 20: bung công thức của một dòng phiếu SEMI cho {@code qty} BTP, nhiều tầng, chỉ trả NL gốc (INGREDIENT).
+     * Dùng công thức ghi trên dòng; không có thì công thức đang dùng của BTP. Chưa có công thức → rỗng.
+     */
+    public Map<UUID, Need> rawNeeds(ProductionRequestLine line, BigDecimal qty) {
+        Map<UUID, IngredientNeed> acc = new LinkedHashMap<>();
+        Recipe recipe = line.getRecipe() != null ? line.getRecipe()
+                : recipeRepository.findBySemiProductIdAndActiveTrue(line.getProduct().getId()).orElse(null);
+        if (recipe != null && qty != null && qty.signum() > 0) expandRecipe(recipe, qty, acc);
+        Map<UUID, Need> out = new LinkedHashMap<>();
+        acc.forEach((id, n) -> out.put(id, new Need(n.item, n.totalQty)));
+        return out;
+    }
+
     // ── Private helpers ──────────────────────────────────────────
 
     /**
@@ -564,7 +581,10 @@ public class ProductionIngredientService {
      *
      * @param semiPrId ID Phiếu SX BTP (productionType = SEMI)
      * @return InventoryRequest đã tạo (PENDING_APPROVAL)
+     * @deprecated 20/D3: NL đi thẳng từ kho vào bảng tạm "Đang sản xuất" của phiếu
+     *             ({@code POST /production-requests/{id}/materials/pick}), không qua phiếu điều chuyển.
      */
+    @Deprecated
     @Transactional
     public InventoryRequest generateSemiTransferRequest(UUID semiPrId) {
         ProductionRequest pr = prRepository.findById(semiPrId)
