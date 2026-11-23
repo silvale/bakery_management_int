@@ -46,7 +46,8 @@ public interface InventoryRequestRepository extends BaseRepository<InventoryRequ
             SELECT DISTINCT r FROM InventoryRequest r
             LEFT JOIN FETCH r.lines l
             LEFT JOIN FETCH l.item
-            LEFT JOIN FETCH l.packaging
+            LEFT JOIN FETCH l.packaging pk
+            LEFT JOIN FETCH pk.unit
             WHERE r.id IN :ids
             """)
     List<InventoryRequest> findWithLinesByIdIn(@Param("ids") Collection<UUID> ids);

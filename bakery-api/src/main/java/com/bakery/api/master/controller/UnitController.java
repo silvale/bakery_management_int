@@ -103,8 +103,14 @@ public class UnitController {
     @RequirePermission(screen = "UNITS", action = "DELETE")
     public ResponseEntity<Void> deleteUnit(@PathVariable String code) {
         String upper = code.toUpperCase();
-        if (!unitRepository.existsById(upper)) {
+        Unit unit = unitRepository.findById(upper).orElse(null);
+        if (unit == null) {
             return ResponseEntity.notFound().build();
+        }
+        // 16/BE-4: đang dùng (item.unit hoặc đóng gói; cả hai có FK tới unit) → 422, không để lộ 500
+        long items = unitRepository.countItemsUsing(upper);
+        if (items > 0) {
+            throw new IllegalStateException("Đơn vị " + unit.getName() + " đang dùng cho " + items + " mặt hàng, không xóa được");
         }
         unitRepository.deleteById(upper);
         return ResponseEntity.noContent().build();

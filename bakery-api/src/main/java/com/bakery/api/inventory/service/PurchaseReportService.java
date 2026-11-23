@@ -134,7 +134,7 @@ public class PurchaseReportService {
     private Map<UUID, Packaging> defaultPackaging(Set<UUID> itemIds) {
         Map<UUID, Packaging> out = new HashMap<>();
         if (itemIds.isEmpty()) return out;
-        jdbc.query("SELECT item_id, name, qty_per_pack FROM item_packaging WHERE is_default AND item_id IN (:ids)",
+        jdbc.query("SELECT p.item_id, u.name, p.qty_per_pack FROM item_packaging p JOIN unit u ON u.code = p.code WHERE p.is_default AND p.item_id IN (:ids)",
                 new MapSqlParameterSource("ids", itemIds),
                 (RowCallbackAdapter) rs -> out.put(rs.getObject("item_id", UUID.class),
                         new Packaging(rs.getString("name"), rs.getBigDecimal("qty_per_pack"))));

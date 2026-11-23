@@ -93,5 +93,7 @@ public class ItemResponse extends BaseResponse {
         private String name;
         private BigDecimal qtyPerPack;
         private boolean isDefault;
+        /** 16/BE-2: đã có phiếu hoặc lô trỏ tới → không xóa, không đổi đơn vị/quy đổi được. */
+        private boolean inUse;
     }
 }

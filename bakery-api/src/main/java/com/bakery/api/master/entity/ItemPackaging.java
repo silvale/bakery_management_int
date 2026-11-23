@@ -27,8 +27,8 @@ import org.hibernate.annotations.UpdateTimestamp;
  *
  * <p>Ví dụ: Bột Tarta (unit=KG)
  * <ul>
- *   <li>BAO_10 / Bao 10kg / qtyPerPack=10</li>
- *   <li>BAO_20 / Bao 20kg / qtyPerPack=20 / isDefault=true</li>
+ *   <li>BAO / Bao / qtyPerPack=20 / isDefault=true</li>
+ *   <li>THUNG / Thùng / qtyPerPack=100 — mỗi mã đơn vị chỉ một dòng trên 1 item (unique item_id + code)</li>
  * </ul>
  */
 @Getter
@@ -45,17 +45,26 @@ public class ItemPackaging {
     @JoinColumn(name = "item_id", nullable = false)
     private Item item;
 
-    /** Mã đóng gói — unique per item. Ví dụ: BAO_10, BAO_20, THUNG, CHAI */
+    /** Mã đơn vị đóng gói (FK unit.code) — unique per item. Ví dụ: BAO, THUNG, CHAI */
     @Column(name = "code", nullable = false, length = 50)
     private String code;
 
-    /** Tên hiển thị. Ví dụ: Bao 10kg, Thùng 12 chai */
-    @Column(name = "name", nullable = false, length = 100)
-    private String name;
+    /**
+     * 16/D1: đơn vị là nguồn tên duy nhất — cùng cột {@code code}, chỉ đọc (FK sang unit.code).
+     * Đặt tay khi tạo mới (không persist), nạp sẵn (EAGER) khi đọc.
+     */
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "code", referencedColumnName = "code", insertable = false, updatable = false)
+    private Unit unit;
+
+    /** Tên hiển thị = {@code unit.name} (Bao, Hộp 1000...). */
+    public String getName() {
+        return unit != null ? unit.getName() : null;
+    }
 
     /**
      * Số lượng tính theo {@code item.unit} (đơn vị canonical) trong 1 pack.
-     * Ví dụ: BAO_10 của Bột Tarta (unit=KG) → qtyPerPack = 10.
+     * Ví dụ: BAO của Bột Tarta (unit=KG) → qtyPerPack = 20.
      */
     @Column(name = "qty_per_pack", nullable = false, precision = 15, scale = 4)
     private BigDecimal qtyPerPack;

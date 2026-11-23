@@ -93,4 +93,21 @@ class JsonContractTest {
         s.setUnitCost(BigDecimal.ZERO);
         assertThat(json(s).get("priceHidden").asBoolean()).isTrue();
     }
+
+    /** 16/BE-2: cờ inUse của quy cách ra đúng tên; name vẫn có (lấy từ unit). Request: id + isDefault, name bỏ qua. */
+    @Test
+    void packagingExposesInUseAndName() throws Exception {
+        ItemResponse.PackagingResponse p = new ItemResponse.PackagingResponse();
+        p.setCode("BAO"); p.setName("Bao"); p.setQtyPerPack(BigDecimal.TEN); p.setInUse(true);
+        JsonNode n = json(p);
+        assertThat(n.get("inUse").asBoolean()).isTrue();
+        assertThat(n.get("name").asText()).isEqualTo("Bao");
+        assertThat(n.has("code")).isTrue();
+
+        var req = mapper.readValue("{\"id\":\"" + UUID.randomUUID() + "\",\"code\":\"BAO\",\"name\":\"gõ tay\",\"qtyPerPack\":25,\"isDefault\":true,\"inUse\":true}",
+                com.bakery.api.master.service.ItemService.PackagingRequest.class);
+        assertThat(req.isDefault()).isTrue();
+        assertThat(req.id()).isNotNull();
+        assertThat(req.qtyPerPack()).isEqualByComparingTo("25");
+    }
 }

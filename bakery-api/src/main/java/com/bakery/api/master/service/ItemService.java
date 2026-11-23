@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -102,6 +103,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     private final WarehouseRepository warehouseRepository;
     private final ProductExpiryConfigRepository expiryConfigRepository;
     private final ItemPackagingRepository packagingRepository;
+    private final com.bakery.api.master.repository.UnitRepository unitRepository;
     private final ProductMappingRepository productMappingRepository;
     private final BakeryActorResolver actorResolver;
     private final CommandRequestRepository commandRequestRepository;
@@ -208,15 +210,10 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         // Nạp item TRƯỚC quy cách: ItemPackaging.item là proxy lazy, nạp trước sẽ khiến findAllById trả proxy (instanceof Ingredient sai)
         List<Item> loaded = repository.findAllById(matched.keySet());
         Map<UUID, List<ItemResponse.PackagingResponse>> packs = new java.util.HashMap<>();
-        packagingRepository.findByItemIdInOrderByQtyPerPackAsc(matched.keySet()).forEach(p -> {
-            ItemResponse.PackagingResponse pr = new ItemResponse.PackagingResponse();
-            pr.setId(p.getId());
-            pr.setCode(p.getCode());
-            pr.setName(p.getName());
-            pr.setQtyPerPack(p.getQtyPerPack());
-            pr.setDefault(p.isDefault());
-            packs.computeIfAbsent(p.getItem().getId(), k -> new java.util.ArrayList<>()).add(pr);
-        });
+        List<ItemPackaging> rows = packagingRepository.findByItemIdInOrderByQtyPerPackAsc(matched.keySet());
+        Set<UUID> inUse = packagingInUse(rows.stream().map(ItemPackaging::getId).toList());
+        rows.forEach(p -> packs.computeIfAbsent(p.getItem().getId(), k -> new java.util.ArrayList<>())
+                .add(toPackagingResponse(p, inUse)));
         java.text.Collator vi = java.text.Collator.getInstance(java.util.Locale.forLanguageTag("vi"));
         return loaded.stream().map(i0 -> {
             Item i = org.hibernate.Hibernate.unproxy(i0, Item.class) instanceof Item real ? real : i0;
@@ -295,7 +292,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             case "defaultPackaging.name": {
                 Subquery<String> sq = query.subquery(String.class);
                 Root<ItemPackaging> pk = sq.from(ItemPackaging.class);
-                sq.select(cb.least(pk.<String>get("name")))
+                sq.select(cb.least(pk.get("unit").<String>get("name")))
                         .where(cb.equal(pk.get("item").get("id"), root.get("id")),
                                 cb.isTrue(pk.get("isDefault")));
                 return sq;
@@ -437,18 +434,10 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                         }
                     });
             // Packagings — luôn query riêng (không batch vì thường chỉ vài dòng/item)
-            List<ItemResponse.PackagingResponse> packagings = packagingRepository
-                    .findByItemIdOrderByQtyPerPackAsc(ing.getId())
-                    .stream()
-                    .map(p -> {
-                        ItemResponse.PackagingResponse pr = new ItemResponse.PackagingResponse();
-                        pr.setId(p.getId());
-                        pr.setCode(p.getCode());
-                        pr.setName(p.getName());
-                        pr.setQtyPerPack(p.getQtyPerPack());
-                        pr.setDefault(p.isDefault());
-                        return pr;
-                    })
+            List<ItemPackaging> packRows = packagingRepository.findByItemIdOrderByQtyPerPackAsc(ing.getId());
+            Set<UUID> inUse = packagingInUse(packRows.stream().map(ItemPackaging::getId).toList());
+            List<ItemResponse.PackagingResponse> packagings = packRows.stream()
+                    .map(p -> toPackagingResponse(p, inUse))
                     .toList();
             r.setPackagings(packagings);
 
@@ -778,11 +767,15 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     // ── Packaging management ──────────────────────────────────────────────────
 
     /**
-     * Upsert toàn bộ packaging list cho 1 item.
-     * Xóa hết cũ rồi insert mới — đơn giản và an toàn vì packaging không có FK từ bảng khác.
+     * Lưu danh sách quy cách của 1 item, cập nhật theo {@code id} (16/BE-3):
+     * có id → update; không id → insert; dòng cũ không còn trong request → delete.
+     * Quy cách đã dùng trong phiếu/lô ({@code inventory_request_line}, {@code stock_lot} trỏ FK tới) không xóa,
+     * không đổi {@code code}/{@code qtyPerPack} được (D5); đổi {@code default} thì được.
      *
-     * <p>Rule: đúng 1 entry có {@code isDefault=true}. Nếu không có entry nào là default,
-     * tự động set entry đầu tiên (sort by qtyPerPack asc) làm default.
+     * <p>Request không có id mà trùng {@code code} với một dòng cũ chưa được id nào nhận → coi là chính dòng đó
+     * (tránh vỡ unique item_id+code với client chưa gửi id).
+     *
+     * <p>Rule: đúng 1 entry {@code isDefault=true} — entry đầu tiên được đánh dấu thắng; không có thì entry đầu tiên.
      */
     @Transactional
     public List<ItemResponse.PackagingResponse> upsertPackagings(
@@ -790,30 +783,108 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         Item item = repository.findById(itemId)
                 .orElseThrow(() -> new ResourceNotFoundException("Item", itemId));
 
-        packagingRepository.deleteByItemId(itemId);
-
-        boolean hasDefault = requests.stream().anyMatch(PackagingRequest::isDefault);
-        List<ItemPackaging> saved = new java.util.ArrayList<>();
-        for (int i = 0; i < requests.size(); i++) {
-            PackagingRequest req = requests.get(i);
-            ItemPackaging p = new ItemPackaging();
-            p.setItem(item);
-            p.setCode(req.code().toUpperCase());
-            p.setName(req.name());
-            p.setQtyPerPack(req.qtyPerPack());
-            p.setDefault(!hasDefault && i == 0 || req.isDefault());
-            saved.add(packagingRepository.save(p));
+        // 1. Kiểm request: mã đơn vị có trong danh mục, số lượng > 0, không trùng mã
+        List<String> codes = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (PackagingRequest req : requests) {
+            String code = req.code() == null ? "" : req.code().trim().toUpperCase();
+            if (code.isEmpty()) throw new IllegalArgumentException("Đơn vị đóng gói là bắt buộc");
+            if (req.qtyPerPack() == null || req.qtyPerPack().signum() <= 0) {
+                throw new IllegalArgumentException("Số lượng quy đổi của " + code + " phải lớn hơn 0");
+            }
+            if (!seen.add(code)) throw new IllegalArgumentException("Đơn vị " + code + " bị trùng trong danh sách quy cách");
+            codes.add(code);
+        }
+        Map<String, com.bakery.api.master.entity.Unit> units = new java.util.HashMap<>();
+        unitRepository.findAllById(codes).forEach(u -> units.put(u.getCode(), u));
+        for (String code : codes) {
+            if (!units.containsKey(code)) throw new IllegalArgumentException("Đơn vị " + code + " không có trong danh mục");
         }
 
-        return saved.stream().map(p -> {
-            ItemResponse.PackagingResponse r = new ItemResponse.PackagingResponse();
-            r.setId(p.getId());
-            r.setCode(p.getCode());
-            r.setName(p.getName());
-            r.setQtyPerPack(p.getQtyPerPack());
-            r.setDefault(p.isDefault());
-            return r;
-        }).toList();
+        // 2. Ghép request với dòng cũ
+        List<ItemPackaging> existing = packagingRepository.findByItemIdOrderByQtyPerPackAsc(itemId);
+        Map<UUID, ItemPackaging> byId = new java.util.HashMap<>();
+        Map<String, ItemPackaging> byCode = new java.util.HashMap<>();
+        existing.forEach(p -> { byId.put(p.getId(), p); byCode.put(p.getCode(), p); });
+        Set<UUID> inUse = packagingInUse(new ArrayList<>(byId.keySet()));
+
+        ItemPackaging[] target = new ItemPackaging[requests.size()];   // dòng cũ mà request i cập nhật; null = insert
+        Set<UUID> kept = new java.util.HashSet<>();
+        for (int i = 0; i < requests.size(); i++) {
+            UUID id = requests.get(i).id();
+            if (id == null) continue;
+            ItemPackaging p = byId.get(id);
+            if (p == null) throw new IllegalArgumentException("Quy cách " + id + " không thuộc mặt hàng này");
+            if (!kept.add(id)) throw new IllegalArgumentException("Quy cách " + id + " xuất hiện hai lần");
+            target[i] = p;
+        }
+        for (int i = 0; i < requests.size(); i++) {
+            if (requests.get(i).id() != null) continue;
+            ItemPackaging p = byCode.get(codes.get(i));
+            if (p != null && kept.add(p.getId())) target[i] = p;
+        }
+
+        // 3. D5: dòng đã dùng không xóa, không đổi code / qtyPerPack
+        for (ItemPackaging p : existing) {
+            if (inUse.contains(p.getId()) && !kept.contains(p.getId())) throw packagingLocked(p);
+        }
+        for (int i = 0; i < requests.size(); i++) {
+            ItemPackaging p = target[i];
+            if (p != null && inUse.contains(p.getId())
+                    && (!p.getCode().equals(codes.get(i)) || p.getQtyPerPack().compareTo(requests.get(i).qtyPerPack()) != 0)) {
+                throw packagingLocked(p);
+            }
+        }
+
+        // 4. Xóa trước (để không vướng unique item_id+code), rồi sửa, rồi thêm
+        List<ItemPackaging> removed = existing.stream().filter(p -> !kept.contains(p.getId())).toList();
+        if (!removed.isEmpty()) {
+            packagingRepository.deleteAll(removed);
+            packagingRepository.flush();
+        }
+        boolean hasDefault = requests.stream().anyMatch(PackagingRequest::isDefault);
+        boolean defaultTaken = false;
+        List<ItemPackaging> saved = new ArrayList<>();
+        for (int i = 0; i < requests.size(); i++) {
+            PackagingRequest req = requests.get(i);
+            ItemPackaging p = target[i] != null ? target[i] : new ItemPackaging();
+            if (target[i] == null) p.setItem(item);
+            p.setCode(codes.get(i));
+            p.setUnit(units.get(codes.get(i)));
+            p.setQtyPerPack(req.qtyPerPack());
+            boolean wantDefault = hasDefault ? req.isDefault() : i == 0;
+            p.setDefault(wantDefault && !defaultTaken);
+            defaultTaken |= p.isDefault();
+            saved.add(packagingRepository.save(p));
+        }
+        packagingRepository.flush();
+
+        return saved.stream().map(p -> toPackagingResponse(p, inUse)).toList();
+    }
+
+    private static IllegalStateException packagingLocked(ItemPackaging p) {
+        return new IllegalStateException("Quy cách " + p.getName()
+                + " đã dùng trong phiếu/lô, không xóa hoặc sửa được. Hãy thêm quy cách mới");
+    }
+
+    private static ItemResponse.PackagingResponse toPackagingResponse(ItemPackaging p, Set<UUID> inUse) {
+        ItemResponse.PackagingResponse r = new ItemResponse.PackagingResponse();
+        r.setId(p.getId());
+        r.setCode(p.getCode());
+        r.setName(p.getName());   // 16/D1: unit.name
+        r.setQtyPerPack(p.getQtyPerPack());
+        r.setDefault(p.isDefault());
+        r.setInUse(inUse.contains(p.getId()));
+        return r;
+    }
+
+    /** Id quy cách đang có phiếu hoặc lô trỏ tới (2 query theo index packaging_id). */
+    private Set<UUID> packagingInUse(java.util.Collection<UUID> ids) {
+        Set<UUID> out = new java.util.HashSet<>();
+        if (ids.isEmpty()) return out;
+        out.addAll(packagingRepository.findIdsUsedInRequestLines(ids));
+        out.addAll(packagingRepository.findIdsUsedInStockLots(ids));
+        return out;
     }
 
     /**
@@ -859,8 +930,9 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
     /** Request DTO cho upsert packagings — dùng nội bộ, không extend framework record. */
     public record PackagingRequest(
+            java.util.UUID id,
             String code,
-            String name,
+            String name,   // bỏ qua: tên lấy theo unit.name (16/D1)
             BigDecimal qtyPerPack,
             boolean isDefault) {}
 
