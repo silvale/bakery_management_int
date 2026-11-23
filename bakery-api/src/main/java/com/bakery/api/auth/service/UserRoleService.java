@@ -36,20 +36,37 @@ public class UserRoleService extends AbstractBakeryAdminService<UserRole, UserRo
 
     @Override
     protected void applyUpdate(UserRole e, UserRoleRequest req) {
-        requireNotSystem(e);
-        e.setCode(req.code());
+        if (isSuperAdmin(e)) throw new IllegalStateException("Không sửa vai trò Admin");
+        // 18/D2: vai trò mặc định đổi được tên và mô tả, không đổi mã (mã gắn với kho mặc định, seed, migration)
+        if (e.isSystem()) {
+            if (req.code() != null && !req.code().equals(e.getCode())) {
+                throw new IllegalStateException("Không đổi mã vai trò mặc định");
+            }
+        } else {
+            e.setCode(req.code());
+        }
         e.setName(req.name());
         e.setDescription(req.description());
     }
 
     @Override
     protected void beforeDelete(UserRole e) {
-        requireNotSystem(e);
+        requireDeletable(e);
     }
 
-    /** 11/D1: giai đoạn 1 không sửa/xóa vai trò hệ thống → 422. */
-    public static void requireNotSystem(UserRole e) {
-        if (e.isSystem()) throw new IllegalStateException("Vai trò hệ thống không sửa được");
+    /** 18/D3: vai trò mặc định (hệ thống, gồm Admin) không xóa được → 422. */
+    public static void requireDeletable(UserRole e) {
+        if (e.isSystem()) throw new IllegalStateException("Vai trò mặc định không xóa được");
+    }
+
+    /** 18/D4: Admin (SUPER_ADMIN) khóa hoàn toàn — không sửa quyền, tên, mã; để Admin không tự khóa mình. */
+    public static boolean isSuperAdmin(UserRole e) {
+        return AccessScope.SUPER_ADMIN.equalsIgnoreCase(e.getCode());
+    }
+
+    /** 18/D1+D4: đổi được bộ quyền của mọi vai trò trừ Admin. */
+    public static void requireCanEditPermissions(UserRole e) {
+        if (isSuperAdmin(e)) throw new IllegalStateException("Không sửa quyền của vai trò Admin");
     }
 
     @Override

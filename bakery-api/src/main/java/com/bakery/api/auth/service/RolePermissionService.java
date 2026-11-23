@@ -54,7 +54,7 @@ public class RolePermissionService {
         // Validate role exists
         UserRole role = userRoleRepository.findById(roleId)
                 .orElseThrow(() -> new ResourceNotFoundException("UserRole", roleId));
-        UserRoleService.requireNotSystem(role);   // 11/D1: vai trò hệ thống không đổi bộ quyền ở giai đoạn 1
+        UserRoleService.requireCanEditPermissions(role);   // 18/D1+D4: chỉ SUPER_ADMIN bị khóa quyền
 
         // Load valid screen+action combos để validate
         var validActions = screenRegistryRepository.findAllByOrderBySortOrderAsc()

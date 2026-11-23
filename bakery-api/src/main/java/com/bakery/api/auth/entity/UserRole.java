@@ -22,7 +22,7 @@ public class UserRole extends BaseEntity {
     @Column(name = "description", length = 500)
     private String description;
 
-    /** 11/D1: 7 vai trò hệ thống không sửa/xóa được ở giai đoạn 1. */
+    /** Vai trò mặc định (7 vai trò seed): không xóa, không đổi mã; Admin còn khóa tên và quyền (18/D1–D4). */
     @Column(name = "is_system", nullable = false)
     private boolean system = false;
 

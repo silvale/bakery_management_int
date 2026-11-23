@@ -143,13 +143,53 @@ class AccessScopeTest {
         assertThat(s.canSeeCost()).isTrue();
     }
 
-    @Test
-    void systemRolesAreLocked() {
+    // 18: bốn nhánh khóa vai trò — sửa quyền, đổi mã, SUPER_ADMIN, xóa
+    private static UserRole role(String code, boolean system) {
         UserRole r = new UserRole();
-        r.setSystem(true);
-        assertThatThrownBy(() -> UserRoleService.requireNotSystem(r)).isInstanceOf(IllegalStateException.class)
-                .hasMessage("Vai trò hệ thống không sửa được");
-        r.setSystem(false);
-        UserRoleService.requireNotSystem(r);
+        r.setCode(code);
+        r.setName("Tên cũ");
+        r.setSystem(system);
+        return r;
+    }
+
+    private final UserRoleService roles = new UserRoleService(null, null, null);
+
+    @Test
+    void defaultRolesCanChangePermissionsButAdminCannot() {
+        UserRoleService.requireCanEditPermissions(role("SHOP_STAFF", true));
+        UserRoleService.requireCanEditPermissions(role("TU_TAO", false));
+        assertThatThrownBy(() -> UserRoleService.requireCanEditPermissions(role("SUPER_ADMIN", true)))
+                .isInstanceOf(IllegalStateException.class).hasMessage("Không sửa quyền của vai trò Admin");
+        assertThat(com.bakery.api.auth.dto.UserRoleResponse.from(role("SHOP_STAFF", true)).isCanEditPermissions()).isTrue();
+        assertThat(com.bakery.api.auth.dto.UserRoleResponse.from(role("SUPER_ADMIN", true)).isCanEditPermissions()).isFalse();
+    }
+
+    @Test
+    void defaultRoleRenamesButKeepsCode() {
+        UserRole r = role("SHOP_STAFF", true);
+        roles.applyUpdate(r, new com.bakery.api.auth.dto.UserRoleRequest("SHOP_STAFF", "Nhân viên bán hàng", "mô tả mới"));
+        assertThat(r.getName()).isEqualTo("Nhân viên bán hàng");
+        assertThat(r.getDescription()).isEqualTo("mô tả mới");
+        assertThat(r.getCode()).isEqualTo("SHOP_STAFF");
+        assertThatThrownBy(() -> roles.applyUpdate(r, new com.bakery.api.auth.dto.UserRoleRequest("SHOP_X", "x", null)))
+                .isInstanceOf(IllegalStateException.class).hasMessage("Không đổi mã vai trò mặc định");
+        assertThat(r.getCode()).isEqualTo("SHOP_STAFF");
+        UserRole custom = role("TU_TAO", false);
+        roles.applyUpdate(custom, new com.bakery.api.auth.dto.UserRoleRequest("MA_MOI", "x", null));   // vai trò tự tạo: như cũ
+        assertThat(custom.getCode()).isEqualTo("MA_MOI");
+    }
+
+    @Test
+    void adminRoleIsFullyLockedAndDefaultRolesCannotBeDeleted() {
+        UserRole admin = role("SUPER_ADMIN", true);
+        assertThatThrownBy(() -> roles.applyUpdate(admin, new com.bakery.api.auth.dto.UserRoleRequest("SUPER_ADMIN", "Tên mới", null)))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> roles.applyUpdate(admin, new com.bakery.api.auth.dto.UserRoleRequest("KHAC", "Admin", null)))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(admin.getName()).isEqualTo("Tên cũ");
+        assertThatThrownBy(() -> roles.beforeDelete(admin)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> roles.beforeDelete(role("SHOP_STAFF", true))).isInstanceOf(IllegalStateException.class)
+                .hasMessage("Vai trò mặc định không xóa được");
+        roles.beforeDelete(role("TU_TAO", false));
     }
 }

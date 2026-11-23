@@ -14,11 +14,14 @@ public class UserRoleResponse extends BaseResponse {
     private String code;
     private String name;
     private String description;
-    /** 11/D1: vai trò hệ thống — giai đoạn 1 không sửa/xóa được. */
+    /** Vai trò mặc định (7 vai trò seed): không xóa, không đổi mã (18/D2, D3). */
     @com.fasterxml.jackson.annotation.JsonProperty("isSystem")
     private boolean system;
     private String defaultWarehouseCodes;
     private boolean priceBySupplier;
+    /** 18: false chỉ với SUPER_ADMIN (D4) — FE không tự đoán theo code. */
+    @com.fasterxml.jackson.annotation.JsonProperty("canEditPermissions")
+    private boolean canEditPermissions;
 
     public static UserRoleResponse from(UserRole r) {
         UserRoleResponse res = new UserRoleResponse();
@@ -29,6 +32,7 @@ public class UserRoleResponse extends BaseResponse {
         res.system = r.isSystem();
         res.defaultWarehouseCodes = r.getDefaultWarehouseCodes();
         res.priceBySupplier = r.isPriceBySupplier();
+        res.canEditPermissions = !com.bakery.api.auth.service.UserRoleService.isSuperAdmin(r);
         return res;
     }
 }

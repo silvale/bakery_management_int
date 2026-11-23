@@ -56,6 +56,15 @@ class JsonContractTest {
     }
 
     @Test
+    void roleExposesCanEditPermissions() {   // 18: FE không đoán theo code
+        UserRoleResponse r = new UserRoleResponse();
+        r.setCanEditPermissions(true);
+        JsonNode n = json(r);
+        assertThat(n.get("canEditPermissions").asBoolean()).isTrue();
+        assertThat(n.has("editPermissions")).isFalse();
+    }
+
+    @Test
     void authResponsesUseIsAdmin() {
         AuthProfile p = new AuthProfile(UUID.randomUUID(), "u", "U", new ReferenceValue("MAIN_STAFF", "NV"), true,
                 List.of(), List.of(), Map.of());
