@@ -164,6 +164,9 @@ public class AccessScope {
     /** Giá vốn, chi phí, giá trị điều chỉnh, doanh thu... — chỉ Admin (D5). */
     public boolean canSeeCost() { return isAdmin(); }
 
+    /** Xem công thức và danh mục bán thành phẩm (17/D1): quyền RECIPES:VIEW, Admin luôn có. Theo quyền, không theo tên vai trò. */
+    public boolean canViewRecipes() { return can("RECIPES", "VIEW"); }
+
     // ── nội bộ ───────────────────────────────────────────────
 
     private Optional<UserAccount> load() {

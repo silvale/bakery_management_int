@@ -164,6 +164,11 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             spec = spec.and((root, query, cb) -> cb.equal(root.type(), typeClass));
         }
 
+        // 17/D1: không có RECIPES:VIEW thì không thấy BTP (AND thêm nên không lách được bằng param)
+        if (!scope.canViewRecipes()) {
+            spec = spec.and((root, query, cb) -> cb.notEqual(root.type(), SemiProduct.class));
+        }
+
         // sort=<field>,<asc|desc>: tự áp ORDER BY trong spec (null cuối, id làm tiêu chí phụ).
         // Không truyền sort → giữ nguyên hành vi cũ.
         if (pageable.getSort().isSorted()) {
@@ -194,6 +199,41 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         }
     }
 
+    /** 17/D1: /items/all — không có RECIPES:VIEW thì bỏ BTP. */
+    @Override
+    public List<ItemResponse> findAll() {
+        boolean semi = scope.canViewRecipes();
+        return repository.findAllByStatus(EntityStatus.ACTIVE).stream()
+                .filter(i -> semi || !isSemi(i))
+                .map(this::toResponse)
+                .toList();
+    }
+
+    /** 17/D1: /items/{id} của BTP → 403 khi không có RECIPES:VIEW. */
+    @Override
+    public Optional<ItemResponse> findById(UUID id) {
+        return repository.findById(id).map(i -> { requireVisible(i); return toResponse(i); });
+    }
+
+    /** Dùng cho history/diff: cùng quy tắc, không lộ BTP qua bản sửa đổi cũ. */
+    @Override
+    public ItemResponse mapToResponse(Object entity) {
+        if (entity instanceof Item i) requireVisible(i);
+        return super.mapToResponse(entity);
+    }
+
+    private static boolean isSemi(Item i) {
+        return org.hibernate.Hibernate.unproxy(i) instanceof SemiProduct;
+    }
+
+    private void requireVisible(Item i) {
+        if (isSemi(i) && !scope.canViewRecipes()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN,
+                    "Không có quyền xem bán thành phẩm [RECIPES:VIEW]");
+        }
+    }
+
     /**
      * 12/BE-1: mặt hàng thuộc NCC (mặc định hoặc có trong bảng giá), không kèm giá. NCC không tồn tại → 404.
      * Sắp theo tên (collation tiếng Việt).
@@ -208,7 +248,9 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         }
         if (matched.isEmpty()) return List.of();
         // Nạp item TRƯỚC quy cách: ItemPackaging.item là proxy lazy, nạp trước sẽ khiến findAllById trả proxy (instanceof Ingredient sai)
-        List<Item> loaded = repository.findAllById(matched.keySet());
+        boolean semiOk = scope.canViewRecipes();   // 17/D1
+        List<Item> loaded = repository.findAllById(matched.keySet()).stream()
+                .filter(i -> semiOk || !isSemi(i)).toList();
         Map<UUID, List<ItemResponse.PackagingResponse>> packs = new java.util.HashMap<>();
         List<ItemPackaging> rows = packagingRepository.findByItemIdInOrderByQtyPerPackAsc(matched.keySet());
         Set<UUID> inUse = packagingInUse(rows.stream().map(ItemPackaging::getId).toList());
@@ -393,6 +435,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         r.setUnit(item.getUnit());
         r.setSplittable(item.isSplittable());
         r.setGiftWithCake(item.isGiftWithCake());
+        boolean withRecipe = scope.canViewRecipes();   // 17/D1: không có quyền → recipe = null, không query
         // 11/D5: giá vốn chỉ Admin
         if (scope.canSeeCost()) {
             r.setUnitCost(item.getUnitCost());
@@ -443,7 +486,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
         } else if (item instanceof SemiProduct) {
             r.setItemType("SEMI_PRODUCT");
-            recipeRepository.findBySemiProductIdAndActiveTrue(item.getId())
+            if (withRecipe) recipeRepository.findBySemiProductIdAndActiveTrue(item.getId())
                     .or(() -> recipeRepository.findFirstBySemiProductIdOrderByVersionDesc(item.getId()))
                     .ifPresent(recipe -> r.setRecipe(recipeService.mapToResponse(recipe)));
 
@@ -451,7 +494,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             r.setItemType("PRODUCT");
             expiryConfigRepository.findByItemId(item.getId())
                     .ifPresent(cfg -> r.setShelfDays(cfg.getShelfDays()));
-            recipeRepository.findByProductIdAndActiveTrue(item.getId())
+            if (withRecipe) recipeRepository.findByProductIdAndActiveTrue(item.getId())
                     .or(() -> recipeRepository.findFirstByProductIdOrderByVersionDesc(item.getId()))
                     .ifPresent(recipe -> r.setRecipe(recipeService.mapToResponse(recipe)));
             // Giá bán — lấy từ ProductMapping đầu tiên tìm thấy

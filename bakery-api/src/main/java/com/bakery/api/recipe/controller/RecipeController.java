@@ -70,6 +70,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
     private final RecipeExportService recipeExportService;
     private final ProductRepository productRepository;
     private final SemiProductRepository semiProductRepository;
+    private final com.bakery.api.auth.service.AccessScope scope;
 
     @Override
     protected BakeryAdminService<RecipeRequest, RecipeResponse> getService() {
@@ -107,6 +108,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
     @com.bakery.framework.security.RequirePermission(screen = "COST_PRICE", action = "VIEW")
     @GetMapping("/cost/{itemId}")
     public RecipeCostService.CostResult calculateCost(@PathVariable UUID itemId) {
+        scope.require("RECIPES", "VIEW");   // 17/BE-3: breakdown có thành phần/định lượng → cần cả quyền xem công thức
         return recipeCostService.calculate(itemId);
     }
 
@@ -157,6 +159,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
     @com.bakery.framework.security.RequirePermission(screen = "COST_PRICE", action = "VIEW")   // file xuất có chi phí công thức
     @PostMapping("/export")
     public ResponseEntity<byte[]> exportRecipes(@RequestBody List<UUID> itemIds) {
+        scope.require("RECIPES", "VIEW");   // 17/BE-3: file xuất chứa công thức
         byte[] data = recipeExportService.exportRecipes(itemIds);
         String filename = "cong-thuc-" + System.currentTimeMillis() + ".xlsx";
         return ResponseEntity.ok()

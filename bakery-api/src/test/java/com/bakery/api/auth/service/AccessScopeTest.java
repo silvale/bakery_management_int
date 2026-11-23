@@ -111,11 +111,25 @@ class AccessScopeTest {
     }
 
     @Test
+    void recipeVisibilityFollowsPermissionNotRoleName() {   // 17/D1: vai trò không có RECIPES:VIEW → không thấy công thức/BTP
+        assertThat(scopeFor("KITCHEN_STAFF").canViewRecipes()).isFalse();
+        SecurityContextHolder.clearContext();
+        AccessScope withPerm = new AccessScope(new BakeryActorResolver(),
+                null, null,
+                stub(UserRoleRepository.class, (n, a) -> Optional.of(role)),
+                stub(RolePermissionRepository.class, (n, a) -> List.of(new RolePermission(role.getId(), "RECIPES", "VIEW"))));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new BakeryUserPrincipal(user.getId().toString(), "u", "ANY_ROLE_NAME"), null, List.of()));
+        assertThat(withPerm.canViewRecipes()).isTrue();
+    }
+
+    @Test
     void adminSeesEverything() {
         AccessScope s = scopeFor(AccessScope.SUPER_ADMIN);
         assertThat(s.isAdmin()).isTrue();
         assertThat(s.canSeePurchasePrice(null)).isTrue();
         assertThat(s.canSeeCost()).isTrue();
+        assertThat(s.canViewRecipes()).isTrue();     // 17: Admin luôn xem được công thức
         assertThat(s.can("ANY", "THING")).isTrue();
         assertThat(s.warehouseIds()).hasSize(2);
         s.assertWarehouse(main);
