@@ -34,6 +34,7 @@ import com.bakery.api.master.entity.Ingredient;
 import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.entity.ItemPackaging;
 import com.bakery.api.master.entity.Product;
+import com.bakery.api.master.entity.ProductMapping;
 import com.bakery.api.master.entity.ProductExpiryConfig;
 import com.bakery.api.master.entity.SemiProduct;
 import com.bakery.api.master.entity.Supplier;
@@ -149,6 +150,14 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         String q = rest.getFirst("q");
         rest.remove("q");
 
+        // 21: filter không phải cột → tách khỏi SpecificationBuilder (nó nuốt im lặng param lạ)
+        String shelfMin = rest.getFirst("shelfDaysMin");
+        String shelfMax = rest.getFirst("shelfDaysMax");
+        String hasRecipe = rest.getFirst("hasRecipe");
+        rest.remove("shelfDaysMin");
+        rest.remove("shelfDaysMax");
+        rest.remove("hasRecipe");
+
         Specification<Item> spec = SpecificationBuilder.from(rest);
 
         if (q != null && !q.isBlank()) {
@@ -169,6 +178,8 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             }
             spec = spec.and((root, query, cb) -> cb.equal(root.type(), typeClass));
         }
+
+        spec = spec.and(shelfDaysSpec(itemType, shelfMin, shelfMax)).and(hasRecipeSpec(itemType, hasRecipe));
 
         // 19/D2: chỉ trả các loại có quyền tab (AND thêm nên không lách được bằng param). BTP: 17 → 19 đổi sang ITEMS_SEMI
         for (String t : List.of("PRODUCT", "SEMI_PRODUCT", "INGREDIENT")) {
@@ -292,12 +303,12 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
     /** Field thuộc chính Item. */
     private static final java.util.Set<String> SORT_PLAIN = java.util.Set.of(
             "code", "name", "unit", "unitCost", "splittable",
-            "minStockQuantity", "restockQuantity", "approvalStatus", "status");
+            "minStockQuantity", "restockQuantity", "approvalStatus", "status", "createdAt");
 
     /** Field join/tính toán — xử lý riêng trong {@link #sortExpression}. */
     private static final java.util.Set<String> SORT_JOINED = java.util.Set.of(
             "itemGroup.name", "defaultSupplier.name",
-            "defaultPackaging.name", "defaultPackaging.qtyPerPack", "lastPrice");
+            "defaultPackaging.name", "defaultPackaging.qtyPerPack", "lastPrice", "sellingPrice");
 
     private void validateSort(Sort sort) {
         for (Sort.Order o : sort) {
@@ -356,6 +367,13 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                                 cb.isTrue(pk.get("isDefault")));
                 return sq;
             }
+            case "sellingPrice": { // 21: giá bán nhỏ nhất trong ProductMapping; loại khác → null
+                Subquery<BigDecimal> sq = query.subquery(BigDecimal.class);
+                Root<ProductMapping> pm = sq.from(ProductMapping.class);
+                sq.select(cb.min(pm.<BigDecimal>get("sellingPrice")))
+                        .where(cb.equal(pm.get("item").get("id"), root.get("id")));
+                return sq;
+            }
             case "lastPrice": { // giá của dòng có effectiveDate mới nhất
                 Subquery<BigDecimal> sq = query.subquery(BigDecimal.class);
                 Root<IngredientPrice> ip = sq.from(IngredientPrice.class);
@@ -371,6 +389,60 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             default:
                 return root.get(field);
         }
+    }
+
+    // ── 21: lọc hạn sử dụng / có công thức ────────────────────────────────────
+
+    private static Integer parseIntParam(String name, String v) {
+        try {
+            return Integer.valueOf(v.trim());
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("Tham số " + name + " phải là số nguyên: '" + v + "'");
+        }
+    }
+
+    /** shelfDaysMin/Max (gồm hai đầu, vắng một đầu được); chỉ áp khi itemType=PRODUCT; chưa có hạn → bị loại. */
+    private Specification<Item> shelfDaysSpec(String itemType, String min, String max) {
+        boolean hasMin = min != null && !min.isBlank();
+        boolean hasMax = max != null && !max.isBlank();
+        Integer lo = hasMin ? parseIntParam("shelfDaysMin", min) : null;
+        Integer hi = hasMax ? parseIntParam("shelfDaysMax", max) : null;
+        if ((lo == null && hi == null) || itemType == null || itemType.isBlank() || resolveClass(itemType) != Product.class) {
+            return (root, query, cb) -> null;
+        }
+        return (root, query, cb) -> {
+            Subquery<Integer> sq = query.subquery(Integer.class);
+            Root<ProductExpiryConfig> c = sq.from(ProductExpiryConfig.class);
+            List<jakarta.persistence.criteria.Predicate> w = new ArrayList<>();
+            w.add(cb.equal(c.get("item").get("id"), root.get("id")));
+            if (lo != null) w.add(cb.greaterThanOrEqualTo(c.<Integer>get("shelfDays"), lo));
+            if (hi != null) w.add(cb.lessThanOrEqualTo(c.<Integer>get("shelfDays"), hi));
+            sq.select(cb.literal(1)).where(w.toArray(new jakarta.persistence.criteria.Predicate[0]));
+            return cb.exists(sq);
+        };
+    }
+
+    /**
+     * hasRecipe=true|false: có công thức gắn (kể cả chưa kích hoạt) hay chưa. Chỉ áp khi itemType=PRODUCT|SEMI_PRODUCT
+     * và user có RECIPES:VIEW (không thì bỏ qua để không lộ sự tồn tại của công thức qua filter).
+     */
+    private Specification<Item> hasRecipeSpec(String itemType, String hasRecipe) {
+        if (hasRecipe == null || hasRecipe.isBlank()) return (root, query, cb) -> null;
+        String v = hasRecipe.trim().toLowerCase();
+        if (!v.equals("true") && !v.equals("false")) {
+            throw new IllegalArgumentException("Tham số hasRecipe phải là true hoặc false: '" + hasRecipe + "'");
+        }
+        if (itemType == null || itemType.isBlank() || resolveClass(itemType) == Ingredient.class || !scope.canViewRecipes()) {
+            return (root, query, cb) -> null;
+        }
+        boolean want = v.equals("true");
+        boolean semi = resolveClass(itemType) == SemiProduct.class;
+        return (root, query, cb) -> {
+            Subquery<Integer> sq = query.subquery(Integer.class);
+            Root<com.bakery.api.recipe.entity.Recipe> r = sq.from(com.bakery.api.recipe.entity.Recipe.class);
+            sq.select(cb.literal(1)).where(cb.equal(r.get(semi ? "semiProduct" : "product").get("id"), root.get("id")));
+            return want ? cb.exists(sq) : cb.not(cb.exists(sq));
+        };
     }
 
     // ── Override create/update — inject ThreadLocal ───────────────────────────
