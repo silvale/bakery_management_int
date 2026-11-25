@@ -13,6 +13,9 @@ public interface ProductionGroupRepository extends BaseRepository<ProductionGrou
 
     List<ProductionGroup> findByItemGroupIdOrderByCodeAsc(UUID itemGroupId);
 
+    /** 21/BE-3: số nhóm kế hoạch SX trỏ tới nhóm hàng (index idx_prod_group_item_group). */
+    long countByItemGroupId(UUID itemGroupId);
+
     List<ProductionGroup> findByActiveTrue();
 
     /** Tìm group chứa 1 item cụ thể (dùng khi generate plan để biết item thuộc group nào). */

@@ -17,6 +17,9 @@ import org.springframework.data.repository.query.Param;
 public interface ItemLookupRepository extends BaseRepository<Item> {
     Optional<Item> findByCode(String code);
 
+    /** 21/BE-3: số mặt hàng thuộc nhóm hàng theo trạng thái (index idx_item_item_group). */
+    long countByItemGroupIdAndStatus(UUID itemGroupId, com.bakery.framework.entity.EntityStatus status);
+
     /**
      * Lấy tất cả Product (item_type = 'PRODUCT') qua JPQL TYPE().
      * Trả List<Item> vì Hibernate proxy không thể cast tự động sang subtype.
