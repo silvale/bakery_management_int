@@ -192,4 +192,15 @@ class InventoryRequestServiceTest {
         assertThat(InventoryRequestService.warehouseBlocker(A, false, true)).isNull();
         assertThat(InventoryRequestService.warehouseBlocker(T, true, true)).isNull();
     }
+
+    @Test void purchaseWarehouseBlocker_only_main() {
+        var P = com.bakery.framework.entity.InventoryRequestType.PURCHASE;
+        var T = com.bakery.framework.entity.InventoryRequestType.TRANSFER;
+        var main = new com.bakery.api.master.entity.Warehouse(); main.setCode("MAIN");
+        var kitchen = new com.bakery.api.master.entity.Warehouse(); kitchen.setCode("KITCHEN");
+        assertThat(InventoryRequestService.purchaseWarehouseBlocker(P, kitchen)).isEqualTo("Chỉ Kho Chính được nhập hàng từ nhà cung cấp");
+        assertThat(InventoryRequestService.purchaseWarehouseBlocker(P, main)).isNull();
+        assertThat(InventoryRequestService.purchaseWarehouseBlocker(P, null)).isNull();   // thiếu kho: warehouseBlocker báo
+        assertThat(InventoryRequestService.purchaseWarehouseBlocker(T, kitchen)).isNull();  // điều chuyển không đổi
+    }
 }

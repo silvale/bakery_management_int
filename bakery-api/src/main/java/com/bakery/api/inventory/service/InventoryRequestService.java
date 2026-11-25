@@ -174,6 +174,8 @@ public class InventoryRequestService
                     .orElseThrow(() -> new ResourceNotFoundException("Supplier", req.supplierId())));
         }
 
+        // 21/BE-2: sửa phiếu nhập không được đổi kho nhận sang kho khác MAIN
+        requirePurchaseIntoMain(e.getRequestType(), e.getTargetWarehouse());
         // 11/D2: sau khi đổi kho, phiếu vẫn phải thuộc phạm vi của user
         scope.assertAnyWarehouse(e.getSourceWarehouse(), e.getTargetWarehouse());
 
@@ -300,6 +302,7 @@ public class InventoryRequestService
         authorizeCreate(e);
         requireDeliveryDate(e.getRequestType(), e.getExpectedDeliveryDate());
         requireWarehouses(e.getRequestType(), e.getSourceWarehouse() != null, e.getTargetWarehouse() != null);
+        requirePurchaseIntoMain(e.getRequestType(), e.getTargetWarehouse());
         String prefix = switch (e.getRequestType()) {
             case PURCHASE -> "PO";
             case TRANSFER -> "TR";
@@ -518,6 +521,19 @@ public class InventoryRequestService
 
     private static void requireWarehouses(InventoryRequestType type, boolean hasSource, boolean hasTarget) {
         String msg = warehouseBlocker(type, hasSource, hasTarget);
+        if (msg != null) throw new IllegalStateException(msg);
+    }
+
+    /** 21/BE-2: chỉ Kho Chính (mã MAIN) nhập hàng từ NCC; áp cho mọi user kể cả Admin. Null = hợp lệ (thiếu kho do {@link #warehouseBlocker} báo). */
+    static String purchaseWarehouseBlocker(InventoryRequestType type, Warehouse target) {
+        if (type == InventoryRequestType.PURCHASE && target != null && !"MAIN".equals(target.getCode())) {
+            return "Chỉ Kho Chính được nhập hàng từ nhà cung cấp";
+        }
+        return null;
+    }
+
+    private static void requirePurchaseIntoMain(InventoryRequestType type, Warehouse target) {
+        String msg = purchaseWarehouseBlocker(type, target);
         if (msg != null) throw new IllegalStateException(msg);
     }
 
