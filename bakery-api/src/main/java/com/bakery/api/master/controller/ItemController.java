@@ -117,4 +117,14 @@ public class ItemController extends BakeryAdminResource<ItemRequest, ItemRespons
         int count = service.bulkDelete(ids);
         return ResponseEntity.ok(Map.of("deleted", count, "ids", ids));
     }
+
+    /**
+     * 22/BE-3: đặt kho lưu trữ (kho mặc định) hàng loạt.
+     * PUT /api/v1/items/default-warehouse — body {"itemIds":[...], "warehouseId":"..."} → {"updated": n}
+     */
+    @com.bakery.framework.security.RequirePermission(screen = "ITEMS", action = "UPDATE")
+    @PutMapping("/default-warehouse")
+    public Map<String, Object> setDefaultWarehouse(@RequestBody com.bakery.api.master.dto.ItemDefaultWarehouseRequest body) {
+        return Map.of("updated", service.setDefaultWarehouse(body.itemIds(), body.warehouseId()));
+    }
 }

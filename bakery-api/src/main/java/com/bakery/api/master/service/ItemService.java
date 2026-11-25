@@ -37,6 +37,7 @@ import com.bakery.api.master.entity.Product;
 import com.bakery.api.master.entity.ProductMapping;
 import com.bakery.api.master.entity.ProductExpiryConfig;
 import com.bakery.api.master.entity.SemiProduct;
+import com.bakery.api.master.entity.Warehouse;
 import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.repository.ItemLookupRepository;
 import com.bakery.api.master.repository.ItemPackagingRepository;
@@ -244,6 +245,54 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
     private static boolean isSemi(Item i) {
         return org.hibernate.Hibernate.unproxy(i) instanceof SemiProduct;
+    }
+
+    /** INGREDIENT | SEMI_PRODUCT | PRODUCT của một item (kể cả proxy). */
+    static String kindOf(Item i) {
+        Object o = org.hibernate.Hibernate.unproxy(i);
+        return o instanceof Ingredient ? "INGREDIENT" : o instanceof SemiProduct ? "SEMI_PRODUCT" : "PRODUCT";
+    }
+
+    /**
+     * 22/BE-3: kho mặc định hợp loại mặt hàng? NL: bắt buộc, kho "Sản xuất lấy NL"; BTP: kho "Lưu BTP" (20/D10);
+     * thành phẩm: không ràng buộc. Trả lý do hoặc null.
+     */
+    static String defaultWarehouseBlocker(String kind, Warehouse w) {
+        switch (kind) {
+            case "INGREDIENT":
+                return w == null || !w.isProductionSource()
+                        ? "Nguyên liệu phải chọn kho lưu trữ (kho sản xuất lấy NL)" : null;
+            case "SEMI_PRODUCT":
+                return w == null || !w.isCanStoreSemi()
+                        ? "Bán thành phẩm phải có kho mặc định là kho lưu bán thành phẩm" : null;
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * 22/BE-3: đặt kho mặc định (kho lưu trữ) hàng loạt, một transaction. Mặt hàng nào không hợp loại kho thì
+     * cả lần bị từ chối, lỗi nêu mặt hàng đầu tiên sai. Không đổi trạng thái duyệt. Trả số mặt hàng đã đặt.
+     */
+    @Transactional
+    public int setDefaultWarehouse(List<UUID> itemIds, UUID warehouseId) {
+        if (itemIds == null || itemIds.isEmpty()) throw new IllegalArgumentException("Chưa chọn mặt hàng nào");
+        if (warehouseId == null) throw new IllegalArgumentException("Thiếu kho");
+        Warehouse w = warehouseRepository.findById(warehouseId)
+                .orElseThrow(() -> new ResourceNotFoundException("Warehouse", warehouseId));
+        List<Item> items = new ArrayList<>();
+        for (UUID id : itemIds.stream().distinct().toList()) {
+            items.add(repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Item", id)));
+        }
+        for (Item i : items) {
+            String msg = defaultWarehouseBlocker(kindOf(i), w);
+            // PRODUCT không ràng buộc nhưng kho nơi nhận ngoài không có tồn nên không làm kho mặc định của ai
+            if (msg == null && w.isExternal()) msg = "Kho " + w.getName() + " là nơi nhận ngoài";
+            if (msg != null) throw new IllegalArgumentException(i.getName() + ": " + msg);
+        }
+        items.forEach(i -> i.setDefaultWarehouse(w));
+        repository.saveAll(items);
+        return items.size();
     }
 
     private void requireVisible(Item i) {
@@ -770,10 +819,9 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         } else {
             e.setDefaultWarehouse(null);
         }
-        // 20/D10: BTP bắt buộc có kho mặc định ở khu sản xuất (lô BTP làm xong vào kho này). Chỉ chặn khi tạo/sửa, không đụng dữ liệu cũ.
-        if (isSemi(e) && !com.bakery.api.inventory.service.ProductionZone.contains(e.getDefaultWarehouse())) {
-            throw new IllegalArgumentException("Bán thành phẩm phải có kho mặc định (Kho Bếp hoặc Phòng Lạnh)");
-        }
+        // 20/D10 + 22/BE-3: kho mặc định phải hợp loại mặt hàng. Chỉ chặn khi tạo/sửa, không đụng dữ liệu cũ.
+        String warehouseMsg = defaultWarehouseBlocker(kindOf(e), e.getDefaultWarehouse());
+        if (warehouseMsg != null) throw new IllegalArgumentException(warehouseMsg);
         // unitCost: chỉ áp dụng cho INGREDIENT (nhập tay).
         // SEMI_PRODUCT / PRODUCT được tính lại trong afterApprove → không ghi đè ở đây.
         if ("INGREDIENT".equalsIgnoreCase(req.itemType())) {
