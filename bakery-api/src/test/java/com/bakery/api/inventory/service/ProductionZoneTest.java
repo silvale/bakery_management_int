@@ -2,53 +2,35 @@ package com.bakery.api.inventory.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.bakery.api.inventory.entity.StockLot;
 import com.bakery.api.master.entity.Warehouse;
 import org.junit.jupiter.api.Test;
 
+/** 22: kho đầu ra theo cờ của kho, không theo mã. */
 class ProductionZoneTest {
 
-    private static Warehouse wh(String code) {
+    private static Warehouse wh(String name, boolean storeSemi) {
         Warehouse w = new Warehouse();
-        w.setCode(code);
+        w.setName(name);
+        w.setCanStoreSemi(storeSemi);
         return w;
     }
 
-    private static StockLot lotAt(String code) {
-        StockLot l = new StockLot();
-        l.setWarehouse(wh(code));
-        return l;
+    @Test void semiProductGoesToItsDefaultWhenWarehouseStoresSemi() {
+        Warehouse hold = wh("hold", true), cold = wh("cold", true);
+        assertThat(ProductionZone.outputWarehouse(true, cold, hold)).isSameAs(cold);
+        assertThat(ProductionZone.outputWarehouse(true, hold, hold)).isSameAs(hold);
     }
 
-    @Test void zoneIsKitchenAndCold() {
-        assertThat(ProductionZone.contains(lotAt("KITCHEN"))).isTrue();
-        assertThat(ProductionZone.contains(lotAt("COLD"))).isTrue();
+    @Test void semiProductWithoutOrNonStoringDefaultGoesToDeliveryHold() {
+        Warehouse hold = wh("hold", true);
+        assertThat(ProductionZone.outputWarehouse(true, null, hold)).isSameAs(hold);
+        assertThat(ProductionZone.outputWarehouse(true, wh("shop", false), hold)).isSameAs(hold);
+        assertThat(ProductionZone.outputWarehouse(true, wh("main", false), hold)).isSameAs(hold);
     }
 
-    @Test void otherWarehousesAreOutsideZone() {
-        assertThat(ProductionZone.contains(lotAt("MAIN"))).isFalse();
-        assertThat(ProductionZone.contains(lotAt("SHOP"))).isFalse();
-        assertThat(ProductionZone.contains(lotAt("COLD2"))).isFalse();
-        assertThat(ProductionZone.contains(new StockLot())).isFalse(); // lô không có kho
-        assertThat(ProductionZone.contains((StockLot) null)).isFalse();
-    }
-
-    @Test void semiProductGoesToItsColdOrKitchenDefault() {
-        Warehouse kitchen = wh("KITCHEN"), cold = wh("COLD");
-        assertThat(ProductionZone.outputWarehouse(true, cold, kitchen)).isSameAs(cold);
-        assertThat(ProductionZone.outputWarehouse(true, kitchen, kitchen)).isSameAs(kitchen);
-    }
-
-    @Test void semiProductWithoutOrOutOfZoneDefaultGoesToKitchen() {
-        Warehouse kitchen = wh("KITCHEN");
-        assertThat(ProductionZone.outputWarehouse(true, null, kitchen)).isSameAs(kitchen);
-        assertThat(ProductionZone.outputWarehouse(true, wh("SHOP"), kitchen)).isSameAs(kitchen);
-        assertThat(ProductionZone.outputWarehouse(true, wh("MAIN"), kitchen)).isSameAs(kitchen);
-    }
-
-    @Test void finishedProductAlwaysGoesToKitchen() {
-        Warehouse kitchen = wh("KITCHEN");
-        // thành phẩm chờ giao ra cửa hàng: không cất Phòng lạnh dù item có kho mặc định COLD
-        assertThat(ProductionZone.outputWarehouse(false, wh("COLD"), kitchen)).isSameAs(kitchen);
+    @Test void finishedProductAlwaysGoesToDeliveryHold() {
+        Warehouse hold = wh("hold", true);
+        // thành phẩm chờ giao ra bán hàng: không cất Phòng Lạnh dù item có kho mặc định lưu BTP
+        assertThat(ProductionZone.outputWarehouse(false, wh("cold", true), hold)).isSameAs(hold);
     }
 }

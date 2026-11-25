@@ -137,13 +137,16 @@ public class AccessScope {
         throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Bạn không có quyền với kho " + names);
     }
 
-    /** Cần ít nhất một trong các mã kho (vd KITCHEN hoặc SHOP). */
-    public void assertAnyWarehouseCode(String... codes) {
+    /** Cần được gán ít nhất một kho có một trong các việc (22). Admin bỏ qua. */
+    public void assertAnyWarehouseRole(com.bakery.api.master.entity.WarehouseRole... roles) {
         if (isAdmin()) return;
-        for (String c : codes) if (hasWarehouseCode(c)) return;
-        String names = java.util.Arrays.stream(codes)
-                .map(c -> warehouseRepository.findByCode(c).map(Warehouse::getName).orElse(c))
-                .collect(Collectors.joining(" hoặc "));
+        for (Warehouse w : warehouses()) {
+            for (com.bakery.api.master.entity.WarehouseRole r : roles) if (!w.isExternal() && w.has(r)) return;
+        }
+        String names = warehouseRepository.findAllByStatus(com.bakery.framework.entity.EntityStatus.ACTIVE).stream()
+                .filter(w -> java.util.Arrays.stream(roles).anyMatch(w::has))
+                .sorted(java.util.Comparator.comparingInt(Warehouse::getSortOrder).thenComparing(Warehouse::getCode))
+                .map(Warehouse::getName).collect(Collectors.joining(" hoặc "));
         throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Bạn không có quyền với kho " + names);
     }
 

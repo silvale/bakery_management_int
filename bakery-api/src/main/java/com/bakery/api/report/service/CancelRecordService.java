@@ -50,11 +50,11 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class CancelRecordService {
 
-    private static final String SHOP_CODE = "SHOP";
 
     private final CancelRecordRepository cancelRecordRepository;
     private final StockLotRepository stockLotRepository;
     private final WarehouseRepository warehouseRepository;
+    private final com.bakery.api.master.service.WarehouseRoles warehouseRoles;
     private final DeliveryRecordRepository deliveryRecordRepository;
     private final PosDailySaleRepository posSaleRepository;
     private final ProductMappingRepository productMappingRepository;
@@ -69,14 +69,10 @@ public class CancelRecordService {
         LocalDate reportDate = report.getReportDate();
         UUID reportId = report.getId();
 
-        Warehouse shop = warehouseRepository.findByCode(SHOP_CODE).orElse(null);
-        if (shop == null) {
-            log.warn("generateForReport: không tìm thấy kho SHOP");
-            return;
-        }
+        Warehouse shop = warehouseRoles.salesPoint();   // 22: kho bán hàng theo cấu hình
 
         // Load tất cả SHOP lots còn hàng, group by ex_code
-        List<StockLot> shopLots = stockLotRepository.findByWarehouseCode(SHOP_CODE)
+        List<StockLot> shopLots = stockLotRepository.findByWarehouseCode(salesPointCode())
                 .stream()
                 .filter(l -> l.getExCode() != null && l.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
                 .toList();
@@ -284,8 +280,10 @@ public class CancelRecordService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private String salesPointCode() { return warehouseRoles.salesPoint().getCode(); }
+
     private BigDecimal getShopQtyForExCode(String exCode) {
-        return stockLotRepository.findByWarehouseCode(SHOP_CODE).stream()
+        return stockLotRepository.findByWarehouseCode(salesPointCode()).stream()
                 .filter(l -> exCode.equals(l.getExCode())
                         && l.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
                 .map(StockLot::getQtyRemaining)

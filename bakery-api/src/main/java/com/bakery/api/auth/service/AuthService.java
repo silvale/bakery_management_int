@@ -174,7 +174,7 @@ public class AuthService {
         List<RefInfo> warehouses = (admin ? u.getWarehouses() : u.getWarehouses()).stream()
                 .sorted(Comparator.comparing(Warehouse::getCode))
                 .map(w -> new RefInfo(w.getId(), w.getCode(), w.getName(),
-                        w.getWarehouseType() != null ? w.getWarehouseType().name() : null))
+                        w.getKind() != null ? w.getKind().name() : null))
                 .toList();
         List<UUID> suppliers = u.getPriceSuppliers().stream().map(Supplier::getId).toList();
         return new AuthProfile(u.getId(), u.getUsername(), u.getFullName(),

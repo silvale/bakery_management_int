@@ -15,6 +15,7 @@ import com.bakery.api.auth.repository.UserAccountRepository;
 import com.bakery.api.auth.repository.UserRoleRepository;
 import com.bakery.api.master.entity.Supplier;
 import com.bakery.api.master.entity.Warehouse;
+import com.bakery.api.master.entity.WarehouseRole;
 import com.bakery.api.master.repository.WarehouseRepository;
 import com.bakery.framework.security.BakeryActorResolver;
 import com.bakery.framework.security.BakeryUserPrincipal;
@@ -64,7 +65,7 @@ class AccessScopeTest {
         return new AccessScope(new BakeryActorResolver(),
                 stub(UserAccountRepository.class, (n, a) -> "findWithScopeById".equals(n) ? Optional.of(user) : null),
                 stub(WarehouseRepository.class, (n, a) -> switch (n) {
-                    case "findAll" -> List.of(main, kitchen);
+                    case "findAll", "findAllByStatus" -> List.of(main, kitchen);
                     case "findByCode" -> Optional.of("MAIN".equals(a[0]) ? main : kitchen);
                     default -> null;
                 }),
@@ -88,8 +89,12 @@ class AccessScopeTest {
         s.assertAnyWarehouse(main, kitchen);          // kho xuất MAIN + kho nhận KITCHEN → hợp lệ
         s.assertAnyWarehouse(null, kitchen);
         assertThatThrownBy(() -> s.assertAnyWarehouse(main, null)).isInstanceOf(ResponseStatusException.class);
-        assertThatThrownBy(() -> s.assertAnyWarehouseCode("SHOP", "MAIN")).isInstanceOf(ResponseStatusException.class);
-        s.assertAnyWarehouseCode("SHOP", "KITCHEN");
+        // 22: @RequireWarehouse theo việc của kho, không theo mã
+        kitchen.setDeliveryHold(true);
+        main.setCanReceivePurchase(true);
+        assertThatThrownBy(() -> s.assertAnyWarehouseRole(WarehouseRole.SALES_POINT, WarehouseRole.RECEIVE_PURCHASE))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("403");
+        s.assertAnyWarehouseRole(WarehouseRole.SALES_POINT, WarehouseRole.DELIVERY_HOLD);
     }
 
     @Test

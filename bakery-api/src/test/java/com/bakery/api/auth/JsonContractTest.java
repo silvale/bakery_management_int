@@ -119,4 +119,33 @@ class JsonContractTest {
         assertThat(req.id()).isNotNull();
         assertThat(req.qtyPerPack()).isEqualByComparingTo("25");
     }
+
+    @Test
+    void warehouseUsesIsFlagNames() throws Exception {   // 22: tên theo spec
+        var r = new com.bakery.api.master.dto.WarehouseResponse();
+        r.setCanReceivePurchase(true);
+        r.setProductionSource(true);
+        r.setCanStoreSemi(true);
+        r.setDeliveryHold(true);
+        r.setSalesPoint(true);
+        r.setCanExportExternal(true);
+        r.setKind(com.bakery.api.master.entity.WarehouseKind.INTERNAL);
+        JsonNode n = json(r);
+        for (String f : List.of("canReceivePurchase", "isProductionSource", "canStoreSemi", "isDeliveryHold", "isSalesPoint", "canExportExternal")) {
+            assertThat(n.get(f).asBoolean()).as(f).isTrue();
+        }
+        for (String f : List.of("productionSource", "deliveryHold", "salesPoint", "warehouseType")) assertThat(n.has(f)).as(f).isFalse();
+        assertThat(n.get("kind").asText()).isEqualTo("INTERNAL");
+        assertThat(n.has("sortOrder")).isTrue();
+
+        var req = mapper.readValue("{\"code\":\"K\",\"name\":\"x\",\"isSalesPoint\":true,\"isDeliveryHold\":true,\"isProductionSource\":true,"
+                + "\"canReceivePurchase\":true,\"kind\":\"EXTERNAL\",\"sortOrder\":7}", com.bakery.api.master.dto.WarehouseRequest.class);
+        assertThat(req.isSalesPoint()).isTrue();
+        assertThat(req.isDeliveryHold()).isTrue();
+        assertThat(req.isProductionSource()).isTrue();
+        assertThat(req.canReceivePurchase()).isTrue();
+        assertThat(req.kind()).isEqualTo(com.bakery.api.master.entity.WarehouseKind.EXTERNAL);
+        assertThat(req.sortOrder()).isEqualTo(7);
+        assertThat(req.canStoreSemi()).isNull();   // không gửi = giữ nguyên
+    }
 }

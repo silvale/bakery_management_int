@@ -44,7 +44,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/production-requests")
 @RequiredArgsConstructor
-@com.bakery.api.auth.scope.RequireWarehouse(any = {"KITCHEN"})
+@com.bakery.api.auth.scope.RequireWarehouse(role = {com.bakery.api.master.entity.WarehouseRole.DELIVERY_HOLD})
 public class ProductionRequestController
         extends BakeryAdminResource<ProductionRequestRequest, ProductionRequestResponse> {
 
@@ -178,27 +178,5 @@ public class ProductionRequestController
     public ProductionRequestResponse close(@PathVariable UUID id) {
         checkPermission("APPROVE");
         return service.closeRequest(id);
-    }
-
-    /**
-     * Tạo phiếu xuất kho MAIN → KITCHEN cho nguyên liệu cần để sản xuất BTP.
-     *
-     * <p>Chỉ xuất phần NL còn thiếu trong KITCHEN. Nếu MAIN không đủ,
-     * xuất tối đa tồn MAIN và ghi chú NL nào bị bỏ qua.
-     *
-     * @param id ID Phiếu SX BTP (productionType = SEMI)
-     */
-    /** @deprecated 20/D3: NL đi thẳng vào bảng tạm của phiếu qua {@code /materials/pick}, không qua phiếu điều chuyển. */
-    @Deprecated
-    @PostMapping("/{id}/transfer-ingredients")
-    public java.util.Map<String, Object> transferIngredients(@PathVariable UUID id) {
-        checkPermission("CREATE");
-        InventoryRequest req = ingredientService.generateSemiTransferRequest(id);
-        return java.util.Map.of(
-                "transferCode", req.getCode(),
-                "transferId",   req.getId(),
-                "status",       req.getApprovalStatus(),
-                "lineCount",    req.getLines() != null ? req.getLines().size() : 0
-        );
     }
 }

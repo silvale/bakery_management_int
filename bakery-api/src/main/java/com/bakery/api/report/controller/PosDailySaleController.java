@@ -25,7 +25,7 @@ import com.bakery.framework.security.RequirePermission;
 @RequestMapping("/api/v1/pos-sales")
 @RequiredArgsConstructor
 @RequirePermission(screen = "POS_SALES", action = "VIEW")
-@com.bakery.api.auth.scope.RequireWarehouse(any = {"SHOP"})
+@com.bakery.api.auth.scope.RequireWarehouse(role = {com.bakery.api.master.entity.WarehouseRole.SALES_POINT})
 public class PosDailySaleController {
 
     private final PosDailySaleService service;

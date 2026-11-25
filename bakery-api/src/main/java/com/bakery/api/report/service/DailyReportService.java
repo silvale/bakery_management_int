@@ -33,7 +33,6 @@ import com.bakery.api.cake.service.DailyReportDesignService.DesignRow;
 import com.bakery.framework.entity.DailyReportStatus;
 import com.bakery.framework.entity.DeliveryStatus;
 import com.bakery.framework.entity.MovementType;
-import com.bakery.framework.entity.WarehouseType;
 import com.bakery.framework.exception.ResourceNotFoundException;
 import com.bakery.framework.security.BakeryActorResolver;
 import lombok.RequiredArgsConstructor;
@@ -66,6 +65,7 @@ public class DailyReportService {
     private final StockLotRepository stockLotRepository;
     private final StockMovementRepository stockMovementRepository;
     private final WarehouseRepository warehouseRepository;
+    private final com.bakery.api.master.service.WarehouseRoles warehouseRoles;
     private final BakeryActorResolver actorResolver;
     private final ProductionPlannerService productionPlannerService;
     private final com.bakery.framework.repository.CommandRequestRepository commandRequestRepository;
@@ -322,8 +322,7 @@ public class DailyReportService {
                         (a, b) -> a));
 
         // Tồn SHOP trước khi NV huỷ = qty_system_cancel
-        List<Warehouse> finShopWarehouses = warehouseRepository.findByWarehouseType(WarehouseType.SHOP);
-        final UUID finShopWarehouseId = finShopWarehouses.isEmpty() ? null : finShopWarehouses.get(0).getId();
+        final UUID finShopWarehouseId = warehouseRoles.salesPoint().getId();   // 22: kho bán hàng theo cấu hình
         final Map<UUID, BigDecimal> shopStockByItem = finShopWarehouseId == null
                 ? Collections.emptyMap()
                 : stockLotRepository.findAll().stream()
@@ -537,8 +536,7 @@ public class DailyReportService {
         List<UUID> accessoryIds = posByItem.keySet().stream().filter(id -> !productIds.contains(id)).toList();
         if (accessoryIds.isEmpty()) return List.of();
 
-        List<Warehouse> shops = warehouseRepository.findByWarehouseType(WarehouseType.SHOP);
-        Warehouse shop = shops.isEmpty() ? null : shops.get(0);
+        Warehouse shop = warehouseRoles.salesPoint();
         Map<UUID, String> nameById = itemRepository.findAllById(accessoryIds).stream()
                 .collect(Collectors.toMap(i -> i.getId(), i -> i.getName()));
 
@@ -607,8 +605,7 @@ public class DailyReportService {
         LocalDate lookback = reportDate.minusDays(14);
 
         // Tải tồn kho SHOP một lần — dùng để tính qtySystemCancel (có ngay sau POS upload)
-        List<Warehouse> shopWarehouses = warehouseRepository.findByWarehouseType(WarehouseType.SHOP);
-        final UUID shopWarehouseId = shopWarehouses.isEmpty() ? null : shopWarehouses.get(0).getId();
+        final UUID shopWarehouseId = warehouseRoles.salesPoint().getId();
         // itemId → tổng qty_remaining trong SHOP
         Map<UUID, BigDecimal> shopStockByItem = shopWarehouseId == null
                 ? Collections.emptyMap()
@@ -773,7 +770,7 @@ public class DailyReportService {
      * Sau khi finalize, cập nhật tồn kho SHOP = qty_remaining_actual của từng item.
      *
      * <p>Logic:
-     * - Tìm kho SHOP (WarehouseType.SHOP). Nếu chưa có → bỏ qua.
+     * - Kho bán hàng theo cấu hình (WarehouseRoles.salesPoint).
      * - Với mỗi DailyReportLine có qty_remaining_actual:
      *   1. Zero out toàn bộ lot cũ của item tại SHOP (ghi StockMovement OUT)
      *   2. Tạo lot mới với qty = qty_remaining_actual (ghi StockMovement IN)
@@ -781,12 +778,7 @@ public class DailyReportService {
      * <p>Idempotent: gọi lại sẽ reset về trạng thái mới nhất.
      */
     private void updateShopStock(DailyReport report, LocalDate reportDate) {
-        List<Warehouse> shopWarehouses = warehouseRepository.findByWarehouseType(WarehouseType.SHOP);
-        if (shopWarehouses.isEmpty()) {
-            log.warn("Không tìm thấy kho SHOP, bỏ qua cập nhật tồn kho cửa hàng.");
-            return;
-        }
-        Warehouse shopWarehouse = shopWarehouses.get(0);
+        Warehouse shopWarehouse = warehouseRoles.salesPoint();
 
         List<DailyReportLine> lines = lineRepository.findByDailyReportIdWithItem(report.getId());
         // D16: chỉ thành phẩm. Dòng cũ của hàng khác (nến...) giữ nguyên lô, HSD, giá nhập.

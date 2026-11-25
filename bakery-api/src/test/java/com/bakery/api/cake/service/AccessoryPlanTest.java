@@ -43,7 +43,7 @@ class AccessoryPlanTest {
         default -> null;
     });
     private final DeliveryDesignService service =
-            new DeliveryDesignService(designs, null, null, items, null, null, null, null);
+            new DeliveryDesignService(designs, null, null, items, null, null, null);
 
     private static Item item(String code) {
         Ingredient i = new Ingredient();

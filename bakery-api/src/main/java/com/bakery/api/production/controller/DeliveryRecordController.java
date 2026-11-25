@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/delivery-records")
 @RequiredArgsConstructor
 @RequirePermission(screen = "DELIVERY_RECORDS", action = "VIEW")
-@com.bakery.api.auth.scope.RequireWarehouse(any = {"KITCHEN", "SHOP"})
+@com.bakery.api.auth.scope.RequireWarehouse(role = {com.bakery.api.master.entity.WarehouseRole.DELIVERY_HOLD, com.bakery.api.master.entity.WarehouseRole.SALES_POINT})
 public class DeliveryRecordController {
 
     private final ProductionRequestService service;
@@ -47,7 +47,7 @@ public class DeliveryRecordController {
      *
      * @param id DeliveryRecord ID
      */
-    @com.bakery.api.auth.scope.RequireWarehouse(any = {"SHOP"})
+    @com.bakery.api.auth.scope.RequireWarehouse(role = {com.bakery.api.master.entity.WarehouseRole.SALES_POINT})
     @PostMapping("/{id}/confirm")
     @RequirePermission(screen = "DELIVERY_RECORDS", action = "APPROVE")
     public DeliveryRecordResponse confirm(

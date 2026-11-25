@@ -4,40 +4,161 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.bakery.api.master.dto.WarehouseRequest;
 import com.bakery.api.master.entity.Warehouse;
-import com.bakery.framework.entity.WarehouseType;
+import com.bakery.api.master.entity.WarehouseKind;
+import com.bakery.api.master.service.WarehouseService.Config;
+import com.bakery.api.master.service.WarehouseService.Facts;
 import org.junit.jupiter.api.Test;
 
+/** 22/BE-1: quy tắc sửa/xóa kho (thiết kế §5.3), hàm tĩnh nên không cần Spring. */
 class WarehouseServiceTest {
 
-    private static Warehouse wh(String code, WarehouseType type) {
+    private static final Facts NONE = new Facts(false, 0, 0, true, true);
+
+    private static Warehouse wh(String code) {
         Warehouse w = new Warehouse();
         w.setCode(code);
-        w.setName("x");
-        w.setWarehouseType(type);
+        w.setName(code);
         return w;
     }
 
-    @Test void defaultWarehouseCannotChangeCode() {
-        var req = new WarehouseRequest("SHOP2", "Cửa Hàng", WarehouseType.SHOP, null);
-        assertThat(WarehouseService.updateBlocker(wh("SHOP", WarehouseType.SHOP), req)).contains("SHOP");
+    private static WarehouseRequest req(String code, WarehouseKind kind, Boolean receive, Boolean prod, Boolean semi,
+                                        Boolean hold, Boolean sales, Boolean export) {
+        return new WarehouseRequest(code, "x", null, kind, receive, prod, semi, hold, sales, export, null);
     }
 
-    @Test void defaultWarehouseCannotChangeType() {
-        var req = new WarehouseRequest("SHOP", "Cửa Hàng", WarehouseType.MAIN, null);
-        assertThat(WarehouseService.updateBlocker(wh("SHOP", WarehouseType.SHOP), req)).isNotNull();
+    private static WarehouseRequest sameCode(String code) { return req(code, null, null, null, null, null, null, null); }
+
+    @Test void codeCannotChangeForAnyWarehouse() {
+        assertThat(WarehouseService.updateBlocker(wh("MAIN"), sameCode("MAIN2"), NONE)).isEqualTo("Không đổi được mã kho");
+        assertThat(WarehouseService.updateBlocker(wh("KHO9"), sameCode("KHO10"), NONE)).isEqualTo("Không đổi được mã kho");   // kho tự tạo cũng vậy
+        assertThat(WarehouseService.updateBlocker(wh("MAIN"), sameCode("MAIN"), NONE)).isNull();
     }
 
-    @Test void defaultWarehouseCanRename() {
-        var req = new WarehouseRequest("SHOP", "Cửa Hàng Trung Tâm", WarehouseType.SHOP, "12 Lê Lợi");
-        assertThat(WarehouseService.updateBlocker(wh("SHOP", WarehouseType.SHOP), req)).isNull();
+    @Test void cannotTurnOffSalesPointInPlace() {
+        Warehouse shop = wh("SHOP");
+        shop.setSalesPoint(true);
+        String m = WarehouseService.updateBlocker(shop, req("SHOP", null, null, null, null, null, false, null), NONE);
+        assertThat(m).contains("Bán hàng").contains("chuyển");
+        shop.setDeliveryHold(true);
+        assertThat(WarehouseService.updateBlocker(shop, req("SHOP", null, null, null, null, false, null, null), NONE)).contains("Bánh chờ giao");
     }
 
-    @Test void customWarehouseIsFree() {
-        var req = new WarehouseRequest("KHO9", "Kho 9", WarehouseType.MAIN, null);
-        assertThat(WarehouseService.updateBlocker(wh("KHO2", WarehouseType.SHOP), req)).isNull();
+    @Test void turningOnSalesPointAtAnotherWarehouseIsAllowedByRules() {
+        Warehouse b = wh("B");   // B chưa là kho bán hàng; bật cờ hợp lệ (service tắt ở kho cũ cùng transaction)
+        assertThat(WarehouseService.updateBlocker(b, req("B", null, null, null, null, null, true, null), NONE)).isNull();
     }
 
-    @Test void fourDefaultCodes() {
-        assertThat(WarehouseService.DEFAULT_CODES).containsExactlyInAnyOrder("MAIN", "KITCHEN", "SHOP", "COLD");
+    @Test void cannotTurnOffStoreSemiWhileSemiItemsPointHere() {
+        Warehouse w = wh("COLD");
+        w.setCanStoreSemi(true);
+        String m = WarehouseService.updateBlocker(w, req("COLD", null, null, null, false, null, null, null), new Facts(false, 0, 3, true, true));
+        assertThat(m).contains("3").contains("bán thành phẩm");
+        assertThat(WarehouseService.updateBlocker(w, req("COLD", null, null, null, false, null, null, null), NONE)).isNull();
+    }
+
+    @Test void cannotTurnOffProductionSourceWhileIngredientsPointHere() {
+        Warehouse w = wh("COLD");
+        w.setProductionSource(true);
+        String m = WarehouseService.updateBlocker(w, req("COLD", null, null, false, null, null, null, null), new Facts(false, 5, 0, true, true));
+        assertThat(m).contains("5").contains("nguyên liệu");
+    }
+
+    @Test void mustKeepAtLeastOneProductionSourceAndOneReceivePurchase() {
+        Warehouse w = wh("MAIN");
+        w.setProductionSource(true);
+        w.setCanReceivePurchase(true);
+        assertThat(WarehouseService.updateBlocker(w, req("MAIN", null, null, false, null, null, null, null), new Facts(false, 0, 0, false, true)))
+                .isEqualTo("Phải còn ít nhất một kho Sản xuất lấy NL");
+        assertThat(WarehouseService.updateBlocker(w, req("MAIN", null, false, null, null, null, null, null), new Facts(false, 0, 0, true, false)))
+                .isEqualTo("Phải còn ít nhất một kho Nhận NCC");
+    }
+
+    @Test void kindCannotChangeOnceWarehouseHasStockOrRequests() {
+        Warehouse w = wh("K");
+        assertThat(WarehouseService.updateBlocker(w, req("K", WarehouseKind.EXTERNAL, null, null, null, null, null, null), new Facts(true, 0, 0, true, true)))
+                .contains("loại kho");
+        assertThat(WarehouseService.updateBlocker(w, req("K", WarehouseKind.EXTERNAL, null, null, null, null, null, null), NONE)).isNull();   // kho trống đổi được
+    }
+
+    @Test void externalWarehouseCannotEnableAnyRole() {
+        Warehouse w = wh("NH");
+        w.setKind(WarehouseKind.EXTERNAL);
+        assertThat(WarehouseService.updateBlocker(w, req("NH", null, true, null, null, null, null, null), NONE)).contains("nơi nhận ngoài");
+        assertThat(WarehouseService.externalBlocker(Config.apply(Config.of(wh("A")), req("A", WarehouseKind.EXTERNAL, null, null, null, null, true, null))))
+                .isNotNull();
+    }
+
+    @Test void nullFlagsKeepCurrentConfig() {
+        Warehouse w = wh("MAIN");
+        w.setCanReceivePurchase(true);
+        w.setProductionSource(true);
+        Config after = Config.apply(Config.of(w), sameCode("MAIN"));
+        assertThat(after.receive()).isTrue();
+        assertThat(after.production()).isTrue();
+        assertThat(after.sales()).isFalse();
+    }
+
+    @Test void deleteBlockers() {
+        Config plain = Config.of(wh("X"));
+        assertThat(WarehouseService.deleteBlocker(plain, 2, 0, true, true)).contains("2 lô tồn");
+        assertThat(WarehouseService.deleteBlocker(plain, 0, 4, true, true)).contains("4 mặt hàng");
+        Warehouse shop = wh("SHOP");
+        shop.setSalesPoint(true);
+        assertThat(WarehouseService.deleteBlocker(Config.of(shop), 0, 0, true, true)).contains("Bán hàng");
+        Warehouse hold = wh("K");
+        hold.setDeliveryHold(true);
+        assertThat(WarehouseService.deleteBlocker(Config.of(hold), 0, 0, true, true)).contains("Bánh chờ giao");
+        Warehouse lastSource = wh("S");
+        lastSource.setProductionSource(true);
+        assertThat(WarehouseService.deleteBlocker(Config.of(lastSource), 0, 0, false, true)).contains("Sản xuất lấy NL");
+        assertThat(WarehouseService.deleteBlocker(plain, 0, 0, true, true)).isNull();
+    }
+
+    // ── Chuyển việc Bán hàng / Bánh chờ giao giữa hai kho (cùng transaction) ──
+
+    @SuppressWarnings("unchecked")
+    private static WarehouseService serviceOver(java.util.List<Warehouse> all, java.util.List<Warehouse> flushed) {
+        var repo = (com.bakery.api.master.repository.WarehouseRepository) java.lang.reflect.Proxy.newProxyInstance(
+                WarehouseServiceTest.class.getClassLoader(), new Class<?>[] {com.bakery.api.master.repository.WarehouseRepository.class},
+                (p, m, a) -> switch (m.getName()) {
+                    case "findAll" -> all;
+                    case "saveAndFlush" -> { flushed.add((Warehouse) a[0]); yield a[0]; }
+                    default -> null;
+                });
+        return new WarehouseService(repo, null, null, null);
+    }
+
+    @Test void movingSalesPointTurnsOffOldWarehouseAndLeavesNewOneOn() {
+        Warehouse shop = wh("SHOP"), b = wh("B");
+        shop.setId(java.util.UUID.randomUUID());
+        b.setId(java.util.UUID.randomUUID());
+        shop.setSalesPoint(true);
+        var flushed = new java.util.ArrayList<Warehouse>();
+        WarehouseService svc = serviceOver(java.util.List.of(shop, b), flushed);
+        svc.transferSingletons(b, Config.apply(Config.of(b), req("B", null, null, null, null, null, true, null)));
+        assertThat(shop.isSalesPoint()).isFalse();      // kho cũ tắt
+        assertThat(flushed).containsExactly(shop);      // flush trước khi kho mới bật (unique index)
+        assertThat(b.isSalesPoint()).isFalse();         // cờ của kho mới do applyUpdate gán sau, không bị transfer đụng tới
+    }
+
+    @Test void movingDeliveryHoldDoesNotTouchSalesPoint() {
+        Warehouse shop = wh("SHOP"), k = wh("K"), c = wh("C");
+        for (Warehouse w : java.util.List.of(shop, k, c)) w.setId(java.util.UUID.randomUUID());
+        shop.setSalesPoint(true);
+        k.setDeliveryHold(true);
+        WarehouseService svc = serviceOver(java.util.List.of(shop, k, c), new java.util.ArrayList<>());
+        svc.transferSingletons(c, Config.apply(Config.of(c), req("C", null, null, null, null, true, null, null)));
+        assertThat(k.isDeliveryHold()).isFalse();
+        assertThat(shop.isSalesPoint()).isTrue();
+    }
+
+    @Test void noTransferWhenTargetAlreadyHoldsTheRole() {
+        Warehouse shop = wh("SHOP");
+        shop.setId(java.util.UUID.randomUUID());
+        shop.setSalesPoint(true);
+        var flushed = new java.util.ArrayList<Warehouse>();
+        serviceOver(java.util.List.of(shop), flushed).transferSingletons(shop, Config.of(shop));
+        assertThat(flushed).isEmpty();
+        assertThat(shop.isSalesPoint()).isTrue();
     }
 }

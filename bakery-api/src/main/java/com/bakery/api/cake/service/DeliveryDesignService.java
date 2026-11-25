@@ -31,8 +31,7 @@ import com.bakery.api.inventory.entity.StockLot;
 import com.bakery.api.inventory.entity.StockMovement;
 import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.inventory.repository.StockMovementRepository;
-import com.bakery.api.inventory.service.ProductionZone;
-import com.bakery.api.inventory.service.StockFifo;
+import com.bakery.api.inventory.service.ProductionStock;
 import com.bakery.api.production.entity.DeliveryRecord;
 import com.bakery.framework.entity.CommandAction;
 import com.bakery.framework.entity.CommandRequest;
@@ -61,8 +60,7 @@ public class DeliveryDesignService {
     private final DeliveryRecordDesignRepository rowRepository;
     private final DeliveryRecordAccessoryRepository accessoryRepository;
     private final ItemLookupRepository itemRepository;
-    private final StockLotRepository stockLotRepository;
-    private final StockMovementRepository stockMovementRepository;
+    private final ProductionStock productionStock;
     private final CommandRequestRepository commandRequestRepository;
     private final BakeryActorResolver actorResolver;
 
@@ -195,22 +193,9 @@ public class DeliveryDesignService {
         return shortageWarnings(need, got, names);
     }
 
-    /** Trừ FIFO trong khu sản xuất, ghi movement OUT; trả phần còn thiếu (không bao giờ âm tồn). */
+    /** Trừ phụ kiện theo quy tắc chung 22/§5.2 (nhóm 1 trước, thiếu mới sang nhóm 2); trả phần còn thiếu, không bao giờ âm tồn. */
     private BigDecimal deductFromZone(UUID itemId, BigDecimal need, UUID refId, String note) {
-        List<StockLot> lots = stockLotRepository
-                .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(itemId, BigDecimal.ZERO)
-                .stream().filter(ProductionZone::contains).toList();
-        return StockFifo.deduct(lots, need, (lot, taken) -> {
-            StockMovement mv = new StockMovement();
-            mv.setLot(lot);
-            mv.setMovementType(MovementType.OUT);
-            mv.setQty(taken);
-            mv.setRefType(REF_TYPE);
-            mv.setRefId(refId);
-            mv.setNote(note);
-            stockMovementRepository.save(mv);
-            stockLotRepository.save(lot);
-        });
+        return productionStock.deduct(itemId, need, REF_TYPE, refId, note);
     }
 
     private static List<String> shortageWarnings(Map<UUID, BigDecimal> need, Map<UUID, BigDecimal> got, Map<UUID, String> names) {

@@ -46,7 +46,6 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ProductionAdjustmentService {
 
-    private static final String KITCHEN_CODE = "KITCHEN";
     private static final String REF_TYPE = "PRODUCTION_ADJUSTMENT";
 
     private final ProductionAdjustmentRepository adjustmentRepository;
@@ -56,6 +55,8 @@ public class ProductionAdjustmentService {
     private final StockLotRepository stockLotRepository;
     private final StockMovementRepository stockMovementRepository;
     private final WarehouseRepository warehouseRepository;
+    private final com.bakery.api.master.service.WarehouseRoles warehouseRoles;
+    private final com.bakery.api.inventory.service.ProductionStock productionStock;
     private final EntityManager entityManager;
     private final BakeryActorResolver actorResolver;
 
@@ -155,8 +156,7 @@ public class ProductionAdjustmentService {
         Recipe recipe = resolveRecipe(line);
         if (recipe == null) return;
 
-        Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
-                .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
+        Warehouse kitchen = warehouseRoles.deliveryHold();
 
         List<RecipeLine> recipeLines = recipeLineRepository.findByRecipeIdOrderBySortOrderAsc(recipe.getId());
         BigDecimal delta = adj.getDelta(); // dương = tăng sản lượng, âm = giảm
@@ -179,36 +179,13 @@ public class ProductionAdjustmentService {
         return recipeRepository.findByProductIdAndActiveTrue(line.getProduct().getId()).orElse(null);
     }
 
+    /** Bù NL khi tăng sản lượng: cùng quy tắc trừ NL của 22/§5.2 (nhóm 1 trước, thiếu mới sang nhóm 2). */
     private void deductFromKitchen(BigDecimal needed, UUID itemId, UUID refId) {
-        List<StockLot> lots = stockLotRepository
-                .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(itemId, BigDecimal.ZERO)
-                .stream()
-                .filter(ProductionZone::contains) // KITCHEN + COLD, giữ thứ tự FIFO
-                .toList();
-
-        BigDecimal remaining = needed;
-        for (StockLot lot : lots) {
-            if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
-            BigDecimal deduct = remaining.min(lot.getQtyRemaining());
-            lot.setQtyRemaining(lot.getQtyRemaining().subtract(deduct));
-            stockLotRepository.save(lot);
-
-            StockMovement mv = new StockMovement();
-            mv.setLot(lot);
-            mv.setMovementType(MovementType.OUT);
-            mv.setQty(deduct);
-            mv.setRefId(refId);
-            mv.setRefType(REF_TYPE);
-            mv.setNote("Bù NL do điều chỉnh sản lượng tăng");
-            stockMovementRepository.save(mv);
-
-            remaining = remaining.subtract(deduct);
-        }
-
+        BigDecimal remaining = productionStock.deduct(itemId, needed, REF_TYPE, refId, "Bù NL do điều chỉnh sản lượng tăng");
         if (remaining.compareTo(BigDecimal.ZERO) > 0) {
             Item item = entityManager.find(Item.class, itemId);
             String itemName = (item != null) ? item.getName() : itemId.toString();
-            throw new IllegalStateException("Kho bếp + phòng lạnh không đủ NL để bù adjustment: " + itemName + " (thiếu " + remaining + ")");
+            throw new IllegalStateException("Kho sản xuất không đủ NL để bù adjustment: " + itemName + " (thiếu " + remaining + ")");
         }
     }
 

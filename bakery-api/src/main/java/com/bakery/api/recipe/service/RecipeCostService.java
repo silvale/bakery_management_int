@@ -13,7 +13,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import com.bakery.api.inventory.entity.StockLot;
-import com.bakery.api.inventory.service.ProductionZone;
 import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.master.entity.*;
 import com.bakery.api.master.repository.ItemLookupRepository;
@@ -210,12 +209,12 @@ public class RecipeCostService {
             return new PriceResolution(prices.get(0).getPrice(), "CATALOG");
         }
 
-        // 2. Weighted average stock lot cost (khu sản xuất: KITCHEN + COLD)
+        // 2. Weighted average stock lot cost (lô ở mọi kho Sản xuất lấy NL — 22)
         List<StockLot> lots = stockLotRepository
                 .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
                         itemId, BigDecimal.ZERO)
                 .stream()
-                .filter(ProductionZone::contains)
+                .filter(l -> l.getWarehouse() != null && l.getWarehouse().isProductionSource())
                 .toList();
 
         if (!lots.isEmpty()) {

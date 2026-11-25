@@ -87,8 +87,13 @@ public class UserAccountService extends AbstractBakeryAdminService<UserAccount, 
     }
 
     private java.util.List<com.bakery.api.master.entity.Warehouse> findWarehouses(java.util.List<UUID> ids) {
-        return ids.stream().distinct().map(id -> warehouseRepository.findById(id)
+        var list = ids.stream().distinct().map(id -> warehouseRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Warehouse", id))).toList();
+        // 22/§5.3: nơi nhận ngoài không gán nhân viên
+        list.stream().filter(com.bakery.api.master.entity.Warehouse::isExternal).findFirst().ifPresent(w -> {
+            throw new IllegalStateException("Kho " + w.getName() + " là nơi nhận ngoài, không gán nhân viên");
+        });
+        return list;
     }
 
     private java.util.List<com.bakery.api.master.entity.Supplier> findSuppliers(java.util.List<UUID> ids) {

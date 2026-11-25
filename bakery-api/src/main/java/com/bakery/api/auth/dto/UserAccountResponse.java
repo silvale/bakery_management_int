@@ -36,7 +36,7 @@ public class UserAccountResponse extends BaseResponse {
         }
         a.getWarehouses().stream().sorted(java.util.Comparator.comparing(com.bakery.api.master.entity.Warehouse::getCode))
                 .forEach(w -> res.warehouses.add(new RefInfo(w.getId(), w.getCode(), w.getName(),
-                        w.getWarehouseType() != null ? w.getWarehouseType().name() : null)));
+                        w.getKind() != null ? w.getKind().name() : null)));
         a.getPriceSuppliers().stream().sorted(java.util.Comparator.comparing(com.bakery.api.master.entity.Supplier::getCode))
                 .forEach(s -> res.priceSuppliers.add(RefInfo.of(s.getId(), s.getCode(), s.getName())));
         return res;

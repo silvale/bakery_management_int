@@ -44,7 +44,7 @@ import com.bakery.framework.security.RequirePermission;
 @RequestMapping("/api/v1/daily-reports")
 @RequiredArgsConstructor
 @RequirePermission(screen = "DAILY_REPORT", action = "VIEW")
-@com.bakery.api.auth.scope.RequireWarehouse(any = {"SHOP"})
+@com.bakery.api.auth.scope.RequireWarehouse(role = {com.bakery.api.master.entity.WarehouseRole.SALES_POINT})
 public class DailyReportController {
 
     private final DailyReportService service;

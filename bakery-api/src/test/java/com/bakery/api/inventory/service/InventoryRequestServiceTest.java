@@ -193,14 +193,25 @@ class InventoryRequestServiceTest {
         assertThat(InventoryRequestService.warehouseBlocker(T, true, true)).isNull();
     }
 
-    @Test void purchaseWarehouseBlocker_only_main() {
+    @Test void purchaseWarehouseBlocker_needs_receive_purchase_role() {
         var P = com.bakery.framework.entity.InventoryRequestType.PURCHASE;
         var T = com.bakery.framework.entity.InventoryRequestType.TRANSFER;
-        var main = new com.bakery.api.master.entity.Warehouse(); main.setCode("MAIN");
-        var kitchen = new com.bakery.api.master.entity.Warehouse(); kitchen.setCode("KITCHEN");
-        assertThat(InventoryRequestService.purchaseWarehouseBlocker(P, kitchen)).isEqualTo("Chỉ Kho Chính được nhập hàng từ nhà cung cấp");
+        var main = new com.bakery.api.master.entity.Warehouse(); main.setName("Kho Chính"); main.setCanReceivePurchase(true);
+        var newOne = new com.bakery.api.master.entity.Warehouse(); newOne.setName("Kho Tổng"); newOne.setCanReceivePurchase(true);   // kho mới tạo cũng nhận được
+        var kitchen = new com.bakery.api.master.entity.Warehouse(); kitchen.setName("Phòng Bánh Mì");
+        assertThat(InventoryRequestService.purchaseWarehouseBlocker(P, kitchen)).isEqualTo("Kho Phòng Bánh Mì không được nhập hàng từ nhà cung cấp");
         assertThat(InventoryRequestService.purchaseWarehouseBlocker(P, main)).isNull();
+        assertThat(InventoryRequestService.purchaseWarehouseBlocker(P, newOne)).isNull();
         assertThat(InventoryRequestService.purchaseWarehouseBlocker(P, null)).isNull();   // thiếu kho: warehouseBlocker báo
-        assertThat(InventoryRequestService.purchaseWarehouseBlocker(T, kitchen)).isNull();  // điều chuyển không đổi
+        assertThat(InventoryRequestService.purchaseWarehouseBlocker(T, kitchen)).isNull(); // điều chuyển không đổi
+    }
+
+    @Test void externalWarehouseBlocker_rejects_external_for_any_type() {
+        var ext = new com.bakery.api.master.entity.Warehouse(); ext.setName("Nhà Hàng"); ext.setKind(com.bakery.api.master.entity.WarehouseKind.EXTERNAL);
+        var main = new com.bakery.api.master.entity.Warehouse(); main.setName("Kho Chính");
+        assertThat(InventoryRequestService.externalWarehouseBlocker(main, ext)).isEqualTo("Kho Nhà Hàng là nơi nhận ngoài, không dùng cho phiếu kho");
+        assertThat(InventoryRequestService.externalWarehouseBlocker(ext, main)).contains("Nhà Hàng");
+        assertThat(InventoryRequestService.externalWarehouseBlocker(main, null)).isNull();
+        assertThat(InventoryRequestService.externalWarehouseBlocker(null, null)).isNull();
     }
 }

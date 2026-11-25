@@ -35,7 +35,7 @@ public class WarehouseScopeAspect {
             } catch (NoSuchMethodException ignored) { /* dùng lớp */ }
         }
         if (ann == null) ann = pjp.getTarget().getClass().getAnnotation(RequireWarehouse.class);
-        if (ann != null) scope.assertAnyWarehouseCode(ann.any());
+        if (ann != null) scope.assertAnyWarehouseRole(ann.role());
         return pjp.proceed();
     }
 }

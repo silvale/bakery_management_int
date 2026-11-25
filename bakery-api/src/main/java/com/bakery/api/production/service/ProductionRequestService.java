@@ -8,7 +8,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 import com.bakery.api.inventory.entity.StockLot;
+import com.bakery.api.inventory.service.ProductionStock;
 import com.bakery.api.inventory.service.ProductionZone;
+import com.bakery.api.master.service.WarehouseRoles;
 import com.bakery.api.inventory.entity.StockMovement;
 import com.bakery.api.inventory.repository.StockLotRepository;
 import com.bakery.api.inventory.repository.StockMovementRepository;
@@ -77,13 +79,13 @@ public class ProductionRequestService
         extends AbstractBakeryAdminService<ProductionRequest, ProductionRequestRequest, ProductionRequestResponse> {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final String KITCHEN_CODE = "KITCHEN";
-    private static final String SHOP_CODE = "SHOP";
     private static final String REF_TYPE = "PRODUCTION_REQUEST";
 
     private final ProductionRequestRepository repository;
     private final ItemLookupRepository itemRepository;
     private final WarehouseRepository warehouseRepository;
+    private final WarehouseRoles warehouseRoles;
+    private final ProductionStock productionStock;
     private final RecipeRepository recipeRepository;
     private final RecipeLineRepository recipeLineRepository;
     private final StockLotRepository stockLotRepository;
@@ -418,35 +420,13 @@ public class ProductionRequestService
         return recipeRepository.findByProductIdAndActiveTrue(line.getProduct().getId()).orElse(null);
     }
 
+    /** Trừ NL khi hoàn thành DAILY/ORDER: nhóm 1 trước, thiếu mới sang nhóm 2 (22/§5.2); vẫn thiếu thì lỗi như cũ. */
     private void deductFromKitchen(BigDecimal needed, UUID itemId, String itemName, ProductionRequest e) {
-        List<StockLot> lots = stockLotRepository
-                .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(itemId, BigDecimal.ZERO)
-                .stream()
-                .filter(ProductionZone::contains) // KITCHEN + COLD, giữ thứ tự FIFO
-                .toList();
-
-        BigDecimal remaining = needed;
-        for (StockLot lot : lots) {
-            if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
-            BigDecimal deduct = remaining.min(lot.getQtyRemaining());
-            lot.setQtyRemaining(lot.getQtyRemaining().subtract(deduct));
-            stockLotRepository.save(lot);
-
-            StockMovement mv = new StockMovement();
-            mv.setLot(lot);
-            mv.setMovementType(MovementType.OUT);
-            mv.setQty(deduct);
-            mv.setRefId(e.getId());
-            mv.setRefType(REF_TYPE);
-            mv.setNote("Xuất NL sản xuất từ phiếu " + e.getCode());
-            stockMovementRepository.save(mv);
-
-            remaining = remaining.subtract(deduct);
-        }
-
+        BigDecimal remaining = productionStock.deduct(itemId, needed, REF_TYPE, e.getId(),
+                "Xuất NL sản xuất từ phiếu " + e.getCode());
         if (remaining.compareTo(BigDecimal.ZERO) > 0) {
             throw new IllegalStateException(
-                    "Kho bếp + phòng lạnh không đủ nguyên liệu: " + itemName + " (thiếu " + remaining + ")");
+                    "Kho sản xuất không đủ nguyên liệu: " + itemName + " (thiếu " + remaining + ")");
         }
     }
 
@@ -584,14 +564,13 @@ public class ProductionRequestService
                     "qtyProduced (" + qtyProduced + ") ≠ plannedQty (" + plannedQty + "). Vui lòng chọn adjustmentType.");
         }
 
-        Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
-                .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
+        Warehouse deliveryHold = warehouseRoles.deliveryHold();   // 22: kho bánh chờ giao
 
         if (e.getProductionType() == ProductionType.SEMI) {
             // 20/D5: phiếu BTP trừ NL từ bảng tạm (đã OUT lúc lấy), thiếu → 422 "Bấm Lấy thêm"
             materialService.consume(e, line, qtyProduced);
         } else {
-            // DAILY/ORDER giữ nguyên: trừ NL kho KITCHEN + COLD theo recipe × qtyProduced (đơn vị được quy đổi)
+            // DAILY/ORDER: trừ NL theo recipe × qtyProduced (đơn vị được quy đổi); kho theo 22/§5.2 (ProductionStock)
             Recipe recipe = resolveRecipe(line);
             if (recipe != null) {
                 List<RecipeLine> recipeLines = recipeLineRepository.findByRecipeIdOrderBySortOrderAsc(recipe.getId());
@@ -608,9 +587,9 @@ public class ProductionRequestService
             }
         }
 
-        // Lô đầu ra: BTP có kho mặc định ở khu sản xuất (vd Phòng lạnh) vào kho đó; còn lại vào KITCHEN
+        // Lô đầu ra: BTP có kho mặc định được lưu BTP vào kho đó; còn lại vào kho bánh chờ giao
         Warehouse outputWarehouse = ProductionZone.outputWarehouse(
-                e.getProductionType() == ProductionType.SEMI, line.getProduct().getDefaultWarehouse(), kitchen);
+                e.getProductionType() == ProductionType.SEMI, line.getProduct().getDefaultWarehouse(), deliveryHold);
 
         StockLot productLot = new StockLot();
         productLot.setItem(line.getProduct());
@@ -771,10 +750,8 @@ public class ProductionRequestService
             var productionDate = line.getProductionRequest().getProductionDate();
 
             // Lấy lot tại KITCHEN (lot được tạo khi completeLine)
-            Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
-                    .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
-            Warehouse shop = warehouseRepository.findByCode(SHOP_CODE)
-                    .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho SHOP"));
+            Warehouse kitchen = warehouseRoles.deliveryHold();   // 22: bánh chờ giao → bán hàng
+            Warehouse shop = warehouseRoles.salesPoint();
 
             // FEFO: lấy lot KITCHEN của item này, trừ dần theo qtyReceived
             List<StockLot> kitchenLots = stockLotRepository

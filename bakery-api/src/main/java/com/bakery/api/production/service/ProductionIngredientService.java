@@ -11,7 +11,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.bakery.api.inventory.entity.InventoryRequest;
-import com.bakery.api.inventory.service.ProductionZone;
 import com.bakery.api.inventory.entity.InventoryRequestLine;
 import com.bakery.api.inventory.repository.InventoryRequestLineRepository;
 import com.bakery.api.inventory.repository.InventoryRequestRepository;
@@ -41,7 +40,6 @@ import com.bakery.api.pricing.entity.IngredientPrice;
 import com.bakery.api.pricing.repository.IngredientPriceRepository;
 import com.bakery.framework.entity.ApprovalStatus;
 import com.bakery.framework.entity.InventoryRequestType;
-import com.bakery.framework.entity.WarehouseType;
 import com.bakery.framework.exception.ResourceNotFoundException;
 import com.bakery.framework.security.BakeryActorResolver;
 import lombok.RequiredArgsConstructor;
@@ -64,7 +62,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProductionIngredientService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final String KITCHEN_CODE = "KITCHEN";
 
     private final ProductionPlanRepository planRepository;
     private final ProductionPlanLineRepository planLineRepository;
@@ -75,6 +72,7 @@ public class ProductionIngredientService {
     private final RecipeLineRepository recipeLineRepository;
     private final StockLotRepository stockLotRepository;
     private final WarehouseRepository warehouseRepository;
+    private final com.bakery.api.master.service.WarehouseRoles warehouseRoles;
     private final InventoryRequestRepository inventoryRequestRepository;
     private final InventoryRequestLineRepository inventoryRequestLineRepository;
     private final UnitConversionRepository unitConversionRepository;
@@ -101,10 +99,9 @@ public class ProductionIngredientService {
         // Expand BOM → tổng raw ingredient cần theo từng item
         Map<UUID, IngredientNeed> needed = expandBom(plan);
 
-        // Tải tồn kho MAIN + KITCHEN — available = tổng cả 2 kho
-        Warehouse mainWarehouse = findMainWarehouse();
-        Map<UUID, BigDecimal> mainStock = currentMainStock(mainWarehouse);
-        Map<UUID, BigDecimal> kitchenStock = currentKitchenStock();
+        // 22: tồn kho cấp (nhóm 2) + tồn bếp (nhóm 1) — available = tổng hai nhóm
+        Map<UUID, BigDecimal> mainStock = stockOf(warehouseRoles.productionFallback());
+        Map<UUID, BigDecimal> kitchenStock = stockOf(warehouseRoles.productionPrimary());
 
         List<Map<String, Object>> sufficient = new ArrayList<>();
         List<Map<String, Object>> shortage = new ArrayList<>();
@@ -163,9 +160,9 @@ public class ProductionIngredientService {
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionPlan", planId));
 
         Map<UUID, IngredientNeed> needed = expandBom(plan);
-        Warehouse mainWarehouse = findMainWarehouse();
-        Map<UUID, BigDecimal> mainStock = currentMainStock(mainWarehouse);
-        Map<UUID, BigDecimal> kitchenStock = currentKitchenStock();
+        Warehouse mainWarehouse = supplyWarehouse();
+        Map<UUID, BigDecimal> mainStock = stockOf(warehouseRoles.productionFallback());
+        Map<UUID, BigDecimal> kitchenStock = stockOf(warehouseRoles.productionPrimary());
 
         // Lọc chỉ lấy những NL thiếu (so với tổng MAIN + KITCHEN)
         List<IngredientNeed> shortageItems = needed.values().stream()
@@ -180,7 +177,7 @@ public class ProductionIngredientService {
             throw new IllegalStateException("Không có nguyên liệu thiếu — không cần tạo phiếu nhập.");
         }
 
-        // Tạo phiếu PURCHASE vào MAIN
+        // Tạo phiếu PURCHASE vào kho cấp NL (22: kho Sản xuất lấy NL kiêm Nhận NCC đầu tiên)
         InventoryRequest request = new InventoryRequest();
         request.setRequestType(InventoryRequestType.PURCHASE);
         request.setRequestDate(LocalDate.now());
@@ -221,7 +218,7 @@ public class ProductionIngredientService {
             BigDecimal unitCost = latestPriceByItem.getOrDefault(need.item.getId(), need.item.getUnitCost());
             line.setUnitCost(unitCost);
             line.setSortOrder(order++);
-            line.setNote("Cần " + need.totalQty + ", tồn MAIN " + inMain + " + BẾP " + inKitchen + " → nhập thêm " + shortageQty);
+            line.setNote("Cần " + need.totalQty + ", tồn kho cấp " + inMain + " + BẾP " + inKitchen + " → nhập thêm " + shortageQty);
             line.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
             inventoryRequestLineRepository.save(line);
         }
@@ -251,12 +248,12 @@ public class ProductionIngredientService {
             throw new IllegalStateException("Kế hoạch SX không có nguyên liệu cần xuất (chưa có công thức?).");
         }
 
-        Warehouse mainWarehouse = findMainWarehouse();
-        Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
-                .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN."));
+        // 22: phiếu từ kho cấp đầu tiên (nhóm 2, theo thứ tự) → kho bánh chờ giao; tồn cấp = tồn của kho nguồn
+        Warehouse mainWarehouse = supplyWarehouse();
+        Warehouse kitchen = warehouseRoles.deliveryHold();
 
-        Map<UUID, BigDecimal> mainStock    = currentMainStock(mainWarehouse);
-        Map<UUID, BigDecimal> kitchenStock = currentKitchenStock();
+        Map<UUID, BigDecimal> mainStock    = stockOf(List.of(mainWarehouse));
+        Map<UUID, BigDecimal> kitchenStock = stockOf(warehouseRoles.productionPrimary());
 
         // Tính qty cần transfer = needed - kitchenStock (chỉ phần KITCHEN chưa có)
         // Capped bởi tồn MAIN. NL KITCHEN đã đủ → skip.
@@ -272,7 +269,7 @@ public class ProductionIngredientService {
             }
             BigDecimal inMain = mainStock.getOrDefault(need.item.getId(), BigDecimal.ZERO);
             if (inMain.compareTo(BigDecimal.ZERO) <= 0) {
-                skipped.add(need.item.getName() + " (MAIN hết tồn)");
+                skipped.add(need.item.getName() + " (kho cấp hết tồn)");
                 continue;
             }
             // Chỉ transfer tối đa tồn MAIN
@@ -281,13 +278,13 @@ public class ProductionIngredientService {
         }
 
         if (!skipped.isEmpty()) {
-            log.warn("generateTransferRequest: bỏ qua {} NL thiếu tồn MAIN: {}", skipped.size(), skipped);
+            log.warn("generateTransferRequest: bỏ qua {} NL thiếu tồn kho cấp: {}", skipped.size(), skipped);
         }
 
         if (transferable.isEmpty()) {
             throw new IllegalStateException(
-                    "Không có NL nào cần chuyển (KITCHEN đã đủ hoặc MAIN không có tồn)."
-                    + (skipped.isEmpty() ? "" : " NL thiếu MAIN: " + skipped));
+                    "Không có NL nào cần chuyển (bếp đã đủ hoặc kho cấp không có tồn)."
+                    + (skipped.isEmpty() ? "" : " NL thiếu ở kho cấp: " + skipped));
         }
 
         // Tạo phiếu TRANSFER
@@ -299,7 +296,7 @@ public class ProductionIngredientService {
         request.setTargetWarehouse(kitchen);
         request.setNote("Xuất NL cho kế hoạch SX ngày " + plan.getPlanDate()
                 + " (plan #" + planId.toString().substring(0, 8) + ")"
-                + (skipped.isEmpty() ? "" : " [bỏ qua " + skipped.size() + " NL thiếu MAIN]"));
+                + (skipped.isEmpty() ? "" : " [bỏ qua " + skipped.size() + " NL thiếu ở kho cấp]"));
         request.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
 
         // Auto-generate code: TR-YYYYMMDD-NNN
@@ -483,8 +480,10 @@ public class ProductionIngredientService {
         return BigDecimal.ONE;
     }
 
-    private Map<UUID, BigDecimal> currentMainStock(Warehouse mainWarehouse) {
-        return stockLotRepository.findByWarehouseCode(mainWarehouse.getCode()).stream()
+    /** Tồn còn lại theo item, cộng mọi kho trong danh sách. */
+    private Map<UUID, BigDecimal> stockOf(List<Warehouse> warehouses) {
+        return warehouses.stream()
+                .flatMap(w -> stockLotRepository.findByWarehouseCode(w.getCode()).stream())
                 .filter(lot -> lot.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
                 .collect(Collectors.groupingBy(
                         lot -> lot.getItem().getId(),
@@ -494,23 +493,12 @@ public class ProductionIngredientService {
                 ));
     }
 
-    /** Tồn khu sản xuất (KITCHEN + COLD) theo item. Tên giữ nguyên vì nhiều chỗ gọi. */
-    private Map<UUID, BigDecimal> currentKitchenStock() {
-        return ProductionZone.CODES.stream()
-                .flatMap(code -> stockLotRepository.findByWarehouseCode(code).stream())
-                .filter(lot -> lot.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
-                .collect(Collectors.groupingBy(
-                        lot -> lot.getItem().getId(),
-                        Collectors.reducing(BigDecimal.ZERO,
-                                lot -> lot.getQtyRemaining(),
-                                BigDecimal::add)
-                ));
-    }
-
-    private Warehouse findMainWarehouse() {
-        return warehouseRepository.findByWarehouseType(WarehouseType.MAIN).stream()
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho MAIN."));
+    /** Kho cấp NL cho sản xuất (nhóm 2 đầu tiên theo thứ tự); không có thì kho Nhận NCC đầu tiên. */
+    private Warehouse supplyWarehouse() {
+        List<Warehouse> g2 = warehouseRoles.productionFallback();
+        if (!g2.isEmpty()) return g2.get(0);
+        return warehouseRoles.withRole(com.bakery.api.master.entity.WarehouseRole.RECEIVE_PURCHASE).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("Chưa cấu hình kho Nhận NCC"));
     }
 
     // ── SEMI_PRODUCT helpers ──────────────────────────────────────────────────
@@ -550,12 +538,8 @@ public class ProductionIngredientService {
             }
         }
 
-        // Tồn khu sản xuất (KITCHEN + COLD) của BTP này
-        Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
-                .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
-        BigDecimal kitchenStock = ProductionZone.CODES.stream()
-                .map(warehouseRepository::findByCode)
-                .flatMap(java.util.Optional::stream)
+        // Tồn BTP ở các kho sản xuất lấy NL không nhận NCC (22: nhóm 1)
+        BigDecimal kitchenStock = warehouseRoles.productionPrimary().stream()
                 .flatMap(w -> stockLotRepository.findByItemIdAndWarehouseId(semiItemId, w.getId()).stream())
                 .filter(l -> l.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
                 .map(com.bakery.api.inventory.entity.StockLot::getQtyRemaining)
@@ -571,115 +555,6 @@ public class ProductionIngredientService {
                 "kitchenStock", kitchenStock,
                 "suggested", suggested
         );
-    }
-
-    /**
-     * Tạo phiếu xuất kho MAIN → KITCHEN cho nguyên liệu cần để sản xuất BTP.
-     *
-     * <p>Chỉ tạo phiếu cho NL còn thiếu trong KITCHEN (không xuất những gì đã có đủ).
-     * Nếu MAIN không đủ cho 1 NL, xuất tối đa tồn MAIN có thể.
-     *
-     * @param semiPrId ID Phiếu SX BTP (productionType = SEMI)
-     * @return InventoryRequest đã tạo (PENDING_APPROVAL)
-     * @deprecated 20/D3: NL đi thẳng từ kho vào bảng tạm "Đang sản xuất" của phiếu
-     *             ({@code POST /production-requests/{id}/materials/pick}), không qua phiếu điều chuyển.
-     */
-    @Deprecated
-    @Transactional
-    public InventoryRequest generateSemiTransferRequest(UUID semiPrId) {
-        ProductionRequest pr = prRepository.findById(semiPrId)
-                .orElseThrow(() -> new ResourceNotFoundException("ProductionRequest", semiPrId));
-        if (pr.getProductionType() != ProductionType.SEMI) {
-            throw new IllegalStateException("Chỉ tạo phiếu NL cho Phiếu SX BTP (type=SEMI). Hiện tại: "
-                    + pr.getProductionType());
-        }
-
-        // Expand BOM của tất cả lines trong phiếu SEMI
-        Map<UUID, IngredientNeed> needed = new LinkedHashMap<>();
-        for (ProductionRequestLine l : pr.getLines()) {
-            if (l.getProduct() == null || l.getPlannedQty() == null) continue;
-            Recipe recipe = recipeRepository.findBySemiProductIdAndActiveTrue(l.getProduct().getId()).orElse(null);
-            if (recipe == null) {
-                log.warn("generateSemiTransfer: BTP {} chưa có công thức — bỏ qua", l.getProduct().getCode());
-                continue;
-            }
-            expandRecipe(recipe, l.getPlannedQty(), needed);
-        }
-
-        if (needed.isEmpty()) {
-            throw new IllegalStateException("Không có NL nào (BTP chưa có công thức?).");
-        }
-
-        // So sánh với tồn KITCHEN — chỉ xuất phần thiếu
-        Warehouse kitchen = warehouseRepository.findByCode(KITCHEN_CODE)
-                .orElseThrow(() -> new IllegalStateException("Không tìm thấy kho KITCHEN"));
-        Map<UUID, BigDecimal> kitchenStock = ProductionZone.CODES.stream()
-                .flatMap(code -> stockLotRepository.findByWarehouseCode(code).stream())
-                .filter(l -> l.getQtyRemaining().compareTo(BigDecimal.ZERO) > 0)
-                .collect(Collectors.groupingBy(
-                        l -> l.getItem().getId(),
-                        Collectors.reducing(BigDecimal.ZERO,
-                                com.bakery.api.inventory.entity.StockLot::getQtyRemaining,
-                                BigDecimal::add)));
-
-        Warehouse mainWarehouse = findMainWarehouse();
-        Map<UUID, BigDecimal> mainStock = currentMainStock(mainWarehouse);
-
-        List<IngredientNeed> toTransfer = new ArrayList<>();
-        List<String> skipped = new ArrayList<>();
-        for (IngredientNeed need : needed.values()) {
-            BigDecimal inKitchen = kitchenStock.getOrDefault(need.item.getId(), BigDecimal.ZERO);
-            BigDecimal deficit = need.totalQty.subtract(inKitchen);
-            if (deficit.compareTo(BigDecimal.ZERO) <= 0) continue; // KITCHEN đã đủ
-
-            BigDecimal inMain = mainStock.getOrDefault(need.item.getId(), BigDecimal.ZERO);
-            if (inMain.compareTo(BigDecimal.ZERO) <= 0) {
-                skipped.add(need.item.getName() + " (MAIN hết tồn)");
-                continue;
-            }
-            BigDecimal transfer = deficit.min(inMain);
-            toTransfer.add(new IngredientNeed(need.item, transfer));
-        }
-
-        if (toTransfer.isEmpty()) {
-            throw new IllegalStateException(
-                    "KITCHEN đã đủ nguyên liệu hoặc MAIN không có tồn."
-                    + (skipped.isEmpty() ? "" : " NL thiếu MAIN: " + skipped));
-        }
-
-        // Tạo phiếu TRANSFER TR-SEMI-YYYYMMDD-NNN
-        String dateStr = LocalDate.now().format(DATE_FMT);
-        String codePrefix = "TR-SEMI-" + dateStr + "-";
-        long count = inventoryRequestRepository.countByCodeStartingWith(codePrefix);
-
-        InventoryRequest req = new InventoryRequest();
-        req.setRequestType(InventoryRequestType.TRANSFER);
-        req.setRequestDate(LocalDate.now());
-        req.setExpectedDeliveryDate(pr.getProductionDate());
-        req.setSourceWarehouse(mainWarehouse);
-        req.setTargetWarehouse(kitchen);
-        req.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
-        req.setCode(codePrefix + String.format("%03d", count + 1));
-        req.setNote("Xuất NL cho Phiếu SX BTP " + pr.getCode()
-                + (skipped.isEmpty() ? "" : " [bỏ qua " + skipped.size() + " NL thiếu MAIN]"));
-        InventoryRequest saved = inventoryRequestRepository.save(req);
-
-        int order = 1;
-        for (IngredientNeed need : toTransfer) {
-            InventoryRequestLine line = new InventoryRequestLine();
-            line.setInventoryRequest(saved);
-            line.setItem(need.item);
-            line.setQuantity(need.totalQty);
-            line.setUnit(need.item.getUnit() != null ? need.item.getUnit() : "kg");
-            line.setSortOrder(order++);
-            line.setNote("NL cho BTP — " + pr.getCode());
-            line.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
-            inventoryRequestLineRepository.save(line);
-        }
-
-        log.info("generateSemiTransfer: tạo phiếu {} ({} NL) cho phiếu BTP {}",
-                saved.getCode(), toTransfer.size(), pr.getCode());
-        return saved;
     }
 
     /**

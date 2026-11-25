@@ -59,8 +59,6 @@ public class ProductionMaterialService {
     static final String REASON_GROUP = "ADJUSTMENT_REASON";   // 08/D4
     static final String REASON_OTHER = "OTHER";
     /** Kho được lấy NL: Kho Tổng + khu sản xuất (20/BE-1). */
-    private static final Set<String> PICK_WAREHOUSES = Set.of("MAIN", "KITCHEN", "COLD");
-    private static final List<String> STOCK_ORDER = List.of("KITCHEN", "COLD", "MAIN");
 
     private final ProductionRequestRepository requestRepository;
     private final ProductionMaterialRepository materialRepository;
@@ -68,6 +66,7 @@ public class ProductionMaterialService {
     private final StockLotRepository stockLotRepository;
     private final StockMovementRepository stockMovementRepository;
     private final WarehouseRepository warehouseRepository;
+    private final com.bakery.api.master.service.WarehouseRoles warehouseRoles;
     private final CodeValueRepository codeValueRepository;
     private final ProductionIngredientService ingredientService;
     private final BakeryActorResolver actorResolver;
@@ -105,8 +104,11 @@ public class ProductionMaterialService {
         if (req == null || req.warehouseId() == null) throw new IllegalArgumentException("Thiếu kho lấy nguyên liệu.");
         Warehouse wh = warehouseRepository.findById(req.warehouseId())
                 .orElseThrow(() -> new ResourceNotFoundException("Warehouse", req.warehouseId()));
-        if (!PICK_WAREHOUSES.contains(wh.getCode())) {
-            throw new IllegalArgumentException("Chỉ lấy nguyên liệu ở Kho Tổng, Kho Bếp hoặc Phòng Lạnh.");
+        // 22: kho lấy NL = kho có việc "Sản xuất lấy NL"
+        if (!warehouseRoles.has(wh, com.bakery.api.master.entity.WarehouseRole.PRODUCTION_SOURCE)) {
+            throw new IllegalArgumentException("Chỉ lấy nguyên liệu ở kho Sản xuất lấy NL: " + warehouseRoles
+                    .withRole(com.bakery.api.master.entity.WarehouseRole.PRODUCTION_SOURCE).stream()
+                    .map(Warehouse::getName).collect(Collectors.joining(", ")) + ".");
         }
         requireLines(req.lines());
 
@@ -413,8 +415,7 @@ public class ProductionMaterialService {
         needs.forEach((id, n) -> items.put(id, n.item()));
         byItem.forEach((id, rs) -> items.putIfAbsent(id, rs.get(0).getItem()));
 
-        Map<String, Warehouse> whs = new LinkedHashMap<>();
-        for (String c : STOCK_ORDER) warehouseRepository.findByCode(c).ifPresent(w -> whs.put(c, w));
+        List<Warehouse> whs = warehouseRoles.withRole(com.bakery.api.master.entity.WarehouseRole.PRODUCTION_SOURCE);
 
         List<ProductionMaterialDto.Row> out = new ArrayList<>();
         for (var e : items.entrySet()) {
@@ -428,7 +429,7 @@ public class ProductionMaterialService {
             BigDecimal toPick = needed.subtract(picked).add(returned).add(written).max(BigDecimal.ZERO);
 
             List<ProductionMaterialDto.StockAt> stock = new ArrayList<>();
-            for (Warehouse w : whs.values()) {
+            for (Warehouse w : whs) {
                 BigDecimal q = stockLotRepository.findByItemIdAndWarehouseIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
                                 item.getId(), w.getId(), BigDecimal.ZERO).stream()
                         .map(StockLot::getQtyRemaining).reduce(BigDecimal.ZERO, BigDecimal::add);

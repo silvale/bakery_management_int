@@ -26,7 +26,7 @@ class ProductionMaterialStatusTest {
                     }
                     throw new UnsupportedOperationException(m.getName());
                 });
-        return new ProductionMaterialService(null, repo, null, null, null, null, null, null, null);
+        return new ProductionMaterialService(null, repo, null, null, null, null, null, null, null, null);
     }
 
     private static ProductionRequest request(ProductionType type, ProductionLineStatus... lines) {

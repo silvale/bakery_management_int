@@ -29,7 +29,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/cancel-records")
 @RequiredArgsConstructor
 @RequirePermission(screen = "HUY_BANH", action = "VIEW")
-@com.bakery.api.auth.scope.RequireWarehouse(any = {"SHOP"})
+@com.bakery.api.auth.scope.RequireWarehouse(role = {com.bakery.api.master.entity.WarehouseRole.SALES_POINT})
 public class CancelRecordController {
 
     private final CancelRecordService cancelRecordService;

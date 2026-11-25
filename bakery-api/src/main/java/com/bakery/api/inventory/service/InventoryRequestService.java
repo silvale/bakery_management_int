@@ -41,7 +41,6 @@ import com.bakery.api.master.entity.CodeValue;
 import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.entity.Warehouse;
 import com.bakery.framework.entity.EntityStatus;
-import com.bakery.framework.entity.WarehouseType;
 import com.bakery.api.master.entity.ItemPackaging;
 import com.bakery.api.master.repository.ItemLookupRepository;
 import com.bakery.api.master.repository.ItemPackagingRepository;
@@ -174,8 +173,8 @@ public class InventoryRequestService
                     .orElseThrow(() -> new ResourceNotFoundException("Supplier", req.supplierId())));
         }
 
-        // 21/BE-2: sửa phiếu nhập không được đổi kho nhận sang kho khác MAIN
-        requirePurchaseIntoMain(e.getRequestType(), e.getTargetWarehouse());
+        // 22: sửa phiếu không được đổi sang kho EXTERNAL / kho không Nhận NCC (phiếu nhập)
+        requireWarehouseRoles(e.getRequestType(), e.getSourceWarehouse(), e.getTargetWarehouse());
         // 11/D2: sau khi đổi kho, phiếu vẫn phải thuộc phạm vi của user
         scope.assertAnyWarehouse(e.getSourceWarehouse(), e.getTargetWarehouse());
 
@@ -302,7 +301,7 @@ public class InventoryRequestService
         authorizeCreate(e);
         requireDeliveryDate(e.getRequestType(), e.getExpectedDeliveryDate());
         requireWarehouses(e.getRequestType(), e.getSourceWarehouse() != null, e.getTargetWarehouse() != null);
-        requirePurchaseIntoMain(e.getRequestType(), e.getTargetWarehouse());
+        requireWarehouseRoles(e.getRequestType(), e.getSourceWarehouse(), e.getTargetWarehouse());
         String prefix = switch (e.getRequestType()) {
             case PURCHASE -> "PO";
             case TRANSFER -> "TR";
@@ -524,16 +523,26 @@ public class InventoryRequestService
         if (msg != null) throw new IllegalStateException(msg);
     }
 
-    /** 21/BE-2: chỉ Kho Chính (mã MAIN) nhập hàng từ NCC; áp cho mọi user kể cả Admin. Null = hợp lệ (thiếu kho do {@link #warehouseBlocker} báo). */
+    /** 22: kho nhận của phiếu nhập phải có việc Nhận NCC (thay cho "chỉ MAIN" của 21/BE-2); mọi user kể cả Admin. Null = hợp lệ (thiếu kho do {@link #warehouseBlocker} báo). */
     static String purchaseWarehouseBlocker(InventoryRequestType type, Warehouse target) {
-        if (type == InventoryRequestType.PURCHASE && target != null && !"MAIN".equals(target.getCode())) {
-            return "Chỉ Kho Chính được nhập hàng từ nhà cung cấp";
+        if (type == InventoryRequestType.PURCHASE && target != null && !target.isCanReceivePurchase()) {
+            return "Kho " + target.getName() + " không được nhập hàng từ nhà cung cấp";
         }
         return null;
     }
 
-    private static void requirePurchaseIntoMain(InventoryRequestType type, Warehouse target) {
-        String msg = purchaseWarehouseBlocker(type, target);
+    /** 22: kho nơi nhận ngoài (EXTERNAL) không làm kho xuất / nhận của phiếu nào. */
+    static String externalWarehouseBlocker(Warehouse... ws) {
+        for (Warehouse w : ws) {
+            if (w != null && w.isExternal()) return "Kho " + w.getName() + " là nơi nhận ngoài, không dùng cho phiếu kho";
+        }
+        return null;
+    }
+
+    /** Kiểm kho của phiếu theo cấu hình: không EXTERNAL, PURCHASE chỉ vào kho Nhận NCC. */
+    private static void requireWarehouseRoles(InventoryRequestType type, Warehouse source, Warehouse target) {
+        String msg = externalWarehouseBlocker(source, target);
+        if (msg == null) msg = purchaseWarehouseBlocker(type, target);
         if (msg != null) throw new IllegalStateException(msg);
     }
 
@@ -1022,8 +1031,8 @@ public class InventoryRequestService
             if (REASON_OTHER.equals(reason) && (lr.note() == null || lr.note().isBlank())) {
                 throw new IllegalArgumentException(name + ": lý do \"Khác\" bắt buộc ghi chú");
             }
-            if (warehouse.getWarehouseType() == WarehouseType.SHOP && productIds.contains(item.getId())) {
-                throw new IllegalArgumentException(name + ": không điều chỉnh thành phẩm ở kho Cửa Hàng "
+            if (warehouse.isSalesPoint() && productIds.contains(item.getId())) {
+                throw new IllegalArgumentException(name + ": không điều chỉnh thành phẩm ở kho " + warehouse.getName() + " "
                         + "(tồn bánh chốt bằng báo cáo ngày)");
             }
             BigDecimal sys = system.getOrDefault(item.getId(), BigDecimal.ZERO);

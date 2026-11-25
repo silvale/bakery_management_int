@@ -44,7 +44,7 @@ public class RoleDefaultsService {
     public RoleDefaults defaults(UserRole role) {
         return new RoleDefaults(
                 defaultWarehouses(role).stream().map(w -> new RefInfo(w.getId(), w.getCode(), w.getName(),
-                        w.getWarehouseType() != null ? w.getWarehouseType().name() : null)).toList(),
+                        w.getKind() != null ? w.getKind().name() : null)).toList(),
                 defaultPriceSuppliers(role).stream().map(s -> RefInfo.of(s.getId(), s.getCode(), s.getName())).toList());
     }
 }
