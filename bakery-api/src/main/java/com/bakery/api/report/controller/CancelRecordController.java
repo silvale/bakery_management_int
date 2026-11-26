@@ -67,7 +67,7 @@ public class CancelRecordController {
             @RequestParam(defaultValue = "DAMAGED") String cancelType,
             @RequestParam(required = false) String note) {
         DailyReport report = reportRepository.findByReportDate(date)
-                .orElseThrow(() -> new ResourceNotFoundException("DailyReport for date " + date));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy báo cáo ngày " + date.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"))));
         return cancelRecordService.addExtra(report, exCode, qtyCancelActual, cancelType, note);
     }
 

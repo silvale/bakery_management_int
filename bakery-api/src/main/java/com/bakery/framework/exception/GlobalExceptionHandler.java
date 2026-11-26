@@ -36,11 +36,12 @@ public class GlobalExceptionHandler {
         Map<String, String> errors = ex.getBindingResult().getFieldErrors().stream()
                 .collect(Collectors.toMap(
                         FieldError::getField,
-                        f -> f.getDefaultMessage() != null ? f.getDefaultMessage() : "invalid",
+                        f -> f.getDefaultMessage() != null ? f.getDefaultMessage() : "Không hợp lệ",
                         (a, b) -> a));
 
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
-        problem.setTitle("Validation failed");
+        problem.setTitle("Dữ liệu không hợp lệ");
+        problem.setDetail("Dữ liệu không hợp lệ");
         problem.setProperty("errors", errors);
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.badRequest().body(problem);
@@ -49,7 +50,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ProblemDetail> handleNotFound(ResourceNotFoundException ex) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
-        problem.setTitle("Not found");
+        problem.setTitle("Không tìm thấy");
         problem.setDetail(ex.getMessage());
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
@@ -60,7 +61,7 @@ public class GlobalExceptionHandler {
         HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
         if (status == null) status = HttpStatus.INTERNAL_SERVER_ERROR;
         ProblemDetail problem = ProblemDetail.forStatus(status);
-        problem.setTitle(status.getReasonPhrase());
+        problem.setTitle(title(status));
         problem.setDetail(ex.getReason());
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.status(status).body(problem);
@@ -69,7 +70,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException ex) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.FORBIDDEN);
-        problem.setTitle("Access denied");
+        problem.setTitle("Không có quyền");
+        problem.setDetail("Không có quyền thực hiện thao tác này");
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
     }
@@ -77,7 +79,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ProblemDetail> handleIllegalArgument(IllegalArgumentException ex) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
-        problem.setTitle("Bad request");
+        problem.setTitle("Yêu cầu không hợp lệ");
         problem.setDetail(ex.getMessage());
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.badRequest().body(problem);
@@ -86,7 +88,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ProblemDetail> handleIllegalState(IllegalStateException ex) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
-        problem.setTitle("Business rule violation");
+        problem.setTitle("Không thực hiện được");
         problem.setDetail(ex.getMessage());
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.unprocessableEntity().body(problem);
@@ -96,7 +98,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ProblemDetail> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
-        problem.setTitle("Bad request");
+        problem.setTitle("Yêu cầu không hợp lệ");
         problem.setDetail("Tham số " + ex.getName() + " không hợp lệ: " + ex.getValue());
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.badRequest().body(problem);
@@ -106,7 +108,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ProblemDetail> handleUnreadable(HttpMessageNotReadableException ex) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
-        problem.setTitle("Bad request");
+        problem.setTitle("Yêu cầu không hợp lệ");
         problem.setDetail("Dữ liệu gửi lên không hợp lệ");
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.badRequest().body(problem);
@@ -117,7 +119,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ProblemDetail> handleDataIntegrity(DataIntegrityViolationException ex) {
         log.warn("Vi phạm ràng buộc DB: {}", ex.getMostSpecificCause().getMessage());
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
-        problem.setTitle("Conflict");
+        problem.setTitle("Xung đột dữ liệu");
         problem.setDetail("Dữ liệu trùng hoặc vi phạm ràng buộc");
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
@@ -137,7 +139,7 @@ public class GlobalExceptionHandler {
             if (er.getBody().getDetail() != null) detail = er.getBody().getDetail();
         }
         ProblemDetail problem = ProblemDetail.forStatus(status);
-        problem.setTitle(status.getReasonPhrase());
+        problem.setTitle(title(status));
         problem.setDetail(detail);
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.status(status).body(problem);
@@ -147,7 +149,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(org.springframework.web.multipart.MultipartException.class)
     public ResponseEntity<ProblemDetail> handleMultipart(org.springframework.web.multipart.MultipartException ex) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
-        problem.setTitle("Bad request");
+        problem.setTitle("Yêu cầu không hợp lệ");
         problem.setDetail("Yêu cầu tải lên phải là multipart/form-data");
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.badRequest().body(problem);
@@ -157,8 +159,25 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ProblemDetail> handleGeneral(Exception ex) {
         log.error("Unhandled exception", ex);
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.INTERNAL_SERVER_ERROR);
-        problem.setTitle("Internal server error");
+        problem.setTitle("Lỗi hệ thống");
+        problem.setDetail("Lỗi hệ thống, vui lòng thử lại sau");
         problem.setProperty("timestamp", Instant.now());
         return ResponseEntity.internalServerError().body(problem);
+    }
+
+    /** 26: tiêu đề tiếng Việt theo mã HTTP (thay cho cụm tiếng Anh của Spring). */
+    private static String title(HttpStatus status) {
+        return switch (status) {
+            case BAD_REQUEST -> "Yêu cầu không hợp lệ";
+            case UNAUTHORIZED -> "Chưa đăng nhập";
+            case FORBIDDEN -> "Không có quyền";
+            case NOT_FOUND -> "Không tìm thấy";
+            case METHOD_NOT_ALLOWED -> "Không hỗ trợ thao tác này";
+            case CONFLICT -> "Xung đột dữ liệu";
+            case UNSUPPORTED_MEDIA_TYPE -> "Kiểu dữ liệu không được hỗ trợ";
+            case UNPROCESSABLE_ENTITY -> "Không thực hiện được";
+            case INTERNAL_SERVER_ERROR -> "Lỗi hệ thống";
+            default -> "Lỗi";
+        };
     }
 }

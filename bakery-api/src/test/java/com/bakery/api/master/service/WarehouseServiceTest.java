@@ -52,7 +52,7 @@ class WarehouseServiceTest {
         Warehouse w = wh("COLD");
         w.setCanStoreSemi(true);
         String m = WarehouseService.updateBlocker(w, req("COLD", null, null, null, false, null, null, null), new Facts(false, 0, 3, true, true));
-        assertThat(m).contains("3").contains("bán thành phẩm");
+        assertThat(m).contains("3").contains("hàng gia công").doesNotContain("BTP");
         assertThat(WarehouseService.updateBlocker(w, req("COLD", null, null, null, false, null, null, null), NONE)).isNull();
     }
 

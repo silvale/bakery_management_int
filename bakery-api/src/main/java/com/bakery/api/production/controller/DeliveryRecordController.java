@@ -56,7 +56,7 @@ public class DeliveryRecordController {
             com.bakery.api.production.dto.ConfirmDeliveryRequest request) {
         if (request == null || request.qtyReceived() == null) {
             throw new IllegalArgumentException(
-                    "Body JSON bắt buộc: {\"qtyReceived\": số, \"note\": ..., \"designs\": [...]}");
+                    "Phải gửi số lượng đã nhận");
         }
         return service.confirmDelivery(id, request.qtyReceived(), request.note(), request.designs());
     }

@@ -153,7 +153,7 @@ public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
         E entity = getRepository().findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(getEntityName(), id));
         if (entity.getApprovalStatus() != ApprovalStatus.PENDING_APPROVAL) {
-            throw new IllegalStateException(getEntityName() + " is not pending approval");
+            throw new IllegalStateException("Chỉ duyệt được " + com.bakery.framework.exception.EntityNames.vi(getEntityName()) + " đang chờ duyệt");
         }
         entity.setApprovalStatus(ApprovalStatus.APPROVED);
         entity.setApprovedAt(Instant.now());
@@ -175,7 +175,7 @@ public abstract class AbstractBakeryAdminService<E extends BaseEntity, REQ, RES>
         E entity = getRepository().findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(getEntityName(), id));
         if (entity.getApprovalStatus() != ApprovalStatus.PENDING_APPROVAL) {
-            throw new IllegalStateException(getEntityName() + " is not pending approval");
+            throw new IllegalStateException("Chỉ từ chối được " + com.bakery.framework.exception.EntityNames.vi(getEntityName()) + " đang chờ duyệt");
         }
         entity.setApprovalStatus(ApprovalStatus.REJECTED);
         entity.setRejectedReason(reason);

@@ -143,7 +143,7 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
             if (!f.otherHasProduction()) return "Phải còn ít nhất một kho Sản xuất lấy NL";
         }
         if (before.semi() && !after.semi() && f.semiHere() > 0) {
-            return "Không tắt được Lưu BTP: còn " + f.semiHere() + " bán thành phẩm có kho mặc định là kho này";
+            return "Không tắt được Lưu hàng gia công: còn " + f.semiHere() + " hàng gia công có kho mặc định là kho này";
         }
         if (before.receive() && !after.receive() && !f.otherHasReceive()) {
             return "Phải còn ít nhất một kho Nhận NCC";

@@ -69,7 +69,7 @@ public abstract class BakeryAdminResource<REQ, RES> {
 
         if (!permissionService.hasPermission(principal.getRole(), screenCode(), action)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Không có quyền [" + screenCode() + ":" + action + "]");
+                    com.bakery.api.auth.service.PermissionLabels.denied(screenCode(), action));
         }
     }
 

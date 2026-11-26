@@ -82,7 +82,7 @@ public class CakeDesignService extends AbstractBakeryAdminService<CakeDesign, Ca
         if (productId != null) {
             UUID pid;
             try { pid = UUID.fromString(productId); }
-            catch (IllegalArgumentException ex) { throw new IllegalArgumentException("productId không hợp lệ"); }
+            catch (IllegalArgumentException ex) { throw new IllegalArgumentException("Sản phẩm không hợp lệ"); }
             spec = spec.and((root, q, cb) -> cb.equal(root.get("product").get("id"), pid));
         }
         if (groupCode != null) {

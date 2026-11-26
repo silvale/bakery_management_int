@@ -142,7 +142,7 @@ public class UnitController {
         String toUnit   = ((String) body.getOrDefault("toUnit",   "")).trim().toUpperCase();
         Object factorRaw = body.get("factor");
         if (fromUnit.isEmpty() || toUnit.isEmpty() || factorRaw == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "fromUnit, toUnit và factor là bắt buộc"));
+            return ResponseEntity.badRequest().body(Map.of("error", "Phải nhập đơn vị gốc, đơn vị đích và hệ số quy đổi"));
         }
         BigDecimal factor;
         try {

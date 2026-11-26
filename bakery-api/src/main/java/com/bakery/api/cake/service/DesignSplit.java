@@ -44,7 +44,7 @@ public final class DesignSplit {
         Set<UUID> seen = new java.util.HashSet<>();
         BigDecimal sum = BigDecimal.ZERO;
         for (DesignQtyRequest d : designs) {
-            if (d == null || d.designId() == null) throw new IllegalArgumentException("Thiếu designId");
+            if (d == null || d.designId() == null) throw new IllegalArgumentException("Thiếu mẫu bánh");
             if (!seen.add(d.designId())) throw new IllegalArgumentException("Mẫu bị chọn trùng");
             if (!allowed.contains(d.designId())) {
                 throw new IllegalArgumentException(notAllowedMessage(d.designId(), codeOf));

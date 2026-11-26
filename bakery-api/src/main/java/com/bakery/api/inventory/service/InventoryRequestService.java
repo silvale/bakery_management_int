@@ -670,7 +670,7 @@ public class InventoryRequestService
         InventoryRequestLine line = lineRepository.findById(lineId)
                 .orElseThrow(() -> new ResourceNotFoundException("InventoryRequestLine", lineId));
         if (!line.getInventoryRequest().getId().equals(requestId)) {
-            throw new IllegalArgumentException("Line không thuộc phiếu này");
+            throw new IllegalArgumentException("Dòng không thuộc phiếu này");
         }
         InventoryRequest owner = line.getInventoryRequest();
         requireNotPoolType(owner.getRequestType());
@@ -938,11 +938,11 @@ public class InventoryRequestService
         List<String> changes = new ArrayList<>();
         for (LinePrice p : prices) {
             if (p == null || p.lineId() == null || p.unitCost() == null || p.unitCost().signum() < 0) {
-                throw new IllegalArgumentException("Mỗi dòng cần lineId và unitCost ≥ 0");
+                throw new IllegalArgumentException("Mỗi dòng phải có dòng phiếu và đơn giá không âm");
             }
             InventoryRequestLine line = byId.get(p.lineId());
             if (line == null) throw new IllegalArgumentException("Dòng không thuộc phiếu này: " + p.lineId());
-            if (!seen.add(p.lineId())) throw new IllegalArgumentException("lineId bị trùng: " + p.lineId());
+            if (!seen.add(p.lineId())) throw new IllegalArgumentException("Dòng phiếu bị trùng: " + p.lineId());
             BigDecimal old = line.getUnitCost();
             line.setUnitCost(p.unitCost());
             BigDecimal perCanonical = unitCostPerCanonical(line);
@@ -989,7 +989,7 @@ public class InventoryRequestService
     private String editDenied(InventoryRequest e) {
         if (scope.isAdmin()) return null;
         String screen = screenOf(e.getRequestType());
-        if (!scope.can(screen, "UPDATE")) return "Không có quyền thực hiện thao tác này [" + screen + ":UPDATE]";
+        if (!scope.can(screen, "UPDATE")) return com.bakery.api.auth.service.PermissionLabels.denied(screen, "UPDATE");
         if (!scope.hasWarehouse(e.getSourceWarehouse() != null ? e.getSourceWarehouse().getId() : null)
                 && !scope.hasWarehouse(e.getTargetWarehouse() != null ? e.getTargetWarehouse().getId() : null)) {
             return "Bạn không có quyền với kho của phiếu này";
@@ -1019,7 +1019,7 @@ public class InventoryRequestService
             if (denied != null) throw forbidden(denied);
             return;
         }
-        if (!scope.can(screen, action)) throw forbidden("Không có quyền thực hiện thao tác này [" + screen + ":" + action + "]");
+        if (!scope.can(screen, action)) throw forbidden(com.bakery.api.auth.service.PermissionLabels.denied(screen, action));
         scope.assertAnyWarehouse(e.getSourceWarehouse(), e.getTargetWarehouse());
     }
 
@@ -1027,7 +1027,7 @@ public class InventoryRequestService
     private void authorizeCreate(InventoryRequest e) {
         if (scope.isAdmin()) return;
         String screen = screenOf(e.getRequestType());
-        if (!scope.can(screen, "CREATE")) throw forbidden("Không có quyền thực hiện thao tác này [" + screen + ":CREATE]");
+        if (!scope.can(screen, "CREATE")) throw forbidden(com.bakery.api.auth.service.PermissionLabels.denied(screen, "CREATE"));
         scope.assertAnyWarehouse(e.getSourceWarehouse(), e.getTargetWarehouse());
     }
 
@@ -1101,7 +1101,7 @@ public class InventoryRequestService
         List<Item> items = new ArrayList<>();
         Set<UUID> seen = new HashSet<>();
         for (InventoryRequestLineRequest lr : lines) {
-            if (lr.itemId() == null) throw new IllegalArgumentException("Mỗi dòng cần itemId");
+            if (lr.itemId() == null) throw new IllegalArgumentException("Mỗi dòng phải chọn mặt hàng");
             Item item = itemRepository.findById(lr.itemId())
                     .orElseThrow(() -> new ResourceNotFoundException("Item", lr.itemId()));
             if (!seen.add(item.getId())) {
@@ -1173,10 +1173,10 @@ public class InventoryRequestService
         Map<UUID, BigDecimal> received = new HashMap<>();
         for (ReceiveRequest.Line l : req.lines()) {
             if (l.lineId() == null || l.receivedQty() == null) {
-                throw new IllegalArgumentException("Mỗi dòng cần lineId và receivedQty");
+                throw new IllegalArgumentException("Mỗi dòng phải có dòng phiếu và số thực nhận");
             }
             if (received.put(l.lineId(), l.receivedQty()) != null) {
-                throw new IllegalArgumentException("lineId bị trùng: " + l.lineId());
+                throw new IllegalArgumentException("Dòng phiếu bị trùng: " + l.lineId());
             }
         }
         Set<UUID> lineIds = new LinkedHashSet<>();
@@ -1300,12 +1300,11 @@ public class InventoryRequestService
         rest.remove("deliveryDateFrom");
         rest.remove("deliveryDateTo");
 
-        requireEnum("requestType", rest.getFirst("requestType"), InventoryRequestType.class);
-        requireEnum("approvalStatus", rest.getFirst("approvalStatus"), ApprovalStatus.class);
-        requireEnum("paymentStatus", rest.getFirst("paymentStatus"), PaymentStatus.class);
+        requireEnum("loại phiếu", rest.getFirst("requestType"), InventoryRequestType.class);
+        requireEnum("trạng thái duyệt", rest.getFirst("approvalStatus"), ApprovalStatus.class);
+        requireEnum("trạng thái thanh toán", rest.getFirst("paymentStatus"), PaymentStatus.class);
         if (deliveryStatus != null && !DELIVERY_STATUSES.contains(deliveryStatus)) {
-            throw new IllegalArgumentException("deliveryStatus không hợp lệ: " + deliveryStatus
-                    + " (DELIVERED | PENDING | OVERDUE)");
+            throw new IllegalArgumentException("Trạng thái giao hàng không hợp lệ: " + deliveryStatus);
         }
 
         Specification<InventoryRequest> spec = SpecificationBuilder.from(rest);

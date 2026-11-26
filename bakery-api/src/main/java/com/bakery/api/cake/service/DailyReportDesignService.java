@@ -153,13 +153,13 @@ public class DailyReportDesignService {
                 .collect(Collectors.toMap(CakeDesign::getId, d -> d));
         Set<UUID> seen = new HashSet<>();
         for (SubmitLineBody.DesignRemaining d : designs) {
-            if (d == null || d.designId() == null) throw new IllegalArgumentException("Thiếu designId");
+            if (d == null || d.designId() == null) throw new IllegalArgumentException("Thiếu mẫu bánh");
             if (!ofProduct.containsKey(d.designId())) {
                 throw new IllegalArgumentException(DesignSplit.notAllowedMessage(d.designId(),
                         id -> designRepository.findById(id).map(CakeDesign::getCode).orElse(null)));
             }
             if (!seen.add(d.designId())) throw new IllegalArgumentException("Mẫu bị nhập trùng");
-            if (d.qtyRemaining() == null) throw new IllegalArgumentException("Thiếu qtyRemaining của mẫu");
+            if (d.qtyRemaining() == null) throw new IllegalArgumentException("Thiếu số còn lại của mẫu");
             if (d.qtyRemaining().signum() < 0 || (d.qtyCancelled() != null && d.qtyCancelled().signum() < 0)) {
                 throw new IllegalArgumentException("Số lượng không được âm");
             }
