@@ -48,6 +48,10 @@ public class Warehouse extends BaseEntity {
     @Column(name = "can_export_external", nullable = false)
     private boolean canExportExternal;
 
+    /** 24: kho bảng tạm "Đang sản xuất" của cửa hàng; không bật cờ nào khác. */
+    @Column(name = "is_work_in_progress", nullable = false)
+    private boolean workInProgress;
+
     @Column(name = "sort_order", nullable = false)
     private int sortOrder;
 
@@ -64,6 +68,7 @@ public class Warehouse extends BaseEntity {
             case DELIVERY_HOLD -> deliveryHold;
             case SALES_POINT -> salesPoint;
             case EXPORT_EXTERNAL -> canExportExternal;
+            case WORK_IN_PROGRESS -> workInProgress;
         };
     }
 

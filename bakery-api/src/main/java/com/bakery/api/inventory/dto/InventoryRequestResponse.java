@@ -53,4 +53,11 @@ public class InventoryRequestResponse extends BaseResponse {
     private String receivedBy;
     /** Tổng line.totalCost; null nếu không phải PURCHASE. */
     private BigDecimal totalAmount;
+
+    /** 24: phiếu bảng tạm (PICK / RETURN / WRITE_OFF). */
+    private ProductionRequestRef productionRequest;
+    private String pickReason;
+    private java.util.UUID sessionId;
+
+    public record ProductionRequestRef(java.util.UUID id, String code) {}
 }

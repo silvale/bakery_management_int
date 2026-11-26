@@ -21,5 +21,6 @@ public record WarehouseRequest(
         Boolean isDeliveryHold,
         Boolean isSalesPoint,
         Boolean canExportExternal,
+        Boolean isWorkInProgress,
         Integer sortOrder,
         UUID storeId) {}

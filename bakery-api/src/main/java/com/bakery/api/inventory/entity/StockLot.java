@@ -75,4 +75,8 @@ public class StockLot extends BaseEntity {
      */
     @Column(name = "ex_code", length = 50)
     private String exCode;
+
+    /** 24: lô ở kho bảng tạm được giữ cho phiếu SX này; null = NL dư chung. */
+    @Column(name = "reserved_for_request_id")
+    private java.util.UUID reservedForRequestId;
 }

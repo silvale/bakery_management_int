@@ -29,6 +29,17 @@ public class WarehouseRoles {
     /** Kho bánh chờ giao (đúng một kho). */
     public Warehouse deliveryHold() { return single(WarehouseRole.DELIVERY_HOLD, "bánh chờ giao"); }
 
+    /** 24: kho bảng tạm của cửa hàng chứa kho Bánh chờ giao (B chỉ chạy cho cửa hàng đó). */
+    public Warehouse workInProgress() {
+        Warehouse hold = deliveryHold();
+        if (hold.getStore() != null) {
+            for (Warehouse w : withRole(WarehouseRole.WORK_IN_PROGRESS)) {
+                if (w.getStore() != null && w.getStore().getId().equals(hold.getStore().getId())) return w;
+            }
+        }
+        throw new IllegalStateException("Chưa cấu hình kho bảng tạm");
+    }
+
     /** Kho đang dùng có việc {@code r}, xếp theo thứ tự rồi mã. */
     public List<Warehouse> withRole(WarehouseRole r) {
         return filter(active(), r);
