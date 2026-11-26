@@ -38,4 +38,12 @@ class ProductionPickServiceTest {
         draft.setApprovalStatus(ApprovalStatus.DRAFT);
         assertThat(ProductionPickService.extraTargetBlocker(draft)).contains("chưa duyệt hoặc đã hoàn thành");
     }
+
+    @Test void shortMessageHidesNumbersFromThoseWhoCannotSeeStock() {   // 24/§5.8
+        assertThat(ProductionPickService.shortMessage(true, "Thịt heo", "Phòng Lạnh", new java.math.BigDecimal("2.5")))
+                .isEqualTo("Thịt heo: kho Phòng Lạnh chỉ còn 2.5");
+        String hidden = ProductionPickService.shortMessage(false, "Thịt heo", "Phòng Lạnh", new java.math.BigDecimal("2.5"));
+        assertThat(hidden).isEqualTo("Thịt heo: kho Phòng Lạnh không đủ. Báo quản lý kho bổ sung rồi xác nhận lại.");
+        assertThat(hidden).doesNotContain("2");
+    }
 }

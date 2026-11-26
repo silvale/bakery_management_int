@@ -188,13 +188,34 @@ public class InventoryRequestService
 
     @Override
     protected InventoryRequestResponse toResponse(InventoryRequest e) {
-        return toResponse(e, exportSuppliers(List.of(e)));
+        return toResponse(e, exportSuppliers(List.of(e)), pickStock(List.of(e)));
     }
 
     /** Danh sách phiếu: một query NCC cho cả trang phiếu xuất (25), không query theo từng phiếu. */
     private List<InventoryRequestResponse> toResponses(Collection<InventoryRequest> es) {
         Map<UUID, Map<UUID, Set<UUID>>> sup = exportSuppliers(es);
-        return es.stream().map(x -> toResponse(x, sup)).toList();
+        Map<String, BigDecimal> stock = pickStock(es);
+        return es.stream().map(x -> toResponse(x, sup, stock)).toList();
+    }
+
+    /** 24/BE-5: PICK chờ lấy mà user xem được tồn kho nguồn: giữ phiếu cần tồn, một query cho cả trang. */
+    private static boolean pendingPick(InventoryRequest x) {
+        return x.getRequestType() == InventoryRequestType.PICK && x.getApprovalStatus() == ApprovalStatus.PENDING_APPROVAL
+                && x.getSourceWarehouse() != null;
+    }
+
+    /** Tồn chung "kho|mặt hàng" của các phiếu PICK chờ lấy có kho nguồn user xem được tồn. */
+    private Map<String, BigDecimal> pickStock(Collection<InventoryRequest> es) {
+        Map<String, BigDecimal> out = new HashMap<>();
+        List<InventoryRequest> picks = es.stream().filter(InventoryRequestService::pendingPick)
+                .filter(x -> scope.canSeeStockOf(x.getSourceWarehouse())).toList();
+        if (picks.isEmpty()) return out;
+        Set<UUID> whs = picks.stream().map(x -> x.getSourceWarehouse().getId()).collect(java.util.stream.Collectors.toSet());
+        Set<UUID> items = picks.stream().flatMap(x -> x.getLines().stream()).filter(l -> l.getItem() != null)
+                .map(l -> l.getItem().getId()).collect(java.util.stream.Collectors.toSet());
+        if (items.isEmpty()) return out;
+        for (Object[] row : stockLotRepository.sumFreeByWarehouseItem(whs, items)) out.put(row[0] + "|" + row[1], (BigDecimal) row[2]);
+        return out;
     }
 
     /** NCC của các lô bị trừ, theo phiếu xuất đã duyệt → mặt hàng → tập NCC (có thể chứa null = lô không NCC). */
@@ -210,7 +231,7 @@ public class InventoryRequestService
         return out;
     }
 
-    private InventoryRequestResponse toResponse(InventoryRequest e, Map<UUID, Map<UUID, Set<UUID>>> exportSup) {
+    private InventoryRequestResponse toResponse(InventoryRequest e, Map<UUID, Map<UUID, Set<UUID>>> exportSup, Map<String, BigDecimal> pickStock) {
         InventoryRequestResponse r = new InventoryRequestResponse();
         r.applyFrom(e);
         r.setCode(e.getCode());
@@ -245,6 +266,10 @@ public class InventoryRequestService
         // 11/D6: xem được giá theo NCC của phiếu (Admin: luôn; phiếu không NCC: chỉ Admin)
         boolean seePrice = scope.canSeePurchasePrice(e.getSupplier() != null ? e.getSupplier().getId() : null);
         boolean[] hidden = {false};
+        // 24/BE-5: tồn kho nguồn ở phiếu lấy chỉ cho người xem được tồn; người khác không thấy số, không thấy tag Thiếu
+        boolean pick = e.getRequestType() == InventoryRequestType.PICK;
+        boolean seeStock = pick && scope.canSeeStockOf(e.getSourceWarehouse());
+        boolean pendingPick = pendingPick(e);
         // 08: phiếu điều chỉnh — tên lý do, và tồn hiện tại (chỉ khi chưa duyệt) cho admin so với tồn lúc kiểm
         boolean adjustment = e.getRequestType() == InventoryRequestType.ADJUSTMENT;
         Map<String, String> reasonNames = adjustment ? reasonNames() : Map.of();
@@ -285,7 +310,14 @@ public class InventoryRequestService
                     lr.setNote(line.getNote());
                     lr.setPurchaseQty(line.getPurchaseQty());
                     lr.setReceivedQty(line.getReceivedQty());
-                    lr.setStockShort(line.isStockShort());
+                    if (pick) {
+                        BigDecimal have = pendingPick && seeStock && line.getItem() != null && e.getSourceWarehouse() != null
+                                ? pickStock.getOrDefault(e.getSourceWarehouse().getId() + "|" + line.getItem().getId(), BigDecimal.ZERO) : null;
+                        lr.setStock(have);
+                        lr.setStockShort(seeStock && (have != null ? line.getQuantity().compareTo(have) > 0 : line.isStockShort()));
+                    } else {
+                        lr.setStockShort(line.isStockShort());
+                    }
                     if (adjustment) {
                         lr.setSystemQty(line.getSystemQty());
                         lr.setCountedQty(line.getCountedQty());
@@ -1362,7 +1394,8 @@ public class InventoryRequestService
             repository.findWithLinesByIdIn(page.getContent().stream().map(InventoryRequest::getId).toList());
         }
         Map<UUID, Map<UUID, Set<UUID>>> sup = exportSuppliers(page.getContent());
-        return page.map(x -> toResponse(x, sup));
+        Map<String, BigDecimal> stock = pickStock(page.getContent());
+        return page.map(x -> toResponse(x, sup, stock));
     }
 
     private static jakarta.persistence.criteria.Predicate adjustmentRequest(

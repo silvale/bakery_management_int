@@ -45,8 +45,9 @@ public final class ProductionPoolDto {
                       Ref productionRequest, UUID sessionId, String createdBy, Instant createdAt,
                       String receivedBy, LocalDate receivedDate, List<DocLine> lines, BigDecimal totalAmount) {
 
-        public static Doc from(InventoryRequest e, boolean seeCost) {
-            List<DocLine> lines = e.getLines().stream().map(l -> line(l, seeCost)).toList();
+        /** {@code seeStock}: user xem được tồn kho nguồn (24/§5.8); không thì không lộ tag Thiếu. */
+        public static Doc from(InventoryRequest e, boolean seeCost, boolean seeStock) {
+            List<DocLine> lines = e.getLines().stream().map(l -> line(l, seeCost, seeStock)).toList();
             BigDecimal total = null;
             if (seeCost) {
                 total = e.getLines().stream().map(InventoryRequestLine::getAmount)
@@ -59,9 +60,9 @@ public final class ProductionPoolDto {
                     e.getSessionId(), e.getCreatedBy(), e.getCreatedAt(), e.getReceivedBy(), e.getReceivedDate(), lines, total);
         }
 
-        private static DocLine line(InventoryRequestLine l, boolean seeCost) {
+        private static DocLine line(InventoryRequestLine l, boolean seeCost, boolean seeStock) {
             return new DocLine(l.getId(), l.getItem().getId(), l.getItem().getCode(), l.getItem().getName(), l.getUnit(),
-                    l.getQuantity(), l.getReceivedQty(), l.isStockShort(), l.getReasonCode(),
+                    l.getQuantity(), l.getReceivedQty(), seeStock && l.isStockShort(), l.getReasonCode(),
                     seeCost ? l.getAmount() : null, l.getNote());
         }
     }
@@ -128,9 +129,14 @@ public final class ProductionPoolDto {
 
     public record Pool(Ref warehouse, SessionInfo session, SessionInfo staleSession, List<PoolItem> items) {}
 
-    public record PickableItem(UUID itemId, String name, String itemType, String unit, BigDecimal qty) {}
+    /** 24/BE-5: tồn của một kho nguồn; chỉ xuất hiện ở kho user xem được tồn. */
+    public record StockAt(UUID warehouseId, BigDecimal qty) {}
 
-    public record Pickable(Ref warehouse, List<PickableItem> items) {}
+    /** 24/BE-5: một kết quả tìm NL / BTP ở màn chọn hàng. {@code stock} chỉ có kho mà user xem được tồn. */
+    public record Pickable(UUID itemId, String name, String itemType, String unit, Ref homeWarehouse, List<StockAt> stock) {}
+
+    /** 24/BE-5: kho "Sản xuất lấy NL" cho ô "Lấy ở". */
+    public record Source(UUID id, String code, String name, boolean canSeeStock) {}
 
     // ── Danh sách NL của phiếu SX ───────────────────────────────────────────
 
