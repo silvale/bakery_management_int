@@ -63,4 +63,10 @@ public interface StockLotRepository extends BaseRepository<StockLot> {
             ORDER BY i.code, s.warehouse.code
             """)
     List<Object[]> findStockSummaryRaw(@Param("warehouseCode") String warehouseCode);
+
+    /** 24: lô ở kho bảng tạm đang giữ cho phiếu SX (idx_stock_lot_wh_reserved). */
+    List<StockLot> findByWarehouseIdAndReservedForRequestId(UUID warehouseId, UUID requestId);
+
+    /** 24: mọi lô còn hàng của một kho (kiểm bảng tạm lúc đóng phiên; idx_stock_lot_warehouse_remaining). */
+    List<StockLot> findByWarehouseIdAndQtyRemainingGreaterThan(UUID warehouseId, java.math.BigDecimal qty);
 }

@@ -41,4 +41,8 @@ public interface WarehouseRepository extends BaseRepository<Warehouse> {
 
     @Query(value = "SELECT COUNT(*) FROM item WHERE default_warehouse_id = :id AND status = 'ACTIVE'", nativeQuery = true)
     long countItemsByDefaultWarehouse(@Param("id") UUID id);
+
+    /** 24: cửa hàng đã có kho bảng tạm khác {@code excludeId} chưa (uq_warehouse_wip_per_store). */
+    @Query(value = "SELECT EXISTS (SELECT 1 FROM warehouse WHERE store_id = :storeId AND is_work_in_progress AND (CAST(:excludeId AS uuid) IS NULL OR id <> CAST(:excludeId AS uuid)))", nativeQuery = true)
+    boolean existsOtherWip(@Param("storeId") UUID storeId, @Param("excludeId") UUID excludeId);
 }

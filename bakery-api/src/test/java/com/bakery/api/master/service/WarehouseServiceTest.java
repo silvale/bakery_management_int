@@ -23,7 +23,7 @@ class WarehouseServiceTest {
 
     private static WarehouseRequest req(String code, WarehouseKind kind, Boolean receive, Boolean prod, Boolean semi,
                                         Boolean hold, Boolean sales, Boolean export) {
-        return new WarehouseRequest(code, "x", null, kind, receive, prod, semi, hold, sales, export, null, null);
+        return new WarehouseRequest(code, "x", null, kind, receive, prod, semi, hold, sales, export, null, null, null);
     }
 
     private static WarehouseRequest sameCode(String code) { return req(code, null, null, null, null, null, null, null); }
@@ -167,5 +167,27 @@ class WarehouseServiceTest {
                 .isEqualTo("Nơi nhận ngoài không thuộc cửa hàng");
         assertThat(WarehouseService.storeBlocker(WarehouseKind.EXTERNAL, null)).isNull();
         assertThat(WarehouseService.storeBlocker(WarehouseKind.INTERNAL, java.util.UUID.randomUUID())).isNull();
+    }
+
+    // ── 24/BE-1: kho bảng tạm (§4.1) ────────────────────────────────────────
+
+    private static Config wipOnly() { return new Config(WarehouseKind.INTERNAL, false, false, false, false, false, false, true); }
+
+    @Test void wipWarehouseMustBelongToAStore() {
+        assertThat(WarehouseService.wipBlocker(wipOnly(), null)).isEqualTo("Kho bảng tạm phải thuộc một cửa hàng");
+        assertThat(WarehouseService.wipBlocker(wipOnly(), java.util.UUID.randomUUID())).isNull();
+        assertThat(WarehouseService.wipBlocker(new Config(WarehouseKind.INTERNAL, true, false, false, false, false, false, false), null)).isNull();   // kho thường không bị ràng buộc
+    }
+
+    @Test void wipWarehouseCannotEnableAnyOtherRole() {
+        Config withSales = new Config(WarehouseKind.INTERNAL, false, false, false, false, true, false, true);
+        assertThat(WarehouseService.wipBlocker(withSales, java.util.UUID.randomUUID())).isEqualTo("Kho bảng tạm không được bật việc nào khác");
+    }
+
+    @Test void oneWipPerStoreAndCannotTurnOffWithStock() {
+        Config off = new Config(WarehouseKind.INTERNAL, false, false, false, false, false, false, false);
+        assertThat(WarehouseService.wipChangeBlocker(off, wipOnly(), true, 0)).isEqualTo("Cửa hàng này đã có kho bảng tạm");
+        assertThat(WarehouseService.wipChangeBlocker(off, wipOnly(), false, 0)).isNull();
+        assertThat(WarehouseService.wipChangeBlocker(wipOnly(), off, false, 3)).contains("kho còn 3 lô tồn");
     }
 }

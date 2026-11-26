@@ -57,11 +57,11 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
 
     /** Cấu hình kho sau khi sửa. */
     record Config(WarehouseKind kind, boolean receive, boolean production, boolean semi,
-                  boolean hold, boolean sales, boolean export) {
+                  boolean hold, boolean sales, boolean export, boolean wip) {
 
         static Config of(Warehouse e) {
             return new Config(e.getKind(), e.isCanReceivePurchase(), e.isProductionSource(), e.isCanStoreSemi(),
-                    e.isDeliveryHold(), e.isSalesPoint(), e.isCanExportExternal());
+                    e.isDeliveryHold(), e.isSalesPoint(), e.isCanExportExternal(), e.isWorkInProgress());
         }
 
         /** Áp request lên cấu hình hiện có; trường null giữ nguyên. */
@@ -73,10 +73,13 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
                     r.canStoreSemi() != null ? r.canStoreSemi() : c.semi,
                     r.isDeliveryHold() != null ? r.isDeliveryHold() : c.hold,
                     r.isSalesPoint() != null ? r.isSalesPoint() : c.sales,
-                    r.canExportExternal() != null ? r.canExportExternal() : c.export);
+                    r.canExportExternal() != null ? r.canExportExternal() : c.export,
+                    r.isWorkInProgress() != null ? r.isWorkInProgress() : c.wip);
         }
 
-        boolean anyRole() { return receive || production || semi || hold || sales || export; }
+        boolean anyRole() { return receive || production || semi || hold || sales || export || wip; }
+        /** Có việc nào ngoài bảng tạm. */
+        boolean anyOtherThanWip() { return receive || production || semi || hold || sales || export; }
     }
 
     /** Số liệu từ DB mà quy tắc cần. */
@@ -107,6 +110,21 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
     /** 23: nơi nhận ngoài không thuộc cửa hàng. */
     static String storeBlocker(WarehouseKind kind, UUID storeId) {
         return kind == WarehouseKind.EXTERNAL && storeId != null ? "Nơi nhận ngoài không thuộc cửa hàng" : null;
+    }
+
+    /** 24: kho bảng tạm phải thuộc cửa hàng và không bật việc nào khác. */
+    static String wipBlocker(Config after, UUID storeId) {
+        if (!after.wip()) return null;
+        if (storeId == null) return "Kho bảng tạm phải thuộc một cửa hàng";
+        if (after.anyOtherThanWip()) return "Kho bảng tạm không được bật việc nào khác";
+        return null;
+    }
+
+    /** 24: mỗi cửa hàng tối đa một kho bảng tạm; không tắt cờ khi kho còn lô. */
+    static String wipChangeBlocker(Config before, Config after, boolean otherWipInStore, long stockLots) {
+        if (after.wip() && !before.wip() && otherWipInStore) return "Cửa hàng này đã có kho bảng tạm";
+        if (before.wip() && !after.wip() && stockLots > 0) return "Không tắt được Bảng tạm: kho còn " + stockLots + " lô tồn";
+        return null;
     }
 
     /** Tắt rời Bán hàng / Bánh chờ giao: chỉ chuyển sang kho khác, không tắt (kho đang giữ việc mà tắt đi). */
@@ -168,6 +186,12 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
         // Chỉ truy vấn số liệu khi quy tắc cần (đổi loại / tắt việc)
         Facts f = factsFor(e, before, after);
         String blocked = updateBlocker(e, request, f);
+        if (blocked == null) {
+            UUID storeId = request.storeId();
+            blocked = wipChangeBlocker(before, after,
+                    after.wip() && !before.wip() && storeId != null && repository.existsOtherWip(storeId, id),
+                    before.wip() && !after.wip() ? repository.countStockLots(id) : 0);
+        }
         if (blocked != null) throw new IllegalStateException(blocked);
         transferSingletons(e, after);
         return super.update(id, request);
@@ -199,6 +223,10 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
     protected void beforeCreate(Warehouse e) {
         Config c = Config.of(e);
         String m = externalBlocker(c);
+        if (m == null) m = wipBlocker(c, e.getStore() != null ? e.getStore().getId() : null);
+        if (m == null && c.wip() && e.getStore() != null && repository.existsOtherWip(e.getStore().getId(), null)) {
+            m = "Cửa hàng này đã có kho bảng tạm";
+        }
         if (m != null) throw new IllegalStateException(m);
         transferSingletons(e, c);
     }
@@ -219,11 +247,14 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
         e.setDeliveryHold(c.hold());
         e.setSalesPoint(c.sales());
         e.setCanExportExternal(c.export());
+        e.setWorkInProgress(c.wip());
         if (req.sortOrder() != null) e.setSortOrder(req.sortOrder());
         String m = storeBlocker(e.getKind(), req.storeId());
         if (m != null) throw new IllegalStateException(m);
         e.setStore(req.storeId() == null ? null : storeRepository.findById(req.storeId())
                 .orElseThrow(() -> new IllegalArgumentException("Cửa hàng không tồn tại")));
+        m = wipBlocker(c, req.storeId());
+        if (m != null) throw new IllegalStateException(m);
     }
 
     /** Bật Bán hàng / Bánh chờ giao cho kho này thì tắt ở kho đang giữ, trong cùng transaction (flush trước vì unique index). */
@@ -299,7 +330,7 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
      */
     public List<WarehouseRefResponse> allForTransfer() {
         return repository.findAllByStatus(EntityStatus.ACTIVE).stream()
-                .filter(w -> !w.isExternal())
+                .filter(w -> !w.isExternal() && !w.isWorkInProgress())   // 24: bảng tạm không làm kho xuất của TRANSFER
                 .sorted(Comparator.comparingInt(Warehouse::getSortOrder).thenComparing(Warehouse::getCode))
                 .map(w -> new WarehouseRefResponse(w.getId(), w.getCode(), w.getName(),
                         w.getKind() != null ? w.getKind().name() : null))
@@ -340,6 +371,7 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
         r.setDeliveryHold(e.isDeliveryHold());
         r.setSalesPoint(e.isSalesPoint());
         r.setCanExportExternal(e.isCanExportExternal());
+        r.setWorkInProgress(e.isWorkInProgress());
         r.setSortOrder(e.getSortOrder());
         Store st = e.getStore();
         if (st != null) r.setStore(new WarehouseResponse.StoreRef(st.getId(), st.getCode(), st.getName(), st.getSortOrder()));

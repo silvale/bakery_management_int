@@ -27,6 +27,8 @@ public class WarehouseResponse extends BaseResponse {
     @JsonProperty("isSalesPoint")
     private boolean salesPoint;
     private boolean canExportExternal;
+    @JsonProperty("isWorkInProgress")
+    private boolean workInProgress;
     private int sortOrder;
     /** 23: cửa hàng chứa kho; null = không thuộc cửa hàng. Luôn trả, không phụ thuộc WAREHOUSES:VIEW. */
     private StoreRef store;

@@ -258,6 +258,9 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
      * thành phẩm: không ràng buộc. Trả lý do hoặc null.
      */
     static String defaultWarehouseBlocker(String kind, Warehouse w) {
+        if (w != null && w.isWorkInProgress() && !"PRODUCT".equals(kind)) {   // 24: bảng tạm không làm kho lưu trữ NL / kho mặc định BTP
+            return "Kho bảng tạm không dùng làm kho lưu trữ hoặc kho mặc định";
+        }
         switch (kind) {
             case "INGREDIENT":
                 return w == null || !w.isProductionSource()

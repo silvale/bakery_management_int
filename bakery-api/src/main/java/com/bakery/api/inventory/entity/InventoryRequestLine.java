@@ -84,6 +84,11 @@ public class InventoryRequestLine extends BaseEntity {
     @Column(name = "amount", precision = 15, scale = 2)
     private BigDecimal amount;
 
+    /** 24 (PICK): lúc tạo kho nguồn không đủ hàng. */
+    @org.hibernate.envers.NotAudited
+    @Column(name = "stock_short", nullable = false)
+    private boolean stockShort;
+
     @Column(name = "sort_order")
     private Integer sortOrder;
 

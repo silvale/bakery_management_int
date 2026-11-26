@@ -13,6 +13,7 @@ import com.bakery.api.inventory.entity.InventoryRequest;
 import com.bakery.api.inventory.entity.InventoryRequestLine;
 import com.bakery.api.inventory.entity.PaymentStatus;
 import com.bakery.api.master.entity.Ingredient;
+import com.bakery.api.master.entity.Warehouse;
 import com.bakery.api.master.entity.ItemPackaging;
 import com.bakery.framework.entity.ApprovalStatus;
 import com.bakery.framework.entity.InventoryRequestType;
@@ -213,5 +214,30 @@ class InventoryRequestServiceTest {
         assertThat(InventoryRequestService.externalWarehouseBlocker(ext, main)).contains("Nhà Hàng");
         assertThat(InventoryRequestService.externalWarehouseBlocker(main, null)).isNull();
         assertThat(InventoryRequestService.externalWarehouseBlocker(null, null)).isNull();
+    }
+
+    // ── 24/BE-1: kho bảng tạm và phiếu bảng tạm ─────────────────────────────
+
+    private static Warehouse wip() {
+        Warehouse w = new Warehouse();
+        w.setCode("WIP_CH1");
+        w.setName("Đang sản xuất");
+        w.setWorkInProgress(true);
+        return w;
+    }
+
+    @Test void transferPurchaseAdjustmentCannotUseWipWarehouse() {
+        assertThat(InventoryRequestService.wipWarehouseBlocker(InventoryRequestType.TRANSFER, null, wip())).contains("kho bảng tạm");
+        assertThat(InventoryRequestService.wipWarehouseBlocker(InventoryRequestType.PURCHASE, null, wip())).contains("kho bảng tạm");
+        assertThat(InventoryRequestService.wipWarehouseBlocker(InventoryRequestType.ADJUSTMENT, null, wip())).contains("kho bảng tạm");
+        assertThat(InventoryRequestService.wipWarehouseBlocker(InventoryRequestType.PICK, new Warehouse(), wip())).isNull();
+        assertThat(InventoryRequestService.wipWarehouseBlocker(InventoryRequestType.TRANSFER, new Warehouse(), new Warehouse())).isNull();
+    }
+
+    @Test void poolDocumentsAreNotHandledByInventoryRequestEndpoints() {
+        for (InventoryRequestType t : new InventoryRequestType[]{InventoryRequestType.PICK, InventoryRequestType.RETURN, InventoryRequestType.WRITE_OFF}) {
+            assertThat(InventoryRequestService.poolTypeBlocker(t)).isEqualTo("Phiếu bảng tạm thao tác ở màn Đang sản xuất");
+        }
+        assertThat(InventoryRequestService.poolTypeBlocker(InventoryRequestType.TRANSFER)).isNull();
     }
 }

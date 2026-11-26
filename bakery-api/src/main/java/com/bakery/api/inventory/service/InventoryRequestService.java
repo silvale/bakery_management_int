@@ -93,6 +93,7 @@ public class InventoryRequestService
     private final ItemPackagingRepository packagingRepository;
     private final StockLotRepository stockLotRepository;
     private final StockMovementRepository stockMovementRepository;
+    private final StockTransfer stockTransfer;
     private final ProductExpiryConfigRepository expiryConfigRepository;
     private final UnitConversionRepository unitConversionRepository;
     private final IngredientPriceRepository ingredientPriceRepository;
@@ -194,6 +195,12 @@ public class InventoryRequestService
         r.setRequestDate(e.getRequestDate());
         r.setExpectedDeliveryDate(e.getExpectedDeliveryDate());
         r.setNote(e.getNote());
+        r.setPickReason(e.getPickReason());
+        r.setSessionId(e.getSessionId());
+        if (e.getProductionRequest() != null) {
+            r.setProductionRequest(new InventoryRequestResponse.ProductionRequestRef(
+                    e.getProductionRequest().getId(), e.getProductionRequest().getCode()));
+        }
 
         if (e.getSourceWarehouse() != null) {
             r.setSourceWarehouse(new ReferenceValue(
@@ -226,6 +233,7 @@ public class InventoryRequestService
                     InventoryRequestLineResponse lr = new InventoryRequestLineResponse();
                     lr.applyFrom(line);
                     if (line.getItem() != null) {
+                        lr.setItemId(line.getItem().getId());
                         lr.setItem(new ReferenceValue(
                                 line.getItem().getCode(), line.getItem().getName()));
                     }
@@ -240,6 +248,7 @@ public class InventoryRequestService
                     lr.setNote(line.getNote());
                     lr.setPurchaseQty(line.getPurchaseQty());
                     lr.setReceivedQty(line.getReceivedQty());
+                    lr.setStockShort(line.isStockShort());
                     if (adjustment) {
                         lr.setSystemQty(line.getSystemQty());
                         lr.setCountedQty(line.getCountedQty());
@@ -298,6 +307,7 @@ public class InventoryRequestService
      */
     @Override
     protected void beforeCreate(InventoryRequest e) {
+        requireNotPoolType(e.getRequestType());
         authorizeCreate(e);
         requireDeliveryDate(e.getRequestType(), e.getExpectedDeliveryDate());
         requireWarehouses(e.getRequestType(), e.getSourceWarehouse() != null, e.getTargetWarehouse() != null);
@@ -306,6 +316,9 @@ public class InventoryRequestService
             case PURCHASE -> "PO";
             case TRANSFER -> "TR";
             case ADJUSTMENT -> "ADJ";
+            case PICK -> "PK";
+            case RETURN -> "RT";
+            case WRITE_OFF -> "WO";
         };
         String dateStr = LocalDate.now().format(DATE_FMT);
         String codePrefix = prefix + "-" + dateStr + "-";
@@ -523,6 +536,33 @@ public class InventoryRequestService
         if (msg != null) throw new IllegalStateException(msg);
     }
 
+    /** 24: ba loại phiếu bảng tạm chỉ thao tác ở màn Đang sản xuất, không đi qua /inventory-requests. */
+    static boolean isPoolType(InventoryRequestType t) {
+        return t == InventoryRequestType.PICK || t == InventoryRequestType.RETURN || t == InventoryRequestType.WRITE_OFF;
+    }
+
+    static final String POOL_ONLY = "Phiếu bảng tạm thao tác ở màn Đang sản xuất";
+
+    static String poolTypeBlocker(InventoryRequestType t) {
+        return isPoolType(t) ? POOL_ONLY : null;
+    }
+
+    private static void requireNotPoolType(InventoryRequestType t) {
+        String m = poolTypeBlocker(t);
+        if (m != null) throw new IllegalStateException(m);
+    }
+
+    /** 24: kho bảng tạm không làm kho xuất / nhận của PURCHASE, TRANSFER, ADJUSTMENT. */
+    static String wipWarehouseBlocker(InventoryRequestType type, Warehouse... ws) {
+        if (isPoolType(type)) return null;
+        for (Warehouse w : ws) {
+            if (w != null && w.isWorkInProgress()) {
+                return "Kho " + w.getName() + " là kho bảng tạm, chỉ dùng cho phiếu Lấy / Trả / Hao hụt NL";
+            }
+        }
+        return null;
+    }
+
     /** 22: kho nhận của phiếu nhập phải có việc Nhận NCC (thay cho "chỉ MAIN" của 21/BE-2); mọi user kể cả Admin. Null = hợp lệ (thiếu kho do {@link #warehouseBlocker} báo). */
     static String purchaseWarehouseBlocker(InventoryRequestType type, Warehouse target) {
         if (type == InventoryRequestType.PURCHASE && target != null && !target.isCanReceivePurchase()) {
@@ -542,6 +582,7 @@ public class InventoryRequestService
     /** Kiểm kho của phiếu theo cấu hình: không EXTERNAL, PURCHASE chỉ vào kho Nhận NCC. */
     private static void requireWarehouseRoles(InventoryRequestType type, Warehouse source, Warehouse target) {
         String msg = externalWarehouseBlocker(source, target);
+        if (msg == null) msg = wipWarehouseBlocker(type, source, target);
         if (msg == null) msg = purchaseWarehouseBlocker(type, target);
         if (msg != null) throw new IllegalStateException(msg);
     }
@@ -565,6 +606,7 @@ public class InventoryRequestService
             throw new IllegalArgumentException("Line không thuộc phiếu này");
         }
         InventoryRequest owner = line.getInventoryRequest();
+        requireNotPoolType(owner.getRequestType());
         authorize(owner, "UPDATE");
         if (!scope.canSeePurchasePrice(owner.getSupplier() != null ? owner.getSupplier().getId() : null)) {
             throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN,
@@ -582,68 +624,16 @@ public class InventoryRequestService
      * Nếu tồn kho không đủ → throw IllegalStateException.
      */
     private void approveTransfer(InventoryRequest e) {
-        UUID sourceWarehouseId = e.getSourceWarehouse() != null ? e.getSourceWarehouse().getId() : null;
-
         for (InventoryRequestLine line : e.getLines()) {
             // Convert qty từ line.unit → item.unit (StockLot luôn lưu theo item.unit)
             BigDecimal convertedQty = convertToItemUnit(line.getQuantity(), line.getUnit(), line.getItem());
             // Fixed unit: nếu item không tách lẻ → làm tròn lên bội số của unitSize
-            BigDecimal remaining = roundUpToUnitSize(convertedQty, line.getItem());
+            BigDecimal qty = roundUpToUnitSize(convertedQty, line.getItem());
 
-            // FIFO: lấy các lot còn hàng của item này trong source warehouse, cũ nhất trước
-            List<StockLot> lots = stockLotRepository
-                    .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
-                            line.getItem().getId(), BigDecimal.ZERO);
-
-            // Filter theo source warehouse nếu có
-            if (sourceWarehouseId != null) {
-                lots = lots.stream()
-                        .filter(l -> l.getWarehouse() != null
-                                && l.getWarehouse().getId().equals(sourceWarehouseId))
-                        .toList();
-            }
-
-            for (StockLot lot : lots) {
-                if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
-
-                BigDecimal deduct = remaining.min(lot.getQtyRemaining());
-                lot.setQtyRemaining(lot.getQtyRemaining().subtract(deduct));
-                stockLotRepository.save(lot);
-
-                // OUT tại source
-                StockMovement outMovement = new StockMovement();
-                outMovement.setLot(lot);
-                outMovement.setMovementType(MovementType.OUT);
-                outMovement.setQty(deduct);
-                outMovement.setRefId(e.getId());
-                outMovement.setRefType(REF_TYPE);
-                outMovement.setNote("Xuất hàng từ phiếu " + e.getCode());
-                stockMovementRepository.save(outMovement);
-
-                // IN tại target — tạo StockLot mới tại kho đích, giữ nguyên unitCost của lot gốc
-                StockLot inLot = new StockLot();
-                inLot.setItem(lot.getItem());
-                inLot.setWarehouse(e.getTargetWarehouse());
-                inLot.setSupplier(lot.getSupplier());
-                inLot.setQtyInitial(deduct);
-                inLot.setQtyRemaining(deduct);
-                inLot.setUnitCost(lot.getUnitCost());
-                inLot.setReceivedDate(e.getRequestDate());
-                inLot.setExpiryDate(lot.getExpiryDate());
-                StockLot savedInLot = stockLotRepository.save(inLot);
-
-                StockMovement inMovement = new StockMovement();
-                inMovement.setLot(savedInLot);
-                inMovement.setMovementType(MovementType.IN);
-                inMovement.setQty(deduct);
-                inMovement.setRefId(e.getId());
-                inMovement.setRefType(REF_TYPE);
-                inMovement.setNote("Nhận hàng từ phiếu " + e.getCode());
-                stockMovementRepository.save(inMovement);
-
-                remaining = remaining.subtract(deduct);
-            }
-
+            // 24: phần chuyển lô FIFO dùng chung với PICK / RETURN (StockTransfer)
+            BigDecimal remaining = stockTransfer.move(line.getItem(), qty, e.getSourceWarehouse(), e.getTargetWarehouse(),
+                    null, null, e.getRequestDate(), REF_TYPE, e.getId(),
+                    "Xuất hàng từ phiếu " + e.getCode(), "Nhận hàng từ phiếu " + e.getCode());
             if (remaining.compareTo(BigDecimal.ZERO) > 0) {
                 throw new IllegalStateException(
                         "Không đủ tồn kho cho sản phẩm: " + line.getItem().getName()
@@ -748,6 +738,7 @@ public class InventoryRequestService
     public InventoryRequestResponse update(UUID id, InventoryRequestRequest request) {
         InventoryRequest e = repository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(getEntityName(), id));
+        requireNotPoolType(e.getRequestType());
         authorize(e, "UPDATE");
         if (e.getApprovalStatus() == ApprovalStatus.APPROVED) {
             throw new IllegalStateException("Phiếu đã xác nhận, không thể sửa. Hãy tạo phiếu mới nếu cần bổ sung");
@@ -769,6 +760,7 @@ public class InventoryRequestService
     public InventoryRequestResponse approve(UUID id) {
         InventoryRequest e = repository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(getEntityName(), id));
+        requireNotPoolType(e.getRequestType());
         authorize(e, "APPROVE");
         requireWarehouses(e.getRequestType(), e.getSourceWarehouse() != null, e.getTargetWarehouse() != null);
         return super.approve(id);
@@ -779,6 +771,7 @@ public class InventoryRequestService
     public InventoryRequestResponse reject(UUID id, String reason) {
         InventoryRequest e = repository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(getEntityName(), id));
+        requireNotPoolType(e.getRequestType());
         authorize(e, "REJECT");
         return super.reject(id, reason);
     }
@@ -788,6 +781,7 @@ public class InventoryRequestService
     public void delete(UUID id) {
         InventoryRequest e = repository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(getEntityName(), id));
+        requireNotPoolType(e.getRequestType());
         authorize(e, "UPDATE");   // 11/D7: xóa phiếu cùng mức quyền với sửa
         if (e.getApprovalStatus() == ApprovalStatus.APPROVED) {
             throw new IllegalStateException("Phiếu đã xác nhận, không thể xóa");
@@ -1065,6 +1059,7 @@ public class InventoryRequestService
     public InventoryRequestResponse receive(UUID id, ReceiveRequest req) {
         InventoryRequest e = repository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(getEntityName(), id));
+        requireNotPoolType(e.getRequestType());
         authorize(e, "RECEIVE");
         if (e.getRequestType() != InventoryRequestType.PURCHASE
                 || e.getApprovalStatus() != ApprovalStatus.PENDING_APPROVAL) {

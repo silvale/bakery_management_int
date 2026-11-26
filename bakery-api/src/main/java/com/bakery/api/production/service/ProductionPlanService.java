@@ -39,6 +39,7 @@ public class ProductionPlanService {
     private final BakeryActorResolver actorResolver;
     private final ProductionRequestService productionRequestService;
     private final ProductionIngredientService ingredientService;
+    private final ProductionPickService pickService;
 
     /** Manager xem kế hoạch theo ngày (DRAFT hoặc APPROVED). */
     @Transactional(readOnly = true)
@@ -115,6 +116,8 @@ public class ProductionPlanService {
         // Tự động tạo phiếu SX DAILY theo từng ItemGroup
         int requestCount = productionRequestService.generateFromPlan(saved).size();
         log.info("Approve plan {} → tạo {} phiếu SX DAILY", saved.getPlanDate(), requestCount);
+        // 24/§5.1: phiếu lấy NL theo kho cho mọi phiếu DAILY của ngày
+        pickService.generate(saved.getPlanDate());
 
         // NOTE: Không check/validate nguyên liệu tại đây.
         // Phiếu TRANSFER MAIN→KITCHEN sẽ được tạo thủ công sau khi đã nhập đủ NL,
@@ -135,6 +138,7 @@ public class ProductionPlanService {
         }
         plan.getLines().size(); // force-init
         int count = productionRequestService.generateFromPlan(plan).size();
+        pickService.generate(plan.getPlanDate());   // 24/§5.1: idempotent, chỉ tạo phần còn thiếu
         log.info("generateRequestsFromApprovedPlan: plan {} → tạo {} phiếu SX", plan.getPlanDate(), count);
         return count;
     }
