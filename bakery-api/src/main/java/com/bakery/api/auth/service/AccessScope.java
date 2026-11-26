@@ -164,6 +164,15 @@ public class AccessScope {
         return supplierId != null && priceSupplierIds().contains(supplierId);
     }
 
+    /**
+     * 24/§5.8: xem được số tồn của kho nguồn ở phiếu lấy NL? Admin, hoặc có INVENTORY_REQUESTS:APPROVE và được gán kho đó
+     * (quản lý kho, bếp trưởng ở phòng của mình). Kết quả quyền/kho cache theo request như {@link #can}.
+     */
+    public boolean canSeeStockOf(Warehouse w) {
+        if (isAdmin()) return true;
+        return w != null && can("INVENTORY_REQUESTS", "APPROVE") && hasWarehouse(w.getId());
+    }
+
     /** Giá vốn, chi phí, giá trị điều chỉnh, doanh thu... — chỉ Admin (D5). */
     public boolean canSeeCost() { return isAdmin(); }
 

@@ -33,7 +33,8 @@ import com.bakery.api.production.dto.ProductionPoolDto.Held;
 import com.bakery.api.production.dto.ProductionPoolDto.PickLineRequest;
 import com.bakery.api.production.dto.ProductionPoolDto.PickRequest;
 import com.bakery.api.production.dto.ProductionPoolDto.Pickable;
-import com.bakery.api.production.dto.ProductionPoolDto.PickableItem;
+import com.bakery.api.production.dto.ProductionPoolDto.Source;
+import com.bakery.api.production.dto.ProductionPoolDto.StockAt;
 import com.bakery.api.production.dto.ProductionPoolDto.Pool;
 import com.bakery.api.production.dto.ProductionPoolDto.PoolItem;
 import com.bakery.api.production.dto.ProductionPoolDto.Ref;
@@ -88,6 +89,12 @@ public class ProductionPickService {
         if (pr == null) return "Lấy thêm NL phải gắn một phiếu SX";
         if (!ProductionSessionService.isHoldable(pr)) return "Phiếu " + pr.getCode() + " chưa duyệt hoặc đã hoàn thành, không lấy thêm được";
         return null;
+    }
+
+    /** Câu lỗi confirm thiếu tồn (24/§5.8): người xem được tồn thấy số còn, người khác không thấy số. */
+    static String shortMessage(boolean seeStock, String item, String warehouse, BigDecimal have) {
+        return seeStock ? item + ": kho " + warehouse + " chỉ còn " + WipDocs.plain(have)
+                : item + ": kho " + warehouse + " không đủ. Báo quản lý kho bổ sung rồi xác nhận lại.";
     }
 
     /** Kiểm lý do + ghi chú + số bị hư của yêu cầu tạo phiếu. Trả lý do (400) hoặc null. */
@@ -268,8 +275,8 @@ public class ProductionPickService {
                     e.getRequestDate(), WipDocs.REF_TYPE, e.getId(),
                     "Lấy NL vào bảng tạm, phiếu " + e.getCode(), "Nhận NL vào bảng tạm, phiếu " + e.getCode());
             if (left.signum() > 0) {
-                throw new IllegalStateException(l.getItem().getName() + ": kho " + e.getSourceWarehouse().getName()
-                        + " chỉ còn " + WipDocs.plain(l.getReceivedQty().subtract(left)));
+                throw new IllegalStateException(shortMessage(scope.canSeeStockOf(e.getSourceWarehouse()), l.getItem().getName(),
+                        e.getSourceWarehouse().getName(), l.getReceivedQty().subtract(left)));
             }
         }
         e.setApprovalStatus(ApprovalStatus.APPROVED);
@@ -278,7 +285,7 @@ public class ProductionPickService {
         e.setReceivedBy(actorResolver.currentUsername());
         e.setReceivedDate(WipDocs.today());
         e.setSessionId(session.getId());
-        return Doc.from(requestRepository.save(e), scope.canSeeCost());
+        return Doc.from(requestRepository.save(e), scope.canSeeCost(), scope.canSeeStockOf(e.getSourceWarehouse()));
     }
 
     @Transactional
@@ -304,7 +311,7 @@ public class ProductionPickService {
         boolean seeCost = scope.canSeeCost();
         return requestRepository.findByRequestTypeInAndRequestDateBetweenOrderByRequestDateDescCreatedAtDesc(
                 List.of(InventoryRequestType.PICK, InventoryRequestType.RETURN, InventoryRequestType.WRITE_OFF), f, t)
-                .stream().map(r -> Doc.from(r, seeCost)).toList();
+                .stream().map(r -> Doc.from(r, seeCost, scope.canSeeStockOf(r.getSourceWarehouse()))).toList();
     }
 
     // ── Xem bảng tạm (§8) ───────────────────────────────────────────────────
@@ -364,22 +371,34 @@ public class ProductionPickService {
         return new Pool(Ref.of(wip), cur, stale, items);
     }
 
+    /** Kho "Sản xuất lấy NL" theo thứ tự hiển thị, kèm user có xem được tồn kho đó không (24/BE-5). */
+    private List<Warehouse> orderedSources() {
+        return roles.withRole(WarehouseRole.PRODUCTION_SOURCE).stream()
+                .sorted(java.util.Comparator.comparingInt(Warehouse::getSortOrder).thenComparing(Warehouse::getCode)).toList();
+    }
+
     @Transactional(readOnly = true)
-    @SuppressWarnings("unchecked")
-    public List<Pickable> pickable() {
-        List<Warehouse> sources = roles.withRole(WarehouseRole.PRODUCTION_SOURCE);
-        if (sources.isEmpty()) return List.of();
-        List<Object[]> rows = em.createNativeQuery(
-                "SELECT l.warehouse_id, i.id, i.name, i.item_type, i.unit, SUM(l.qty_remaining) FROM stock_lot l JOIN item i ON i.id = l.item_id "
-                + "WHERE l.warehouse_id IN (:ws) AND l.qty_remaining > 0 AND i.status = 'ACTIVE' AND i.item_type IN ('INGREDIENT', 'SEMI_PRODUCT') "
-                + "GROUP BY l.warehouse_id, i.id, i.name, i.item_type, i.unit ORDER BY i.name")
-                .setParameter("ws", sources.stream().map(Warehouse::getId).toList()).getResultList();
-        Map<UUID, List<PickableItem>> byWh = new LinkedHashMap<>();
-        for (Object[] r : rows) {
-            byWh.computeIfAbsent((UUID) r[0], k -> new ArrayList<>())
-                    .add(new PickableItem((UUID) r[1], (String) r[2], (String) r[3], (String) r[4], (BigDecimal) r[5]));
-        }
-        return sources.stream().map(w -> new Pickable(Ref.of(w), byWh.getOrDefault(w.getId(), List.of()))).toList();
+    public List<Source> sources() {
+        return orderedSources().stream().map(w -> new Source(w.getId(), w.getCode(), w.getName(), scope.canSeeStockOf(w))).toList();
+    }
+
+    /**
+     * Tìm NL / BTP ACTIVE theo tên hoặc mã (như {@code GET /items?q=}), tối đa 20, không lọc theo tồn.
+     * {@code stock} chỉ gồm kho nguồn user xem được tồn (kho khác bỏ hẳn).
+     */
+    @Transactional(readOnly = true)
+    public List<Pickable> pickable(String q) {
+        String key = q == null ? "" : q.trim().toLowerCase();
+        if (key.length() < 2) return List.of();
+        List<Item> found = em.createQuery("SELECT i FROM Item i LEFT JOIN FETCH i.defaultWarehouse WHERE i.status = :st "
+                + "AND (TYPE(i) = Ingredient OR TYPE(i) = SemiProduct) AND (lower(i.name) LIKE :p OR lower(i.code) LIKE :p) ORDER BY i.name",
+                Item.class).setParameter("st", EntityStatus.ACTIVE).setParameter("p", "%" + key + "%").setMaxResults(20).getResultList();
+        if (found.isEmpty()) return List.of();
+        List<Warehouse> visible = orderedSources().stream().filter(scope::canSeeStockOf).toList();
+        Map<String, BigDecimal> stock = stockOf(visible.stream().map(Warehouse::getId).toList(), found.stream().map(Item::getId).toList());
+        return found.stream().map(i -> new Pickable(i.getId(), i.getName(), Hibernate.unproxy(i) instanceof Ingredient ? "INGREDIENT" : "SEMI_PRODUCT",
+                i.getUnit(), Ref.of(i.getDefaultWarehouse()),
+                visible.stream().map(w -> new StockAt(w.getId(), stock.getOrDefault(w.getId() + "|" + i.getId(), BigDecimal.ZERO))).toList())).toList();
     }
 
     // ── Hỗ trợ ──────────────────────────────────────────────────────────────

@@ -39,6 +39,13 @@ public interface StockLotRepository extends BaseRepository<StockLot> {
     List<Object[]> sumRemainingByItem(@Param("warehouseId") UUID warehouseId,
                                       @Param("itemIds") java.util.Collection<UUID> itemIds);
 
+    /** 24/BE-5: tồn chung (không tính lô đang giữ) theo kho × mặt hàng — [warehouseId, itemId, sum]. Một query cho cả trang phiếu. */
+    @Query("SELECT l.warehouse.id, l.item.id, SUM(l.qtyRemaining) FROM StockLot l "
+            + "WHERE l.warehouse.id IN :warehouseIds AND l.item.id IN :itemIds AND l.reservedForRequestId IS NULL "
+            + "GROUP BY l.warehouse.id, l.item.id")
+    List<Object[]> sumFreeByWarehouseItem(@Param("warehouseIds") java.util.Collection<UUID> warehouseIds,
+                                          @Param("itemIds") java.util.Collection<UUID> itemIds);
+
     /** FIFO trong một kho: lô còn hàng, nhập sớm nhất trước. */
     List<StockLot> findByItemIdAndWarehouseIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
             UUID itemId, UUID warehouseId, BigDecimal minQty);

@@ -33,6 +33,8 @@ public class InventoryRequestLineResponse extends BaseResponse {
     private java.util.UUID itemId;
     /** 24 (PICK): kho nguồn không đủ lúc tạo. */
     private boolean stockShort;
+    /** 24/BE-5 (PICK chờ lấy): tồn chung hiện tại ở kho nguồn; null nếu user không xem được tồn kho đó. */
+    private BigDecimal stock;
     /**
      * Thành tiền (PURCHASE). Đã duyệt: theo receivedQty; chưa duyệt: theo số đặt.
      * Có bao: unitCost × qty ÷ qtyPerPack; không bao: unitCost × qty. Làm tròn 2 số lẻ.

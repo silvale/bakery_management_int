@@ -10,6 +10,7 @@ import com.bakery.api.production.dto.ProductionPoolDto.Created;
 import com.bakery.api.production.dto.ProductionPoolDto.Doc;
 import com.bakery.api.production.dto.ProductionPoolDto.PickRequest;
 import com.bakery.api.production.dto.ProductionPoolDto.Pickable;
+import com.bakery.api.production.dto.ProductionPoolDto.Source;
 import com.bakery.api.production.dto.ProductionPoolDto.Pool;
 import com.bakery.api.production.dto.ProductionPoolDto.SessionDetail;
 import com.bakery.api.production.dto.ProductionPoolDto.SessionInfo;
@@ -48,7 +49,11 @@ public class ProductionPoolController {
 
     @GetMapping("/pool/pickable")
     @RequirePermission(screen = "PROD_REQUESTS", action = "VIEW")
-    public List<Pickable> pickable() { return picks.pickable(); }
+    public List<Pickable> pickable(@RequestParam(required = false) String q) { return picks.pickable(q); }
+
+    @GetMapping("/pool/sources")
+    @RequirePermission(screen = "PROD_REQUESTS", action = "VIEW")
+    public List<Source> sources() { return picks.sources(); }
 
     @PostMapping("/pool/generate")
     @RequirePermission(screen = "PROD_REQUESTS", action = "COMPLETE")

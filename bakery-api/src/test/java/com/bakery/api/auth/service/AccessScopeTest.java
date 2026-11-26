@@ -46,6 +46,7 @@ class AccessScopeTest {
     private final Supplier cho = supplier(), hd = supplier();
     private final UserRole role = new UserRole();
     private final UserAccount user = new UserAccount();
+    private final java.util.List<String> extraActions = new java.util.ArrayList<>();   // quyền INVENTORY_REQUESTS thêm cho từng test
 
     private static Supplier supplier() {
         Supplier s = new Supplier();
@@ -70,9 +71,13 @@ class AccessScopeTest {
                     default -> null;
                 }),
                 stub(UserRoleRepository.class, (n, a) -> Optional.of(role)),
-                stub(RolePermissionRepository.class, (n, a) -> List.of(
-                        new RolePermission(role.getId(), "INVENTORY_REQUESTS", "UPDATE"),
-                        new RolePermission(role.getId(), "INVENTORY_REQUESTS", "VIEW"))));
+                stub(RolePermissionRepository.class, (n, a) -> {
+                    List<RolePermission> l = new java.util.ArrayList<>(List.of(
+                            new RolePermission(role.getId(), "INVENTORY_REQUESTS", "UPDATE"),
+                            new RolePermission(role.getId(), "INVENTORY_REQUESTS", "VIEW")));
+                    extraActions.forEach(x -> l.add(new RolePermission(role.getId(), "INVENTORY_REQUESTS", x)));
+                    return l;
+                }));
     }
 
     @AfterEach
@@ -95,6 +100,23 @@ class AccessScopeTest {
         assertThatThrownBy(() -> s.assertAnyWarehouseRole(WarehouseRole.SALES_POINT, WarehouseRole.RECEIVE_PURCHASE))
                 .isInstanceOf(ResponseStatusException.class).hasMessageContaining("403");
         s.assertAnyWarehouseRole(WarehouseRole.SALES_POINT, WarehouseRole.DELIVERY_HOLD);
+    }
+
+    @Test
+    void stockOfPickSourceNeedsApproveAndAssignment() {   // 24/§5.8
+        extraActions.add("APPROVE");
+        AccessScope manager = scopeFor("KITCHEN_MANAGER");     // có APPROVE, được gán KITCHEN
+        assertThat(manager.canSeeStockOf(kitchen)).isTrue();
+        assertThat(manager.canSeeStockOf(main)).isFalse();     // không được gán MAIN
+        assertThat(manager.canSeeStockOf(null)).isFalse();
+        extraActions.clear();
+        AccessScope staff = scopeFor("KITCHEN_STAFF");         // được gán KITCHEN nhưng không có APPROVE
+        assertThat(staff.canSeeStockOf(kitchen)).isFalse();
+        SecurityContextHolder.clearContext();
+        user.setRole(role);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new BakeryUserPrincipal(user.getId().toString(), "a", "SUPER_ADMIN"), null, List.of()));
+        assertThat(manager.canSeeStockOf(main)).isTrue();      // Admin thấy mọi kho
     }
 
     @Test
