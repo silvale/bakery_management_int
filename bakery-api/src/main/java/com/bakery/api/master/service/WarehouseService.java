@@ -337,6 +337,23 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
                 .toList();
     }
 
+    /** 25: ai được xem danh sách nơi nhận ngoài: Admin; hoặc có INVENTORY_REQUESTS:VIEW và được gán ít nhất một kho xuất ngoài. */
+    static boolean canSeeExportTargets(boolean admin, boolean canViewRequests, boolean hasExportWarehouse) {
+        return admin || (canViewRequests && hasExportWarehouse);
+    }
+
+    /** 25: nơi nhận ngoài (EXTERNAL, ACTIVE) theo sortOrder, cho ô Kho nhận của phiếu xuất ngoài. */
+    public List<WarehouseRefResponse> exportTargets() {
+        boolean hasExport = !scope.isAdmin() && repository.findAllById(scope.warehouseIds()).stream()
+                .anyMatch(w -> w.getStatus() == EntityStatus.ACTIVE && !w.isExternal() && w.isCanExportExternal());
+        if (!canSeeExportTargets(scope.isAdmin(), scope.can("INVENTORY_REQUESTS", "VIEW"), hasExport)) return List.of();
+        return repository.findAllByStatus(EntityStatus.ACTIVE).stream()
+                .filter(Warehouse::isExternal)
+                .sorted(Comparator.comparingInt(Warehouse::getSortOrder).thenComparing(Warehouse::getCode))
+                .map(w -> new WarehouseRefResponse(w.getId(), w.getCode(), w.getName(), w.getKind().name()))
+                .toList();
+    }
+
     // ── Response + số đếm (chỉ khi có WAREHOUSES:VIEW) ──────────────────────
 
     record Counts(Map<UUID, Long> lots, Map<UUID, Long> users, Map<UUID, Long> items) {}

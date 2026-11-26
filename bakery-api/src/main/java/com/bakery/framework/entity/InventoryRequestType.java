@@ -17,5 +17,8 @@ public enum InventoryRequestType {
     RETURN,
 
     /** 24: Hao hụt NL ở bảng tạm; thi hành ngay, không cần duyệt. */
-    WRITE_OFF
+    WRITE_OFF,
+
+    /** 25: Xuất cho nơi nhận ngoài (Nhà Hàng): trừ kho xuất khi duyệt, không tạo lô ở nơi nhận. */
+    EXPORT
 }

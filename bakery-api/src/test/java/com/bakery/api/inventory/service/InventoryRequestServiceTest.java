@@ -240,4 +240,46 @@ class InventoryRequestServiceTest {
         }
         assertThat(InventoryRequestService.poolTypeBlocker(InventoryRequestType.TRANSFER)).isNull();
     }
+
+    // ── 25/BE-1: phiếu xuất ngoài ───────────────────────────────────────────
+
+    private static Warehouse wh(String name, boolean external, boolean canExport) {
+        Warehouse w = new Warehouse();
+        w.setName(name);
+        w.setKind(external ? com.bakery.api.master.entity.WarehouseKind.EXTERNAL : com.bakery.api.master.entity.WarehouseKind.INTERNAL);
+        w.setCanExportExternal(canExport);
+        return w;
+    }
+
+    @Test void exportNeedsSourceAndTarget() {
+        assertThat(InventoryRequestService.warehouseBlocker(InventoryRequestType.EXPORT, false, true)).isEqualTo("Phiếu xuất ngoài phải có kho xuất");
+        assertThat(InventoryRequestService.warehouseBlocker(InventoryRequestType.EXPORT, true, false)).isEqualTo("Phiếu phải có kho nhận");
+        assertThat(InventoryRequestService.warehouseBlocker(InventoryRequestType.EXPORT, true, true)).isNull();
+    }
+
+    @Test void exportSourceMustHaveExportFlagAndTargetMustBeExternal() {
+        Warehouse main = wh("Kho Chính", false, true), plain = wh("Phòng Lạnh", false, false), out = wh("Nhà Hàng", true, false);
+        assertThat(InventoryRequestService.exportWarehouseBlocker(main, out)).isNull();
+        assertThat(InventoryRequestService.exportWarehouseBlocker(plain, out)).isEqualTo("Kho Phòng Lạnh không được xuất ra ngoài");
+        assertThat(InventoryRequestService.exportWarehouseBlocker(out, out)).contains("không được xuất ra ngoài");   // kho xuất không được là nơi nhận ngoài
+        assertThat(InventoryRequestService.exportWarehouseBlocker(main, plain)).isEqualTo("Phiếu xuất ngoài phải gửi tới nơi nhận ngoài");
+    }
+
+    @Test void transferToExternalStillBlockedAndWipStillBlockedForExport() {
+        assertThat(InventoryRequestService.externalWarehouseBlocker(wh("Kho Chính", false, true), wh("Nhà Hàng", true, false))).contains("nơi nhận ngoài");
+        Warehouse wip = wh("Đang sản xuất", false, false);
+        wip.setWorkInProgress(true);
+        assertThat(InventoryRequestService.wipWarehouseBlocker(InventoryRequestType.EXPORT, wip, wh("Nhà Hàng", true, false))).contains("kho bảng tạm");
+    }
+
+    @Test void duplicateItemInExportIsRejected() {
+        Ingredient a = new Ingredient();
+        a.setId(UUID.randomUUID());
+        a.setName("Thịt");
+        InventoryRequestLine l1 = new InventoryRequestLine(), l2 = new InventoryRequestLine();
+        l1.setItem(a);
+        l2.setItem(a);
+        assertThat(InventoryRequestService.duplicateLineBlocker(List.of(l1, l2))).isEqualTo("Mặt hàng Thịt bị trùng dòng");
+        assertThat(InventoryRequestService.duplicateLineBlocker(List.of(l1))).isNull();
+    }
 }
