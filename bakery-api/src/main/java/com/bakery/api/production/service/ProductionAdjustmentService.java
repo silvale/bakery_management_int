@@ -14,6 +14,7 @@ import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.entity.Warehouse;
 import com.bakery.api.master.repository.WarehouseRepository;
 import jakarta.persistence.EntityManager;
+import com.bakery.api.production.dto.ProductionAdjustmentResponse;
 import com.bakery.api.production.entity.DeliveryRecord;
 import com.bakery.api.production.entity.ProductionAdjustment;
 import com.bakery.api.production.entity.ProductionRequestLine;
@@ -54,12 +55,14 @@ public class ProductionAdjustmentService {
 
     // ── Queries ──────────────────────────────────────────────────
 
-    public List<ProductionAdjustment> findByDeliveryRecord(UUID deliveryRecordId) {
-        return adjustmentRepository.findByDeliveryRecordId(deliveryRecordId);
+    @Transactional(readOnly = true)
+    public List<ProductionAdjustmentResponse> findByDeliveryRecord(UUID deliveryRecordId) {
+        return adjustmentRepository.findByDeliveryRecordId(deliveryRecordId).stream().map(ProductionAdjustmentResponse::from).toList();
     }
 
-    public List<ProductionAdjustment> findPending() {
-        return adjustmentRepository.findByApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+    @Transactional(readOnly = true)
+    public List<ProductionAdjustmentResponse> findPending() {
+        return adjustmentRepository.findByApprovalStatus(ApprovalStatus.PENDING_APPROVAL).stream().map(ProductionAdjustmentResponse::from).toList();
     }
 
     // ── Admin tạo correction ─────────────────────────────────────
@@ -69,7 +72,7 @@ public class ProductionAdjustmentService {
      * Không giới hạn số lần (khác với KITCHEN_COMPLETE chỉ 1 lần).
      */
     @Transactional
-    public ProductionAdjustment createAdminCorrection(UUID deliveryRecordId,
+    public ProductionAdjustmentResponse createAdminCorrection(UUID deliveryRecordId,
             AdjustmentType adjustmentType, BigDecimal adjustedQty, String reason) {
         DeliveryRecord dr = deliveryRecordRepository.findById(deliveryRecordId)
                 .orElseThrow(() -> new ResourceNotFoundException("DeliveryRecord", deliveryRecordId));
@@ -86,7 +89,7 @@ public class ProductionAdjustmentService {
         adj.setReason(reason);
         adj.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
         adj.setCreatedBy(actorResolver.currentUserId());
-        return adjustmentRepository.save(adj);
+        return ProductionAdjustmentResponse.from(adjustmentRepository.save(adj));
     }
 
     // ── Bếp trưởng duyệt ────────────────────────────────────────
@@ -97,7 +100,7 @@ public class ProductionAdjustmentService {
      * <p>Cả INGREDIENT_VARIANCE lẫn PRODUCTION_WASTAGE chỉ cập nhật số lượng, không động tồn NL (24/§5.5).
      */
     @Transactional
-    public ProductionAdjustment approve(UUID adjustmentId) {
+    public ProductionAdjustmentResponse approve(UUID adjustmentId) {
         ProductionAdjustment adj = adjustmentRepository.findById(adjustmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionAdjustment", adjustmentId));
 
@@ -117,11 +120,11 @@ public class ProductionAdjustmentService {
         adj.setApprovedAt(Instant.now());
         adj.setApprovedBy(actorResolver.currentUserId());
         adj.setUpdatedAt(Instant.now());
-        return adjustmentRepository.save(adj);
+        return ProductionAdjustmentResponse.from(adjustmentRepository.save(adj));
     }
 
     @Transactional
-    public ProductionAdjustment reject(UUID adjustmentId, String reason) {
+    public ProductionAdjustmentResponse reject(UUID adjustmentId, String reason) {
         ProductionAdjustment adj = adjustmentRepository.findById(adjustmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionAdjustment", adjustmentId));
 
@@ -132,6 +135,6 @@ public class ProductionAdjustmentService {
         adj.setApprovalStatus(ApprovalStatus.REJECTED);
         adj.setRejectedReason(reason);
         adj.setUpdatedAt(Instant.now());
-        return adjustmentRepository.save(adj);
+        return ProductionAdjustmentResponse.from(adjustmentRepository.save(adj));
     }
 }
