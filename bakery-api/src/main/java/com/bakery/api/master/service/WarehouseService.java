@@ -12,8 +12,10 @@ import com.bakery.api.auth.service.AccessScope;
 import com.bakery.api.master.dto.WarehouseRefResponse;
 import com.bakery.api.master.dto.WarehouseRequest;
 import com.bakery.api.master.dto.WarehouseResponse;
+import com.bakery.api.master.entity.Store;
 import com.bakery.api.master.entity.Warehouse;
 import com.bakery.api.master.entity.WarehouseKind;
+import com.bakery.api.master.repository.StoreRepository;
 import com.bakery.api.master.repository.WarehouseRepository;
 import com.bakery.framework.entity.EntityStatus;
 import com.bakery.framework.exception.ResourceNotFoundException;
@@ -41,6 +43,7 @@ import org.springframework.util.MultiValueMap;
 public class WarehouseService extends AbstractBakeryAdminService<Warehouse, WarehouseRequest, WarehouseResponse> {
 
     private final WarehouseRepository repository;
+    private final StoreRepository storeRepository;
     private final CommandRequestRepository commandRequestRepository;
     private final BakeryActorResolver actorResolver;
     private final AccessScope scope;
@@ -99,6 +102,11 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
     static String externalBlocker(Config after) {
         return after.kind() == WarehouseKind.EXTERNAL && after.anyRole()
                 ? "Kho nơi nhận ngoài không được bật việc nào" : null;
+    }
+
+    /** 23: nơi nhận ngoài không thuộc cửa hàng. */
+    static String storeBlocker(WarehouseKind kind, UUID storeId) {
+        return kind == WarehouseKind.EXTERNAL && storeId != null ? "Nơi nhận ngoài không thuộc cửa hàng" : null;
     }
 
     /** Tắt rời Bán hàng / Bánh chờ giao: chỉ chuyển sang kho khác, không tắt (kho đang giữ việc mà tắt đi). */
@@ -212,6 +220,10 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
         e.setSalesPoint(c.sales());
         e.setCanExportExternal(c.export());
         if (req.sortOrder() != null) e.setSortOrder(req.sortOrder());
+        String m = storeBlocker(e.getKind(), req.storeId());
+        if (m != null) throw new IllegalStateException(m);
+        e.setStore(req.storeId() == null ? null : storeRepository.findById(req.storeId())
+                .orElseThrow(() -> new IllegalArgumentException("Cửa hàng không tồn tại")));
     }
 
     /** Bật Bán hàng / Bánh chờ giao cho kho này thì tắt ở kho đang giữ, trong cùng transaction (flush trước vì unique index). */
@@ -329,6 +341,8 @@ public class WarehouseService extends AbstractBakeryAdminService<Warehouse, Ware
         r.setSalesPoint(e.isSalesPoint());
         r.setCanExportExternal(e.isCanExportExternal());
         r.setSortOrder(e.getSortOrder());
+        Store st = e.getStore();
+        if (st != null) r.setStore(new WarehouseResponse.StoreRef(st.getId(), st.getCode(), st.getName(), st.getSortOrder()));
         if (counts != null) {
             r.setStockLotCount(counts.lots().getOrDefault(e.getId(), 0L));
             r.setUserCount(counts.users().getOrDefault(e.getId(), 0L));

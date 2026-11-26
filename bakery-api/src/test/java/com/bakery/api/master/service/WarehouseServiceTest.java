@@ -23,7 +23,7 @@ class WarehouseServiceTest {
 
     private static WarehouseRequest req(String code, WarehouseKind kind, Boolean receive, Boolean prod, Boolean semi,
                                         Boolean hold, Boolean sales, Boolean export) {
-        return new WarehouseRequest(code, "x", null, kind, receive, prod, semi, hold, sales, export, null);
+        return new WarehouseRequest(code, "x", null, kind, receive, prod, semi, hold, sales, export, null, null);
     }
 
     private static WarehouseRequest sameCode(String code) { return req(code, null, null, null, null, null, null, null); }
@@ -125,7 +125,7 @@ class WarehouseServiceTest {
                     case "saveAndFlush" -> { flushed.add((Warehouse) a[0]); yield a[0]; }
                     default -> null;
                 });
-        return new WarehouseService(repo, null, null, null);
+        return new WarehouseService(repo, null, null, null, null);
     }
 
     @Test void movingSalesPointTurnsOffOldWarehouseAndLeavesNewOneOn() {
@@ -160,5 +160,12 @@ class WarehouseServiceTest {
         serviceOver(java.util.List.of(shop), flushed).transferSingletons(shop, Config.of(shop));
         assertThat(flushed).isEmpty();
         assertThat(shop.isSalesPoint()).isTrue();
+    }
+
+    @Test void externalWarehouseCannotBelongToStore() {   // 23/BE-1
+        assertThat(WarehouseService.storeBlocker(WarehouseKind.EXTERNAL, java.util.UUID.randomUUID()))
+                .isEqualTo("Nơi nhận ngoài không thuộc cửa hàng");
+        assertThat(WarehouseService.storeBlocker(WarehouseKind.EXTERNAL, null)).isNull();
+        assertThat(WarehouseService.storeBlocker(WarehouseKind.INTERNAL, java.util.UUID.randomUUID())).isNull();
     }
 }
