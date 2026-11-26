@@ -98,6 +98,22 @@ public class InventoryRequest extends BaseEntity {
     @Column(name = "received_by", length = 100)
     private String receivedBy;
 
+    /** 24: phiếu SX liên quan (PICK/WRITE_OFF gắn phiếu); lô lấy về được giữ cho phiếu này. */
+    @NotAudited
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "production_request_id")
+    private com.bakery.api.production.entity.ProductionRequest productionRequest;
+
+    /** 24: code_value PICK_REASON (chỉ PICK). */
+    @NotAudited
+    @Column(name = "pick_reason", length = 30)
+    private String pickReason;
+
+    /** 24: phiên ngày đã ghi nhận phiếu bảng tạm. */
+    @NotAudited
+    @Column(name = "session_id")
+    private java.util.UUID sessionId;
+
     /** Đặt ở @PrePersist vì phiếu sinh từ generate-purchase không đi qua beforeCreate. */
     @PrePersist
     void initPaymentStatus() {

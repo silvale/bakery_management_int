@@ -29,6 +29,12 @@ public class InventoryRequestLineResponse extends BaseResponse {
     private BigDecimal purchaseQty;
     /** Số thực nhận theo unit; null khi phiếu chưa xác nhận. */
     private BigDecimal receivedQty;
+    /** 24: id mặt hàng của dòng (mọi loại phiếu), cạnh {@code item: {key, name}}. */
+    private java.util.UUID itemId;
+    /** 24 (PICK): kho nguồn không đủ lúc tạo. */
+    private boolean stockShort;
+    /** 24/BE-5 (PICK chờ lấy): tồn chung hiện tại ở kho nguồn; null nếu user không xem được tồn kho đó. */
+    private BigDecimal stock;
     /**
      * Thành tiền (PURCHASE). Đã duyệt: theo receivedQty; chưa duyệt: theo số đặt.
      * Có bao: unitCost × qty ÷ qtyPerPack; không bao: unitCost × qty. Làm tròn 2 số lẻ.

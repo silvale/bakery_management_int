@@ -43,12 +43,12 @@ public class StockLotService extends AbstractBakeryAdminService<StockLot, Void, 
 
     @Override
     protected StockLot toEntity(Void request) {
-        throw new UnsupportedOperationException("StockLot is created via purchase approval only");
+        throw new UnsupportedOperationException("Lô hàng chỉ được tạo khi duyệt phiếu nhập");
     }
 
     @Override
     protected void applyUpdate(StockLot entity, Void request) {
-        throw new UnsupportedOperationException("StockLot cannot be updated via API");
+        throw new UnsupportedOperationException("Không sửa lô hàng trực tiếp được");
     }
 
     private final AccessScope scope;

@@ -33,4 +33,11 @@ class ItemDefaultWarehouseTest {
         assertThat(ItemService.defaultWarehouseBlocker("PRODUCT", null)).isNull();
         assertThat(ItemService.defaultWarehouseBlocker("PRODUCT", wh(false, false))).isNull();
     }
+
+    @Test void wipWarehouseCannotBeStorageOrDefault() {   // 24/BE-1
+        Warehouse wip = new Warehouse();
+        wip.setWorkInProgress(true);
+        assertThat(ItemService.defaultWarehouseBlocker("INGREDIENT", wip)).contains("Kho bảng tạm");
+        assertThat(ItemService.defaultWarehouseBlocker("SEMI_PRODUCT", wip)).contains("Kho bảng tạm");
+    }
 }

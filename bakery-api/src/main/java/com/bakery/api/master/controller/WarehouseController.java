@@ -24,6 +24,12 @@ public class WarehouseController extends BakeryAdminResource<WarehouseRequest, W
         return service;
     }
 
+    /** 25: nơi nhận ngoài (Nhà Hàng) cho phiếu xuất ngoài; trả [] nếu user không có quyền xuất. */
+    @org.springframework.web.bind.annotation.GetMapping("/export-targets")
+    public java.util.List<com.bakery.api.master.dto.WarehouseRefResponse> exportTargets() {
+        return service.exportTargets();
+    }
+
     /**
      * 11/BE-8: {@code GET /warehouses?scope=all} — MỌI kho đang dùng, chỉ {id, code, name, type} (không tồn, không số liệu),
      * để chọn kho xuất của phiếu điều chuyển (bếp xin hàng từ Kho Tổng). Cần {@code INVENTORY_REQUESTS:CREATE}

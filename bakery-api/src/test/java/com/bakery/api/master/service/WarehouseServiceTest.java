@@ -23,7 +23,7 @@ class WarehouseServiceTest {
 
     private static WarehouseRequest req(String code, WarehouseKind kind, Boolean receive, Boolean prod, Boolean semi,
                                         Boolean hold, Boolean sales, Boolean export) {
-        return new WarehouseRequest(code, "x", null, kind, receive, prod, semi, hold, sales, export, null);
+        return new WarehouseRequest(code, "x", null, kind, receive, prod, semi, hold, sales, export, null, null, null);
     }
 
     private static WarehouseRequest sameCode(String code) { return req(code, null, null, null, null, null, null, null); }
@@ -52,7 +52,7 @@ class WarehouseServiceTest {
         Warehouse w = wh("COLD");
         w.setCanStoreSemi(true);
         String m = WarehouseService.updateBlocker(w, req("COLD", null, null, null, false, null, null, null), new Facts(false, 0, 3, true, true));
-        assertThat(m).contains("3").contains("bán thành phẩm");
+        assertThat(m).contains("3").contains("hàng gia công").doesNotContain("BTP");
         assertThat(WarehouseService.updateBlocker(w, req("COLD", null, null, null, false, null, null, null), NONE)).isNull();
     }
 
@@ -125,7 +125,7 @@ class WarehouseServiceTest {
                     case "saveAndFlush" -> { flushed.add((Warehouse) a[0]); yield a[0]; }
                     default -> null;
                 });
-        return new WarehouseService(repo, null, null, null);
+        return new WarehouseService(repo, null, null, null, null);
     }
 
     @Test void movingSalesPointTurnsOffOldWarehouseAndLeavesNewOneOn() {
@@ -160,5 +160,41 @@ class WarehouseServiceTest {
         serviceOver(java.util.List.of(shop), flushed).transferSingletons(shop, Config.of(shop));
         assertThat(flushed).isEmpty();
         assertThat(shop.isSalesPoint()).isTrue();
+    }
+
+    @Test void externalWarehouseCannotBelongToStore() {   // 23/BE-1
+        assertThat(WarehouseService.storeBlocker(WarehouseKind.EXTERNAL, java.util.UUID.randomUUID()))
+                .isEqualTo("Nơi nhận ngoài không thuộc cửa hàng");
+        assertThat(WarehouseService.storeBlocker(WarehouseKind.EXTERNAL, null)).isNull();
+        assertThat(WarehouseService.storeBlocker(WarehouseKind.INTERNAL, java.util.UUID.randomUUID())).isNull();
+    }
+
+    // ── 24/BE-1: kho bảng tạm (§4.1) ────────────────────────────────────────
+
+    private static Config wipOnly() { return new Config(WarehouseKind.INTERNAL, false, false, false, false, false, false, true); }
+
+    @Test void wipWarehouseMustBelongToAStore() {
+        assertThat(WarehouseService.wipBlocker(wipOnly(), null)).isEqualTo("Kho bảng tạm phải thuộc một cửa hàng");
+        assertThat(WarehouseService.wipBlocker(wipOnly(), java.util.UUID.randomUUID())).isNull();
+        assertThat(WarehouseService.wipBlocker(new Config(WarehouseKind.INTERNAL, true, false, false, false, false, false, false), null)).isNull();   // kho thường không bị ràng buộc
+    }
+
+    @Test void wipWarehouseCannotEnableAnyOtherRole() {
+        Config withSales = new Config(WarehouseKind.INTERNAL, false, false, false, false, true, false, true);
+        assertThat(WarehouseService.wipBlocker(withSales, java.util.UUID.randomUUID())).isEqualTo("Kho bảng tạm không được bật việc nào khác");
+    }
+
+    @Test void oneWipPerStoreAndCannotTurnOffWithStock() {
+        Config off = new Config(WarehouseKind.INTERNAL, false, false, false, false, false, false, false);
+        assertThat(WarehouseService.wipChangeBlocker(off, wipOnly(), true, 0)).isEqualTo("Cửa hàng này đã có kho bảng tạm");
+        assertThat(WarehouseService.wipChangeBlocker(off, wipOnly(), false, 0)).isNull();
+        assertThat(WarehouseService.wipChangeBlocker(wipOnly(), off, false, 3)).contains("kho còn 3 lô tồn");
+    }
+
+    @Test void exportTargetsOnlyForAdminOrViewersAssignedToAnExportWarehouse() {   // 25/BE-1
+        assertThat(WarehouseService.canSeeExportTargets(true, false, false)).isTrue();
+        assertThat(WarehouseService.canSeeExportTargets(false, true, true)).isTrue();
+        assertThat(WarehouseService.canSeeExportTargets(false, true, false)).isFalse();    // có quyền xem nhưng không gán kho xuất ngoài
+        assertThat(WarehouseService.canSeeExportTargets(false, false, true)).isFalse();    // gán kho nhưng không có INVENTORY_REQUESTS:VIEW
     }
 }

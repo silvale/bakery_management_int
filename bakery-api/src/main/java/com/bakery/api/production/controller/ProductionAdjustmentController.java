@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
-import com.bakery.api.production.entity.ProductionAdjustment;
+import com.bakery.api.production.dto.ProductionAdjustmentResponse;
 import com.bakery.api.production.service.ProductionAdjustmentService;
 import com.bakery.framework.entity.AdjustmentType;
 import com.bakery.framework.security.RequirePermission;
@@ -35,24 +35,24 @@ public class ProductionAdjustmentController {
     private final ProductionAdjustmentService service;
 
     @GetMapping("/pending")
-    public List<ProductionAdjustment> getPending() {
+    public List<ProductionAdjustmentResponse> getPending() {
         return service.findPending();
     }
 
     @GetMapping("/by-delivery/{deliveryRecordId}")
-    public List<ProductionAdjustment> getByDeliveryRecord(@PathVariable UUID deliveryRecordId) {
+    public List<ProductionAdjustmentResponse> getByDeliveryRecord(@PathVariable UUID deliveryRecordId) {
         return service.findByDeliveryRecord(deliveryRecordId);
     }
 
     @PostMapping("/{id}/approve")
     @RequirePermission(screen = "PROD_ADJUSTMENTS", action = "APPROVE")
-    public ProductionAdjustment approve(@PathVariable UUID id) {
+    public ProductionAdjustmentResponse approve(@PathVariable UUID id) {
         return service.approve(id);
     }
 
     @PostMapping("/{id}/reject")
     @RequirePermission(screen = "PROD_ADJUSTMENTS", action = "REJECT")
-    public ProductionAdjustment reject(
+    public ProductionAdjustmentResponse reject(
             @PathVariable UUID id,
             @RequestParam(required = false) String reason) {
         return service.reject(id, reason);
@@ -64,7 +64,7 @@ public class ProductionAdjustmentController {
      */
     @PostMapping("/admin/correct")
     @RequirePermission(screen = "PROD_ADJUSTMENTS", action = "APPROVE")
-    public ProductionAdjustment adminCorrect(
+    public ProductionAdjustmentResponse adminCorrect(
             @RequestParam UUID deliveryRecordId,
             @RequestParam AdjustmentType adjustmentType,
             @RequestParam BigDecimal adjustedQty,

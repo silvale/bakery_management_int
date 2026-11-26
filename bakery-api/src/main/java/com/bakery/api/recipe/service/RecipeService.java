@@ -76,7 +76,7 @@ public class RecipeService
     @Override
     protected void applyUpdate(Recipe recipe, RecipeRequest req) {
         if (recipe.getApprovalStatus() == ApprovalStatus.APPROVED) {
-            throw new IllegalStateException("Không thể sửa recipe đã APPROVED. Hãy clone và tạo phiên bản mới.");
+            throw new IllegalStateException("Không sửa được công thức đã duyệt. Hãy nhân bản và tạo phiên bản mới.");
         }
         recipe.setNote(req.note());
         recipe.getLines().clear();
@@ -150,7 +150,7 @@ public class RecipeService
                 .orElseThrow(() -> new ResourceNotFoundException("Recipe", recipeId));
 
         if (recipe.getApprovalStatus() != ApprovalStatus.APPROVED) {
-            throw new IllegalStateException("Chỉ recipe đã APPROVED mới có thể activate.");
+            throw new IllegalStateException("Chỉ công thức đã duyệt mới bật dùng được.");
         }
         if (recipe.isActive()) {
             return toResponse(recipe); // idempotent
@@ -270,7 +270,7 @@ public class RecipeService
         boolean hasSemi = req.semiProductId() != null;
         if (hasProduct == hasSemi) {
             throw new IllegalArgumentException(
-                    "Phải cung cấp đúng một trong hai: productId hoặc semiProductId.");
+                    "Phải chọn đúng một trong hai: sản phẩm hoặc hàng gia công.");
         }
     }
 
@@ -279,14 +279,14 @@ public class RecipeService
             Item item = itemRepository.findById(req.productId())
                     .orElseThrow(() -> new ResourceNotFoundException("Product", req.productId()));
             if (!(item instanceof Product p)) {
-                throw new IllegalArgumentException("\"" + item.getName() + "\" không phải sản phẩm (PRODUCT).");
+                throw new IllegalArgumentException("\"" + item.getName() + "\" không phải sản phẩm.");
             }
             recipe.setProduct(p);
         } else {
             Item item = itemRepository.findById(req.semiProductId())
                     .orElseThrow(() -> new ResourceNotFoundException("SemiProduct", req.semiProductId()));
             if (!(item instanceof SemiProduct sp)) {
-                throw new IllegalArgumentException("\"" + item.getName() + "\" không phải bán thành phẩm (SEMI_PRODUCT).");
+                throw new IllegalArgumentException("\"" + item.getName() + "\" không phải hàng gia công.");
             }
             recipe.setSemiProduct(sp);
         }

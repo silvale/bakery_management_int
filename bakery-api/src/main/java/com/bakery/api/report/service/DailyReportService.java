@@ -264,7 +264,7 @@ public class DailyReportService {
             return lineRepository.save(saved);
         }
         if (qtyRemainingActual == null) {
-            throw new IllegalArgumentException("qtyRemainingActual là bắt buộc");
+            throw new IllegalArgumentException("Phải nhập số còn lại thực tế");
         }
         line.setQtyRemainingActual(qtyRemainingActual);
         if (qtyCancelled != null) {

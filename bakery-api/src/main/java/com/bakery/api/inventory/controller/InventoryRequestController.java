@@ -142,7 +142,7 @@ public class InventoryRequestController
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Chưa đăng nhập.");
         }
         if (!"SUPER_ADMIN".equalsIgnoreCase(principal.getRole())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chỉ SUPER_ADMIN được thực hiện thao tác này.");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chỉ Admin được thực hiện thao tác này.");
         }
     }
 }

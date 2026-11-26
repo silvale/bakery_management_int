@@ -431,8 +431,8 @@ public class ProductionPlannerService {
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionPlan", planId));
         if (plan.getApprovalStatus() != ApprovalStatus.REJECTED) {
             throw new IllegalStateException(
-                    "Chỉ có thể tạo lại kế hoạch ở trạng thái REJECTED. Hiện tại: "
-                            + plan.getApprovalStatus());
+                    "Chỉ tạo lại được kế hoạch bị từ chối (hiện tại: "
+                            + plan.getApprovalStatus().label() + ")");
         }
 
         // Xóa lines cũ ngay xuống DB — dùng @Modifying JPQL để flush trước khi INSERT mới

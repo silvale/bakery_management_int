@@ -39,6 +39,7 @@ public class ProductionPlanService {
     private final BakeryActorResolver actorResolver;
     private final ProductionRequestService productionRequestService;
     private final ProductionIngredientService ingredientService;
+    private final ProductionPickService pickService;
 
     /** Manager xem kế hoạch theo ngày (DRAFT hoặc APPROVED). */
     @Transactional(readOnly = true)
@@ -115,6 +116,8 @@ public class ProductionPlanService {
         // Tự động tạo phiếu SX DAILY theo từng ItemGroup
         int requestCount = productionRequestService.generateFromPlan(saved).size();
         log.info("Approve plan {} → tạo {} phiếu SX DAILY", saved.getPlanDate(), requestCount);
+        // 24/§5.1: phiếu lấy NL theo kho cho mọi phiếu DAILY của ngày
+        pickService.generate(saved.getPlanDate());
 
         // NOTE: Không check/validate nguyên liệu tại đây.
         // Phiếu TRANSFER MAIN→KITCHEN sẽ được tạo thủ công sau khi đã nhập đủ NL,
@@ -131,10 +134,11 @@ public class ProductionPlanService {
         ProductionPlan plan = getById(planId);
         if (plan.getApprovalStatus() != ApprovalStatus.APPROVED) {
             throw new IllegalStateException(
-                    "Chỉ có thể generate PRs từ plan APPROVED. Hiện tại: " + plan.getApprovalStatus());
+                    "Chỉ tạo phiếu sản xuất từ kế hoạch đã duyệt (hiện tại: " + plan.getApprovalStatus().label() + ")");
         }
         plan.getLines().size(); // force-init
         int count = productionRequestService.generateFromPlan(plan).size();
+        pickService.generate(plan.getPlanDate());   // 24/§5.1: idempotent, chỉ tạo phần còn thiếu
         log.info("generateRequestsFromApprovedPlan: plan {} → tạo {} phiếu SX", plan.getPlanDate(), count);
         return count;
     }
@@ -166,14 +170,14 @@ public class ProductionPlanService {
 
         ProductionPlanGroup ppg = planGroupRepository.findByPlanIdAndGroupId(planId, groupId)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "ProductionPlanGroup for plan " + planId + " group " + groupId));
+                        "Kế hoạch không có nhóm sản xuất này"));
 
         boolean isBatchFormula = "BATCH_FORMULA".equals(ppg.getGroup().getGroupType());
         if (isBatchFormula && plannedQty < 1) {
-            throw new IllegalArgumentException("Số cối phải >= 1 với nhóm BATCH_FORMULA.");
+            throw new IllegalArgumentException("Số cối phải từ 1 trở lên với nhóm làm theo cối.");
         }
         if (!isBatchFormula && plannedQty < 0) {
-            throw new IllegalArgumentException("plannedQty phải >= 0.");
+            throw new IllegalArgumentException("Số lượng kế hoạch không được âm.");
         }
 
         ppg.setPlannedQty(plannedQty);
@@ -237,7 +241,7 @@ public class ProductionPlanService {
     private void assertDraft(ProductionPlan plan) {
         if (plan.getApprovalStatus() != ApprovalStatus.DRAFT) {
             throw new IllegalStateException(
-                    "Kế hoạch " + plan.getPlanDate() + " không còn ở trạng thái DRAFT.");
+                    "Kế hoạch ngày " + plan.getPlanDate().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")) + " không còn ở trạng thái Nháp.");
         }
     }
 }

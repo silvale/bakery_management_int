@@ -39,6 +39,13 @@ public interface StockLotRepository extends BaseRepository<StockLot> {
     List<Object[]> sumRemainingByItem(@Param("warehouseId") UUID warehouseId,
                                       @Param("itemIds") java.util.Collection<UUID> itemIds);
 
+    /** 24/BE-5: tồn chung (không tính lô đang giữ) theo kho × mặt hàng — [warehouseId, itemId, sum]. Một query cho cả trang phiếu. */
+    @Query("SELECT l.warehouse.id, l.item.id, SUM(l.qtyRemaining) FROM StockLot l "
+            + "WHERE l.warehouse.id IN :warehouseIds AND l.item.id IN :itemIds AND l.reservedForRequestId IS NULL "
+            + "GROUP BY l.warehouse.id, l.item.id")
+    List<Object[]> sumFreeByWarehouseItem(@Param("warehouseIds") java.util.Collection<UUID> warehouseIds,
+                                          @Param("itemIds") java.util.Collection<UUID> itemIds);
+
     /** FIFO trong một kho: lô còn hàng, nhập sớm nhất trước. */
     List<StockLot> findByItemIdAndWarehouseIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
             UUID itemId, UUID warehouseId, BigDecimal minQty);
@@ -63,4 +70,10 @@ public interface StockLotRepository extends BaseRepository<StockLot> {
             ORDER BY i.code, s.warehouse.code
             """)
     List<Object[]> findStockSummaryRaw(@Param("warehouseCode") String warehouseCode);
+
+    /** 24: lô ở kho bảng tạm đang giữ cho phiếu SX (idx_stock_lot_wh_reserved). */
+    List<StockLot> findByWarehouseIdAndReservedForRequestId(UUID warehouseId, UUID requestId);
+
+    /** 24: mọi lô còn hàng của một kho (kiểm bảng tạm lúc đóng phiên; idx_stock_lot_warehouse_remaining). */
+    List<StockLot> findByWarehouseIdAndQtyRemainingGreaterThan(UUID warehouseId, java.math.BigDecimal qty);
 }

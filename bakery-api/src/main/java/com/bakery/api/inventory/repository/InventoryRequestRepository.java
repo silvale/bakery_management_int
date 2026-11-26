@@ -51,4 +51,22 @@ public interface InventoryRequestRepository extends BaseRepository<InventoryRequ
             WHERE r.id IN :ids
             """)
     List<InventoryRequest> findWithLinesByIdIn(@Param("ids") Collection<UUID> ids);
+
+    /** 24: phiếu bảng tạm của một phiên. */
+    List<InventoryRequest> findBySessionIdOrderByCreatedAtAsc(UUID sessionId);
+
+    /** 24: phiếu lấy tự tạo theo kế hoạch của một ngày (không gắn phiếu SX). */
+    List<InventoryRequest> findByRequestTypeAndRequestDateAndPickReasonAndProductionRequestIsNull(
+            InventoryRequestType type, LocalDate date, String pickReason);
+
+    /** 24: phiếu bảng tạm gắn một phiếu SX. */
+    List<InventoryRequest> findByProductionRequestIdAndRequestType(UUID productionRequestId, InventoryRequestType type);
+
+    /** 24: phiếu PICK / RETURN / WRITE_OFF theo ngày (idx_inv_req_type_date_pick). */
+    List<InventoryRequest> findByRequestTypeInAndRequestDateBetweenOrderByRequestDateDescCreatedAtDesc(
+            Collection<InventoryRequestType> types, LocalDate from, LocalDate to);
+
+    /** 24: số phiếu bảng tạm theo phiên → [sessionId, count] (idx_inv_req_session). */
+    @Query(value = "SELECT session_id, COUNT(*) FROM inventory_request WHERE session_id IN (:ids) GROUP BY session_id", nativeQuery = true)
+    List<Object[]> countBySession(@Param("ids") Collection<UUID> ids);
 }

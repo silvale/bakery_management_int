@@ -204,7 +204,7 @@ public class RecipeController extends BakeryAdminResource<RecipeRequest, RecipeR
                 noRecipe++;
                 // Không log item không có active recipe (bình thường)
                 String msg = e.getMessage();
-                if (msg != null && !msg.contains("chưa có active recipe")) {
+                if (msg != null && !msg.contains("chưa có công thức đang dùng")) {
                     errors.add(item.getCode() + ": " + msg);
                 }
             }

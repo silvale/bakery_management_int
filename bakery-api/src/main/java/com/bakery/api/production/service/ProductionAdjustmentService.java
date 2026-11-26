@@ -14,6 +14,7 @@ import com.bakery.api.master.entity.Item;
 import com.bakery.api.master.entity.Warehouse;
 import com.bakery.api.master.repository.WarehouseRepository;
 import jakarta.persistence.EntityManager;
+import com.bakery.api.production.dto.ProductionAdjustmentResponse;
 import com.bakery.api.production.entity.DeliveryRecord;
 import com.bakery.api.production.entity.ProductionAdjustment;
 import com.bakery.api.production.entity.ProductionRequestLine;
@@ -50,24 +51,18 @@ public class ProductionAdjustmentService {
 
     private final ProductionAdjustmentRepository adjustmentRepository;
     private final DeliveryRecordRepository deliveryRecordRepository;
-    private final RecipeRepository recipeRepository;
-    private final RecipeLineRepository recipeLineRepository;
-    private final StockLotRepository stockLotRepository;
-    private final StockMovementRepository stockMovementRepository;
-    private final WarehouseRepository warehouseRepository;
-    private final com.bakery.api.master.service.WarehouseRoles warehouseRoles;
-    private final com.bakery.api.inventory.service.ProductionStock productionStock;
-    private final EntityManager entityManager;
     private final BakeryActorResolver actorResolver;
 
     // ── Queries ──────────────────────────────────────────────────
 
-    public List<ProductionAdjustment> findByDeliveryRecord(UUID deliveryRecordId) {
-        return adjustmentRepository.findByDeliveryRecordId(deliveryRecordId);
+    @Transactional(readOnly = true)
+    public List<ProductionAdjustmentResponse> findByDeliveryRecord(UUID deliveryRecordId) {
+        return adjustmentRepository.findByDeliveryRecordId(deliveryRecordId).stream().map(ProductionAdjustmentResponse::from).toList();
     }
 
-    public List<ProductionAdjustment> findPending() {
-        return adjustmentRepository.findByApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+    @Transactional(readOnly = true)
+    public List<ProductionAdjustmentResponse> findPending() {
+        return adjustmentRepository.findByApprovalStatus(ApprovalStatus.PENDING_APPROVAL).stream().map(ProductionAdjustmentResponse::from).toList();
     }
 
     // ── Admin tạo correction ─────────────────────────────────────
@@ -77,7 +72,7 @@ public class ProductionAdjustmentService {
      * Không giới hạn số lần (khác với KITCHEN_COMPLETE chỉ 1 lần).
      */
     @Transactional
-    public ProductionAdjustment createAdminCorrection(UUID deliveryRecordId,
+    public ProductionAdjustmentResponse createAdminCorrection(UUID deliveryRecordId,
             AdjustmentType adjustmentType, BigDecimal adjustedQty, String reason) {
         DeliveryRecord dr = deliveryRecordRepository.findById(deliveryRecordId)
                 .orElseThrow(() -> new ResourceNotFoundException("DeliveryRecord", deliveryRecordId));
@@ -94,7 +89,7 @@ public class ProductionAdjustmentService {
         adj.setReason(reason);
         adj.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
         adj.setCreatedBy(actorResolver.currentUserId());
-        return adjustmentRepository.save(adj);
+        return ProductionAdjustmentResponse.from(adjustmentRepository.save(adj));
     }
 
     // ── Bếp trưởng duyệt ────────────────────────────────────────
@@ -102,19 +97,15 @@ public class ProductionAdjustmentService {
     /**
      * Bếp trưởng duyệt adjustment.
      *
-     * <p>INGREDIENT_VARIANCE:
-     *   delta > 0 → bếp lấy thêm NL → trừ thêm từ KITCHEN theo recipe
-     *   delta < 0 → bếp dùng ít NL  → hoàn NL vào KITCHEN (tạo lot mới IN)
-     *
-     * <p>PRODUCTION_WASTAGE: chỉ update qtyProduced, không động NL.
+     * <p>Cả INGREDIENT_VARIANCE lẫn PRODUCTION_WASTAGE chỉ cập nhật số lượng, không động tồn NL (24/§5.5).
      */
     @Transactional
-    public ProductionAdjustment approve(UUID adjustmentId) {
+    public ProductionAdjustmentResponse approve(UUID adjustmentId) {
         ProductionAdjustment adj = adjustmentRepository.findById(adjustmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionAdjustment", adjustmentId));
 
         if (adj.getApprovalStatus() != ApprovalStatus.PENDING_APPROVAL) {
-            throw new IllegalStateException("Adjustment không ở trạng thái PENDING_APPROVAL.");
+            throw new IllegalStateException("Phiếu điều chỉnh không ở trạng thái Chờ duyệt.");
         }
 
         // Cập nhật DeliveryRecord.qtyProduced
@@ -122,103 +113,28 @@ public class ProductionAdjustmentService {
         dr.setQtyProduced(adj.getAdjustedQty());
         deliveryRecordRepository.save(dr);
 
-        // Xử lý NL nếu INGREDIENT_VARIANCE
-        if (adj.getAdjustmentType() == AdjustmentType.INGREDIENT_VARIANCE) {
-            adjustIngredients(adj, dr);
-        }
+        // 24/§5.5: hoàn thành đã trừ bảng tạm theo số làm thật; duyệt điều chỉnh KHÔNG động tồn NL nữa (hết lỗi trừ hai lần).
+        // Phần NL thừa/thiếu do lệch nằm ở bảng tạm và lộ ra lúc đóng phiên.
 
         adj.setApprovalStatus(ApprovalStatus.APPROVED);
         adj.setApprovedAt(Instant.now());
         adj.setApprovedBy(actorResolver.currentUserId());
         adj.setUpdatedAt(Instant.now());
-        return adjustmentRepository.save(adj);
+        return ProductionAdjustmentResponse.from(adjustmentRepository.save(adj));
     }
 
     @Transactional
-    public ProductionAdjustment reject(UUID adjustmentId, String reason) {
+    public ProductionAdjustmentResponse reject(UUID adjustmentId, String reason) {
         ProductionAdjustment adj = adjustmentRepository.findById(adjustmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionAdjustment", adjustmentId));
 
         if (adj.getApprovalStatus() != ApprovalStatus.PENDING_APPROVAL) {
-            throw new IllegalStateException("Adjustment không ở trạng thái PENDING_APPROVAL.");
+            throw new IllegalStateException("Phiếu điều chỉnh không ở trạng thái Chờ duyệt.");
         }
 
         adj.setApprovalStatus(ApprovalStatus.REJECTED);
         adj.setRejectedReason(reason);
         adj.setUpdatedAt(Instant.now());
-        return adjustmentRepository.save(adj);
-    }
-
-    // ── Private helpers ──────────────────────────────────────────
-
-    private void adjustIngredients(ProductionAdjustment adj, DeliveryRecord dr) {
-        ProductionRequestLine line = dr.getProductionRequestLine();
-        Recipe recipe = resolveRecipe(line);
-        if (recipe == null) return;
-
-        Warehouse kitchen = warehouseRoles.deliveryHold();
-
-        List<RecipeLine> recipeLines = recipeLineRepository.findByRecipeIdOrderBySortOrderAsc(recipe.getId());
-        BigDecimal delta = adj.getDelta(); // dương = tăng sản lượng, âm = giảm
-
-        for (RecipeLine rl : recipeLines) {
-            BigDecimal nlDelta = rl.getQuantity().multiply(delta);
-
-            if (nlDelta.compareTo(BigDecimal.ZERO) > 0) {
-                // Tăng sản lượng → trừ thêm NL từ KITCHEN (FIFO)
-                deductFromKitchen(nlDelta, rl.getItem().getId(), adj.getId());
-            } else if (nlDelta.compareTo(BigDecimal.ZERO) < 0) {
-                // Giảm sản lượng → hoàn NL về KITCHEN (tạo lot mới)
-                returnToKitchen(nlDelta.abs(), rl.getItem().getId(), kitchen, adj.getId());
-            }
-        }
-    }
-
-    private Recipe resolveRecipe(ProductionRequestLine line) {
-        if (line.getRecipe() != null) return line.getRecipe();
-        return recipeRepository.findByProductIdAndActiveTrue(line.getProduct().getId()).orElse(null);
-    }
-
-    /** Bù NL khi tăng sản lượng: cùng quy tắc trừ NL của 22/§5.2 (nhóm 1 trước, thiếu mới sang nhóm 2). */
-    private void deductFromKitchen(BigDecimal needed, UUID itemId, UUID refId) {
-        BigDecimal remaining = productionStock.deduct(itemId, needed, REF_TYPE, refId, "Bù NL do điều chỉnh sản lượng tăng");
-        if (remaining.compareTo(BigDecimal.ZERO) > 0) {
-            Item item = entityManager.find(Item.class, itemId);
-            String itemName = (item != null) ? item.getName() : itemId.toString();
-            throw new IllegalStateException("Kho sản xuất không đủ NL để bù adjustment: " + itemName + " (thiếu " + remaining + ")");
-        }
-    }
-
-    private void returnToKitchen(BigDecimal qty, UUID itemId, Warehouse kitchen, UUID refId) {
-        // Lấy lot gần nhất của item này trong KITCHEN để lấy unitCost tham chiếu
-        List<StockLot> existing = stockLotRepository
-                .findByItemIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(itemId, BigDecimal.ZERO)
-                .stream()
-                .filter(l -> l.getWarehouse().getId().equals(kitchen.getId()))
-                .toList();
-
-        BigDecimal refCost = existing.isEmpty() ? BigDecimal.ZERO
-                : existing.get(existing.size() - 1).getUnitCost();
-
-        Item item = entityManager.find(Item.class, itemId);
-        if (item == null) throw new ResourceNotFoundException("Item", itemId);
-
-        StockLot returnLot = new StockLot();
-        returnLot.setItem(item);
-        returnLot.setWarehouse(kitchen);
-        returnLot.setQtyInitial(qty);
-        returnLot.setQtyRemaining(qty);
-        returnLot.setUnitCost(refCost);
-        returnLot.setReceivedDate(java.time.LocalDate.now());
-        StockLot savedLot = stockLotRepository.save(returnLot);
-
-        StockMovement mv = new StockMovement();
-        mv.setLot(savedLot);
-        mv.setMovementType(MovementType.IN);
-        mv.setQty(qty);
-        mv.setRefId(refId);
-        mv.setRefType(REF_TYPE);
-        mv.setNote("Hoàn NL do điều chỉnh sản lượng giảm");
-        stockMovementRepository.save(mv);
+        return ProductionAdjustmentResponse.from(adjustmentRepository.save(adj));
     }
 }
