@@ -105,7 +105,7 @@ public class ProductionAdjustmentService {
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionAdjustment", adjustmentId));
 
         if (adj.getApprovalStatus() != ApprovalStatus.PENDING_APPROVAL) {
-            throw new IllegalStateException("Adjustment không ở trạng thái PENDING_APPROVAL.");
+            throw new IllegalStateException("Phiếu điều chỉnh không ở trạng thái Chờ duyệt.");
         }
 
         // Cập nhật DeliveryRecord.qtyProduced
@@ -129,7 +129,7 @@ public class ProductionAdjustmentService {
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionAdjustment", adjustmentId));
 
         if (adj.getApprovalStatus() != ApprovalStatus.PENDING_APPROVAL) {
-            throw new IllegalStateException("Adjustment không ở trạng thái PENDING_APPROVAL.");
+            throw new IllegalStateException("Phiếu điều chỉnh không ở trạng thái Chờ duyệt.");
         }
 
         adj.setApprovalStatus(ApprovalStatus.REJECTED);

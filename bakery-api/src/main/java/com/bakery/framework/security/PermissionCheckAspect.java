@@ -52,7 +52,7 @@ public class PermissionCheckAspect {
             log.warn("Permission denied: user={} role={} screen={} action={}",
                     principal.getUsername(), roleCode, screenCode, actionCode);
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Không có quyền thực hiện thao tác này [" + screenCode + ":" + actionCode + "]");
+                    com.bakery.api.auth.service.PermissionLabels.denied(screenCode, actionCode));
         }
 
         return pjp.proceed();

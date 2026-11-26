@@ -81,7 +81,7 @@ public class AccessScope {
     public void require(String screen, String action) {
         if (!can(screen, action)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Không có quyền thực hiện thao tác này [" + screen + ":" + action + "]");
+                    PermissionLabels.denied(screen, action));
         }
     }
 
@@ -182,7 +182,7 @@ public class AccessScope {
             case "PRODUCT"      -> "ITEMS_PRODUCT";
             case "SEMI_PRODUCT" -> "ITEMS_SEMI";
             case "INGREDIENT"   -> "ITEMS_INGREDIENT";
-            default -> throw new IllegalArgumentException("Unknown itemType: " + itemType);
+            default -> throw new IllegalArgumentException("Loại mặt hàng không hợp lệ: " + itemType);
         };
     }
 

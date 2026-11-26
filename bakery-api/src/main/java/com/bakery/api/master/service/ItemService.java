@@ -175,7 +175,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             if (typeClass != SemiProduct.class && !scope.canViewItemType(itemType)) {
                 throw new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.FORBIDDEN,
-                        "Không có quyền xem tab này [" + com.bakery.api.auth.service.AccessScope.itemTypeScreen(itemType) + ":VIEW]");
+                        "Không có quyền xem tab này" + (com.bakery.api.auth.service.PermissionLabels.screen(com.bakery.api.auth.service.AccessScope.itemTypeScreen(itemType)) == null ? "" : " (" + com.bakery.api.auth.service.PermissionLabels.screen(com.bakery.api.auth.service.AccessScope.itemTypeScreen(itemType)) + ")"));
             }
             spec = spec.and((root, query, cb) -> cb.equal(root.type(), typeClass));
         }
@@ -267,7 +267,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                         ? "Nguyên liệu phải chọn kho lưu trữ (kho sản xuất lấy NL)" : null;
             case "SEMI_PRODUCT":
                 return w == null || !w.isCanStoreSemi()
-                        ? "Bán thành phẩm phải có kho mặc định là kho lưu bán thành phẩm" : null;
+                        ? "Hàng gia công phải có kho mặc định là kho lưu hàng gia công" : null;
             default:
                 return null;
         }
@@ -302,7 +302,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         if (isSemi(i) && !scope.canViewItemType("SEMI_PRODUCT")) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.FORBIDDEN,
-                    "Không có quyền xem bán thành phẩm [ITEMS_SEMI:VIEW]");
+                    com.bakery.api.auth.service.PermissionLabels.denied("ITEMS_SEMI", "VIEW").replace("thực hiện thao tác này", "xem hàng gia công"));
         }
     }
 
@@ -482,7 +482,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
         if (hasRecipe == null || hasRecipe.isBlank()) return (root, query, cb) -> null;
         String v = hasRecipe.trim().toLowerCase();
         if (!v.equals("true") && !v.equals("false")) {
-            throw new IllegalArgumentException("Tham số hasRecipe phải là true hoặc false: '" + hasRecipe + "'");
+            throw new IllegalArgumentException("Bộ lọc \"có công thức\" chỉ nhận true hoặc false: '" + hasRecipe + "'");
         }
         if (itemType == null || itemType.isBlank() || resolveClass(itemType) == Ingredient.class || !scope.canViewRecipes()) {
             return (root, query, cb) -> null;
@@ -542,7 +542,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
                 applyCommonFields(e, req);
                 yield e;
             }
-            default -> throw new IllegalArgumentException("Unknown itemType: " + req.itemType());
+            default -> throw new IllegalArgumentException("Loại mặt hàng không hợp lệ: " + req.itemType());
         };
     }
 
@@ -1176,7 +1176,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
 
             // ── Header row ────────────────────────────────────────────────────
             String[] headers = {
-                "STT", "Mã", "Tên", "Đơn vị", "Unit Size", "Base Unit",
+                "STT", "Mã", "Tên", "Đơn vị", "Quy cách", "Đơn vị gốc",
                 "Nhóm", "NCC mặc định", "Giá vốn", "Giá nhập mới nhất", "Ngày cập nhật giá"
             };
             Row headerRow = sheet.createRow(0);
@@ -1256,7 +1256,7 @@ public class ItemService extends AbstractBakeryAdminService<Item, ItemRequest, I
             case "INGREDIENT"   -> Ingredient.class;
             case "SEMI_PRODUCT" -> SemiProduct.class;
             case "PRODUCT"      -> Product.class;
-            default -> throw new IllegalArgumentException("Unknown itemType: " + itemType);
+            default -> throw new IllegalArgumentException("Loại mặt hàng không hợp lệ: " + itemType);
         };
     }
     /**

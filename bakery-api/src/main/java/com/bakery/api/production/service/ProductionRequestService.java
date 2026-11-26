@@ -127,7 +127,7 @@ public class ProductionRequestService
                 .orElseThrow(() -> new com.bakery.framework.exception.ResourceNotFoundException("ProductionRequest", id));
         if (e.getApprovalStatus() != ApprovalStatus.DRAFT
                 && e.getApprovalStatus() != ApprovalStatus.PENDING_APPROVAL) {
-            throw new IllegalStateException("Phiếu SX không ở trạng thái có thể duyệt (hiện tại: " + e.getApprovalStatus() + ")");
+            throw new IllegalStateException("Phiếu SX không ở trạng thái có thể duyệt (hiện tại: " + e.getApprovalStatus().label() + ")");
         }
         e.setApprovalStatus(ApprovalStatus.APPROVED);
         e.setApprovedAt(java.time.Instant.now());
@@ -459,6 +459,11 @@ public class ProductionRequestService
     /** Kết quả hoàn thành một line: phiếu đã lưu + cảnh báo thiếu phụ kiện (02/BE-13). */
     private record Completion(ProductionRequest saved, List<String> warnings) {}
 
+    /** 26: câu lỗi hoàn thành lệch số mà chưa chọn lý do lệch (số gọn, không .0000). */
+    static String varianceMessage(BigDecimal produced, BigDecimal planned) {
+        return "Số làm ra (" + WipDocs.plain(produced) + ") khác kế hoạch (" + WipDocs.plain(planned) + "). Chọn lý do lệch.";
+    }
+
     private Completion doCompleteLine(UUID requestId, UUID lineId,
             BigDecimal qtyProduced, AdjustmentType adjustmentType, String reason, String note,
             List<DesignQtyRequest> designs) {
@@ -472,7 +477,7 @@ public class ProductionRequestService
                 .orElseThrow(() -> new ResourceNotFoundException("ProductionRequestLine", lineId));
 
         if (line.getLineStatus() == ProductionLineStatus.COMPLETED) {
-            throw new IllegalStateException("Line đã Completed rồi.");
+            throw new IllegalStateException("Dòng này đã hoàn thành rồi.");
         }
 
         // Mẫu bánh: kiểm trước khi động đến tồn kho (lỗi → 400, không đổi gì)
@@ -487,7 +492,7 @@ public class ProductionRequestService
         boolean hasDeviation = !isOpenQty && qtyProduced.compareTo(plannedQty) != 0;
         if (hasDeviation && adjustmentType == null) {
             throw new IllegalArgumentException(
-                    "qtyProduced (" + qtyProduced + ") ≠ plannedQty (" + plannedQty + "). Vui lòng chọn adjustmentType.");
+                    varianceMessage(qtyProduced, plannedQty));
         }
 
         Warehouse deliveryHold = warehouseRoles.deliveryHold();   // 22: kho bánh chờ giao

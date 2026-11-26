@@ -394,7 +394,7 @@ public class ProductionPickService {
     private static void requireMaterial(Item item) {
         Object u = Hibernate.unproxy(item);
         if (!(u instanceof Ingredient) && !(u instanceof SemiProduct)) {
-            throw new IllegalStateException(item.getName() + " không phải nguyên liệu hoặc bán thành phẩm");
+            throw new IllegalStateException(item.getName() + " không phải nguyên liệu hoặc hàng gia công");
         }
     }
 

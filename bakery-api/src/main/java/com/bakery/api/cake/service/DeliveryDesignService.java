@@ -131,7 +131,7 @@ public class DeliveryDesignService {
             Set<UUID> seen = new HashSet<>();
             for (DesignQtyRequest.AccessoryQty a : sent) {
                 if (a == null || a.itemId() == null) {
-                    throw new IllegalArgumentException("Mẫu " + design.getCode() + ": phụ kiện thiếu itemId");
+                    throw new IllegalArgumentException("Mẫu " + design.getCode() + ": phụ kiện chưa chọn mặt hàng");
                 }
                 Item item = itemsById.get(a.itemId());
                 if (item == null) {

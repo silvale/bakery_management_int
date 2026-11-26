@@ -238,11 +238,11 @@ public class RecipeCostService {
         if (item instanceof SemiProduct) {
             return recipeRepository.findBySemiProductIdAndActiveTrue(item.getId())
                     .orElseThrow(() -> new IllegalStateException(
-                            "SemiProduct '" + item.getCode() + "' chưa có active recipe."));
+                            "Hàng gia công '" + item.getCode() + "' chưa có công thức đang dùng."));
         }
         return recipeRepository.findByProductIdAndActiveTrue(item.getId())
                 .orElseThrow(() -> new IllegalStateException(
-                        "Product '" + item.getCode() + "' chưa có active recipe."));
+                        "Sản phẩm '" + item.getCode() + "' chưa có công thức đang dùng."));
     }
 
     // ── Result types ─────────────────────────────────────────────
