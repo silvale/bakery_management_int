@@ -190,4 +190,11 @@ class WarehouseServiceTest {
         assertThat(WarehouseService.wipChangeBlocker(off, wipOnly(), false, 0)).isNull();
         assertThat(WarehouseService.wipChangeBlocker(wipOnly(), off, false, 3)).contains("kho còn 3 lô tồn");
     }
+
+    @Test void exportTargetsOnlyForAdminOrViewersAssignedToAnExportWarehouse() {   // 25/BE-1
+        assertThat(WarehouseService.canSeeExportTargets(true, false, false)).isTrue();
+        assertThat(WarehouseService.canSeeExportTargets(false, true, true)).isTrue();
+        assertThat(WarehouseService.canSeeExportTargets(false, true, false)).isFalse();    // có quyền xem nhưng không gán kho xuất ngoài
+        assertThat(WarehouseService.canSeeExportTargets(false, false, true)).isFalse();    // gán kho nhưng không có INVENTORY_REQUESTS:VIEW
+    }
 }

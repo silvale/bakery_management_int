@@ -188,6 +188,29 @@ public class InventoryRequestService
 
     @Override
     protected InventoryRequestResponse toResponse(InventoryRequest e) {
+        return toResponse(e, exportSuppliers(List.of(e)));
+    }
+
+    /** Danh sách phiếu: một query NCC cho cả trang phiếu xuất (25), không query theo từng phiếu. */
+    private List<InventoryRequestResponse> toResponses(Collection<InventoryRequest> es) {
+        Map<UUID, Map<UUID, Set<UUID>>> sup = exportSuppliers(es);
+        return es.stream().map(x -> toResponse(x, sup)).toList();
+    }
+
+    /** NCC của các lô bị trừ, theo phiếu xuất đã duyệt → mặt hàng → tập NCC (có thể chứa null = lô không NCC). */
+    private Map<UUID, Map<UUID, Set<UUID>>> exportSuppliers(Collection<InventoryRequest> es) {
+        List<UUID> ids = es.stream().filter(x -> x.getRequestType() == InventoryRequestType.EXPORT
+                && x.getApprovalStatus() == ApprovalStatus.APPROVED).map(InventoryRequest::getId).toList();
+        Map<UUID, Map<UUID, Set<UUID>>> out = new HashMap<>();
+        if (ids.isEmpty()) return out;
+        for (Object[] row : stockMovementRepository.exportSuppliers(ids)) {
+            out.computeIfAbsent((UUID) row[0], k -> new HashMap<>())
+               .computeIfAbsent((UUID) row[1], k -> new java.util.HashSet<>()).add((UUID) row[2]);
+        }
+        return out;
+    }
+
+    private InventoryRequestResponse toResponse(InventoryRequest e, Map<UUID, Map<UUID, Set<UUID>>> exportSup) {
         InventoryRequestResponse r = new InventoryRequestResponse();
         r.applyFrom(e);
         r.setCode(e.getCode());
@@ -216,7 +239,9 @@ public class InventoryRequestService
         }
 
         boolean purchase = e.getRequestType() == InventoryRequestType.PURCHASE;
+        boolean export = e.getRequestType() == InventoryRequestType.EXPORT;
         boolean approved = e.getApprovalStatus() == ApprovalStatus.APPROVED;
+        Map<UUID, Set<UUID>> supByItem = exportSup.getOrDefault(e.getId(), Map.of());
         // 11/D6: xem được giá theo NCC của phiếu (Admin: luôn; phiếu không NCC: chỉ Admin)
         boolean seePrice = scope.canSeePurchasePrice(e.getSupplier() != null ? e.getSupplier().getId() : null);
         boolean[] hidden = {false};
@@ -239,10 +264,22 @@ public class InventoryRequestService
                     }
                     lr.setQuantity(line.getQuantity());
                     lr.setUnit(line.getUnit());
-                    lr.setUnitCost(seePrice ? line.getUnitCost() : null);
-                    if (!seePrice && (line.getUnitCost() != null || line.getAmount() != null)) {
-                        lr.setPriceHidden(true);
-                        hidden[0] = true;
+                    if (export) {
+                        // 25/C3: dòng hiện giá khi xem được giá của MỌI NCC có lô bị trừ; chưa duyệt thì chưa có giá
+                        boolean vis = approved && line.getItem() != null
+                                && ExportCost.priceVisible(supByItem.get(line.getItem().getId()), scope::canSeePurchasePrice);
+                        lr.setUnitCost(vis ? line.getUnitCost() : null);
+                        lr.setAmount(vis ? line.getAmount() : null);
+                        if (approved && !vis) {
+                            lr.setPriceHidden(true);
+                            hidden[0] = true;
+                        }
+                    } else {
+                        lr.setUnitCost(seePrice ? line.getUnitCost() : null);
+                        if (!seePrice && (line.getUnitCost() != null || line.getAmount() != null)) {
+                            lr.setPriceHidden(true);
+                            hidden[0] = true;
+                        }
                     }
                     lr.setSortOrder(line.getSortOrder());
                     lr.setNote(line.getNote());
@@ -292,6 +329,12 @@ public class InventoryRequestService
                     .reduce(BigDecimal.ZERO, BigDecimal::add));
             r.setPriceMissing(e.getLines().stream().anyMatch(l -> l.getUnitCost() == null));
         }
+        if (export) {
+            r.setReceivedDate(e.getReceivedDate());
+            r.setReceivedBy(e.getReceivedBy());
+            r.setTotalAmount(approved && !hidden[0] ? lineResponses.stream().map(InventoryRequestLineResponse::getAmount)
+                    .filter(java.util.Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add) : null);
+        }
         r.setPriceHidden(hidden[0] || (purchase && !seePrice));
         // 11/BE-4: để FE ẩn/hiện nút Sửa, Xóa theo quyền thật
         r.setCreatedByMe(createdByMe(e));
@@ -319,6 +362,7 @@ public class InventoryRequestService
             case PICK -> "PK";
             case RETURN -> "RT";
             case WRITE_OFF -> "WO";
+            case EXPORT -> "XK";
         };
         String dateStr = LocalDate.now().format(DATE_FMT);
         String codePrefix = prefix + "-" + dateStr + "-";
@@ -346,6 +390,10 @@ public class InventoryRequestService
             approveTransfer(e);
         } else if (e.getRequestType() == InventoryRequestType.ADJUSTMENT) {
             approveAdjustment(e);
+        } else if (e.getRequestType() == InventoryRequestType.EXPORT) {
+            e.setReceivedDate(LocalDate.now(VN));   // 25: ngày xuất = ngày duyệt (giờ VN)
+            e.setReceivedBy(actorResolver.currentUsername());
+            approveExport(e);
         }
     }
 
@@ -528,6 +576,7 @@ public class InventoryRequestService
     static String warehouseBlocker(InventoryRequestType type, boolean hasSource, boolean hasTarget) {
         if (!hasTarget) return "Phiếu phải có kho nhận";
         if (type == InventoryRequestType.TRANSFER && !hasSource) return "Phiếu điều chuyển phải có kho xuất";
+        if (type == InventoryRequestType.EXPORT && !hasSource) return "Phiếu xuất ngoài phải có kho xuất";
         return null;
     }
 
@@ -579,9 +628,27 @@ public class InventoryRequestService
         return null;
     }
 
-    /** Kiểm kho của phiếu theo cấu hình: không EXTERNAL, PURCHASE chỉ vào kho Nhận NCC. */
+    /** 25: phiếu xuất ngoài: kho xuất INTERNAL có cờ Xuất ra ngoài, kho nhận là nơi nhận ngoài (EXTERNAL). Null = hợp lệ. */
+    static String exportWarehouseBlocker(Warehouse source, Warehouse target) {
+        if (source != null && (source.isExternal() || !source.isCanExportExternal())) {
+            return "Kho " + source.getName() + " không được xuất ra ngoài";
+        }
+        if (target != null && !target.isExternal()) return "Phiếu xuất ngoài phải gửi tới nơi nhận ngoài";
+        return null;
+    }
+
+    /** 25: không cho trùng mặt hàng trong một phiếu xuất ngoài (để tính NCC theo dòng không lẫn). */
+    static String duplicateLineBlocker(List<InventoryRequestLine> lines) {
+        Set<UUID> seen = new java.util.HashSet<>();
+        for (InventoryRequestLine l : lines) {
+            if (l.getItem() != null && !seen.add(l.getItem().getId())) return "Mặt hàng " + l.getItem().getName() + " bị trùng dòng";
+        }
+        return null;
+    }
+
+    /** Kiểm kho của phiếu theo cấu hình: không EXTERNAL (trừ nơi nhận của EXPORT), PURCHASE chỉ vào kho Nhận NCC. */
     private static void requireWarehouseRoles(InventoryRequestType type, Warehouse source, Warehouse target) {
-        String msg = externalWarehouseBlocker(source, target);
+        String msg = type == InventoryRequestType.EXPORT ? exportWarehouseBlocker(source, target) : externalWarehouseBlocker(source, target);
         if (msg == null) msg = wipWarehouseBlocker(type, source, target);
         if (msg == null) msg = purchaseWarehouseBlocker(type, target);
         if (msg != null) throw new IllegalStateException(msg);
@@ -639,6 +706,38 @@ public class InventoryRequestService
                         "Không đủ tồn kho cho sản phẩm: " + line.getItem().getName()
                         + " (còn thiếu " + remaining + " " + line.getUnit() + ")");
             }
+        }
+    }
+
+    /**
+     * 25: EXPORT: trừ FIFO lô chung ở kho xuất, mỗi lô một movement OUT; KHÔNG tạo lô ở nơi nhận. Ghi giá nhập của chính
+     * các lô bị trừ: {@code amount} = Σ số trừ × giá lô, {@code unitCost} = amount ÷ số lượng dòng. Thiếu tồn → 422.
+     */
+    private void approveExport(InventoryRequest e) {
+        String dest = e.getTargetWarehouse() != null ? e.getTargetWarehouse().getName() : "nơi nhận ngoài";
+        for (InventoryRequestLine line : e.getLines()) {
+            BigDecimal qty = roundUpToUnitSize(convertToItemUnit(line.getQuantity(), line.getUnit(), line.getItem()), line.getItem());
+            List<StockLot> lots = stockLotRepository
+                    .findByItemIdAndWarehouseIdAndQtyRemainingGreaterThanOrderByReceivedDateAscCreatedAtAsc(
+                            line.getItem().getId(), e.getSourceWarehouse().getId(), BigDecimal.ZERO).stream()
+                    .filter(l -> l.getReservedForRequestId() == null).toList();
+            ExportCost.Result r = ExportCost.deduct(lots, qty, (lot, taken) -> {
+                stockLotRepository.save(lot);
+                StockMovement out = new StockMovement();
+                out.setLot(lot);
+                out.setMovementType(MovementType.OUT);
+                out.setQty(taken);
+                out.setRefId(e.getId());
+                out.setRefType(REF_TYPE);
+                out.setNote("Xuất cho " + dest + ", phiếu " + e.getCode());
+                stockMovementRepository.save(out);
+            });
+            if (r.remaining().signum() > 0) {
+                throw new IllegalStateException("Không đủ tồn kho cho sản phẩm: " + line.getItem().getName()
+                        + " (còn thiếu " + r.remaining() + " " + line.getUnit() + ")");
+            }
+            line.setAmount(r.amount());
+            line.setUnitCost(ExportCost.unitCost(r.amount(), line.getQuantity()));
         }
     }
 
@@ -798,6 +897,7 @@ public class InventoryRequestService
      */
     private BigDecimal resolveUnitCost(InventoryRequest e, Item item, ItemPackaging packaging, BigDecimal sent,
                                        Map<UUID, BigDecimal> keepCosts) {
+        if (e.getRequestType() == InventoryRequestType.EXPORT) return null;   // 25: phiếu chưa duyệt không có giá, giá ghi lúc duyệt
         if (e.getRequestType() != InventoryRequestType.PURCHASE) return sent;
         UUID supplierId = e.getSupplier() != null ? e.getSupplier().getId() : null;
         if (scope.canSeePurchasePrice(supplierId)) return sent;
@@ -951,7 +1051,8 @@ public class InventoryRequestService
     @Override
     public List<InventoryRequestResponse> findAll() {
         return repository.findAll(visibleSpec().and((r, q, cb) -> cb.equal(r.get("status"),
-                com.bakery.framework.entity.EntityStatus.ACTIVE))).stream().map(this::toResponse).toList();
+                com.bakery.framework.entity.EntityStatus.ACTIVE))).stream().collect(java.util.stream.Collectors.collectingAndThen(
+                java.util.stream.Collectors.toList(), this::toResponses));
     }
 
     @Override
@@ -1261,7 +1362,8 @@ public class InventoryRequestService
             // size=500 → tránh 1 query lines / phiếu
             repository.findWithLinesByIdIn(page.getContent().stream().map(InventoryRequest::getId).toList());
         }
-        return page.map(this::toResponse);
+        Map<UUID, Map<UUID, Set<UUID>>> sup = exportSuppliers(page.getContent());
+        return page.map(x -> toResponse(x, sup));
     }
 
     private static jakarta.persistence.criteria.Predicate adjustmentRequest(
@@ -1311,10 +1413,8 @@ public class InventoryRequestService
      */
     public List<InventoryRequestResponse> findByWarehouse(String warehouseCode, String approvalStatusStr) {
         scope.assertWarehouseCode(warehouseCode);   // 11/D2
-        return repository.findByWarehouseAndStatus(warehouseCode, approvalStatusStr.toUpperCase()).stream()
-                .filter(this::viewableType)
-                .map(this::toResponse)
-                .toList();
+        return toResponses(repository.findByWarehouseAndStatus(warehouseCode, approvalStatusStr.toUpperCase()).stream()
+                .filter(this::viewableType).toList());
     }
 
     /** Build lines từ request và gắn vào entity — dùng chung trong toEntity() và applyUpdate(). */
@@ -1362,6 +1462,10 @@ public class InventoryRequestService
             line.setSortOrder(lr.sortOrder() != null ? lr.sortOrder() : i + 1);
             line.setNote(lr.note());
             e.getLines().add(line);
+        }
+        if (e.getRequestType() == InventoryRequestType.EXPORT) {
+            String dup = duplicateLineBlocker(e.getLines());
+            if (dup != null) throw new IllegalStateException(dup);
         }
     }
 
